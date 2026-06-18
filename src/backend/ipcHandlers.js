@@ -2,6 +2,7 @@ const { ipcMain } = require("electron");
 const authService = require("./services/authService");
 const userService = require("./services/userService");
 const profileService = require("./services/profileService");
+const operationService = require("./services/operationService");
 const { assertPermission } = require("./services/authorizationService");
 
 const SAFE_ERROR_MESSAGES = new Set([
@@ -26,6 +27,7 @@ const SAFE_ERROR_MESSAGES = new Set([
   "Permissoes invalidas.",
   "Chaves de permissao invalidas.",
   "Nao e possivel remover permissoes essenciais do Administrador.",
+  ...operationService.SAFE_OPERATION_ERRORS,
 ]);
 
 const SAFE_ERROR_CODES = new Set([
@@ -107,6 +109,7 @@ function buildRouteMap(overrides = {}) {
     authService,
     userService,
     profileService,
+    operationService,
     assertPermission,
     ...overrides,
   };
@@ -157,6 +160,22 @@ function buildRouteMap(overrides = {}) {
         profileId: data.profileId,
         permissionKeys: data.permissionKeys,
       })
+    )),
+
+    "operation.state": () => withPermission(dependencies, "operacao.ver", () => (
+      dependencies.operationService.getOperationalState()
+    )),
+    "operation.openDay": (data = {}) => withPermission(dependencies, "operacao.abrir_dia", (actorUserId) => (
+      dependencies.operationService.openDay({ actorUserId, data })
+    )),
+    "operation.closeDay": (data = {}) => withPermission(dependencies, "operacao.fechar_dia", (actorUserId) => (
+      dependencies.operationService.closeDay({ actorUserId, data })
+    )),
+    "operation.openShift": (data = {}) => withPermission(dependencies, "operacao.abrir_turno", (actorUserId) => (
+      dependencies.operationService.openShift({ actorUserId, data })
+    )),
+    "operation.closeShift": (data = {}) => withPermission(dependencies, "operacao.fechar_turno", (actorUserId) => (
+      dependencies.operationService.closeShift({ actorUserId, data })
     )),
   };
 }

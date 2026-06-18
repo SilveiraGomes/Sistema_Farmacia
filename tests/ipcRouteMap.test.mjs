@@ -10,7 +10,7 @@ const {
   registerLegacyRoutes,
 } = require('../src/backend/ipcHandlers.js');
 
-test('buildRouteMap exposes auth, user, and profile IPC actions', () => {
+test('buildRouteMap exposes auth, user, profile, and operation IPC actions', () => {
   const routes = buildRouteMap();
 
   const expectedActions = [
@@ -29,6 +29,11 @@ test('buildRouteMap exposes auth, user, and profile IPC actions', () => {
     'profiles.summaries',
     'profiles.permissions',
     'profiles.updatePermissions',
+    'operation.state',
+    'operation.openDay',
+    'operation.closeDay',
+    'operation.openShift',
+    'operation.closeShift',
   ];
 
   for (const action of expectedActions) {
@@ -81,6 +86,28 @@ function createRouteDependencies(calls = []) {
       listPermissions: async () => [],
       updateProfilePermissions: async (payload) => {
         calls.push(['updateProfilePermissions', payload]);
+        return payload;
+      },
+    },
+    operationService: {
+      getOperationalState: async () => {
+        calls.push(['getOperationalState']);
+        return { canOperate: false };
+      },
+      openDay: async (payload) => {
+        calls.push(['openDay', payload]);
+        return payload;
+      },
+      closeDay: async (payload) => {
+        calls.push(['closeDay', payload]);
+        return payload;
+      },
+      openShift: async (payload) => {
+        calls.push(['openShift', payload]);
+        return payload;
+      },
+      closeShift: async (payload) => {
+        calls.push(['closeShift', payload]);
         return payload;
       },
     },
@@ -141,6 +168,30 @@ test('profile routes split user-form summaries from permission-bearing administr
   ]);
 });
 
+test('operation routes require permissions and pass actor user and data to operation service', async () => {
+  const calls = [];
+  const routes = buildRouteMap(createRouteDependencies(calls));
+
+  await routes['operation.state']();
+  await routes['operation.openDay']({ saldo_inicial: 100 });
+  await routes['operation.closeDay']({ saldo_final_informado: 150 });
+  await routes['operation.openShift']({ nome: 'Manha', saldo_inicial: 25 });
+  await routes['operation.closeShift']({ saldo_final_informado: 50 });
+
+  assert.deepEqual(calls, [
+    ['assertPermission', 42, 'operacao.ver'],
+    ['getOperationalState'],
+    ['assertPermission', 42, 'operacao.abrir_dia'],
+    ['openDay', { actorUserId: 42, data: { saldo_inicial: 100 } }],
+    ['assertPermission', 42, 'operacao.fechar_dia'],
+    ['closeDay', { actorUserId: 42, data: { saldo_final_informado: 150 } }],
+    ['assertPermission', 42, 'operacao.abrir_turno'],
+    ['openShift', { actorUserId: 42, data: { nome: 'Manha', saldo_inicial: 25 } }],
+    ['assertPermission', 42, 'operacao.fechar_turno'],
+    ['closeShift', { actorUserId: 42, data: { saldo_final_informado: 50 } }],
+  ]);
+});
+
 test('permissioned IPC routes reject sessions that must change password', async () => {
   const calls = [];
   const dependencies = createRouteDependencies(calls);
@@ -151,6 +202,27 @@ test('permissioned IPC routes reject sessions that must change password', async 
   const routes = buildRouteMap(dependencies);
 
   const result = await handleAppRequest(routes, { action: 'users.list' });
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: {
+      message: 'Troca de senha obrigatoria.',
+      code: 'PASSWORD_CHANGE_REQUIRED',
+    },
+  });
+  assert.deepEqual(calls, []);
+});
+
+test('operation routes reject sessions that must change password before service calls', async () => {
+  const calls = [];
+  const dependencies = createRouteDependencies(calls);
+  dependencies.authService.getCurrentSession = async () => ({
+    user: { id: 42, deve_trocar_senha: true },
+    mustChangePassword: true,
+  });
+  const routes = buildRouteMap(dependencies);
+
+  const result = await handleAppRequest(routes, { action: 'operation.openDay', data: { saldo_inicial: 10 } });
 
   assert.deepEqual(result, {
     ok: false,
@@ -295,6 +367,42 @@ test('handleAppRequest preserves safe coded errors', async () => {
     error: {
       message: 'Permissao insuficiente.',
       code: 'PERMISSION_DENIED',
+    },
+  });
+});
+
+test('handleAppRequest preserves safe operation errors', async () => {
+  const result = await handleAppRequest({
+    'operation.blocked': async () => {
+      const error = new Error('Abra o dia operacional antes de iniciar operacoes.');
+      error.code = 'OPERATION_STATE_INVALID';
+      throw error;
+    },
+  }, { action: 'operation.blocked' });
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: {
+      message: 'Abra o dia operacional antes de iniciar operacoes.',
+      code: 'OPERATION_STATE_INVALID',
+    },
+  });
+});
+
+test('handleAppRequest redacts unsafe messages even with operation error code', async () => {
+  const result = await handleAppRequest({
+    'operation.unsafe': async () => {
+      const error = new Error('SQLITE_CONSTRAINT: secret detail');
+      error.code = 'OPERATION_STATE_INVALID';
+      throw error;
+    },
+  }, { action: 'operation.unsafe' });
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: {
+      message: 'Erro ao processar requisicao.',
+      code: 'OPERATION_STATE_INVALID',
     },
   });
 });
