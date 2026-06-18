@@ -9,10 +9,13 @@ test('ReportA4 renders approved report print sections', async () => {
   assert.match(source, /report-a4-page/);
   assert.match(source, /report-a4-header/);
   assert.match(source, /report-a4-document-box/);
-  assert.match(source, /report-a4-filters/);
-  assert.match(source, /report-a4-kpis/);
+  assert.match(source, /report-a4-data-title/);
+  assert.match(source, /documentHeaderText/);
   assert.match(source, /report-a4-table/);
   assert.match(source, /report-a4-footer/);
+  assert.doesNotMatch(source, /report-a4-filters/);
+  assert.doesNotMatch(source, /report-a4-comparison/);
+  assert.doesNotMatch(source, /report-a4-kpis/);
 });
 
 test('Relatorios uses catalog report engine and export permissions', async () => {
@@ -27,6 +30,13 @@ test('Relatorios uses catalog report engine and export permissions', async () =>
   assert.match(source, /aria-label="Salvar PDF"/);
   assert.match(source, /window\.print\(\)/);
   assert.match(source, /URL\.createObjectURL/);
+  assert.match(source, /className="report-period-control"/);
+  assert.match(source, /aria-label="Data inicial"/);
+  assert.match(source, /aria-label="Data final"/);
+  assert.doesNotMatch(source, /compareStartDate/);
+  assert.doesNotMatch(source, /compareEndDate/);
+  assert.doesNotMatch(source, /paymentMethod/);
+  assert.doesNotMatch(source, /report-comparison-strip/);
 });
 
 test('report center and print styles are defined', async () => {
@@ -36,7 +46,6 @@ test('report center and print styles are defined', async () => {
   assert.match(css, /\.report-workbar/);
   assert.match(css, /\.report-catalog/);
   assert.match(css, /\.report-result-header/);
-  assert.match(css, /\.report-comparison-strip/);
   assert.match(css, /\.reports-print-scope/);
   assert.match(css, /\.report-a4-page/);
   assert.match(css, /@media print/);
