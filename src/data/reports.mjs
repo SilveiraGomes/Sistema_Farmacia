@@ -18,6 +18,8 @@ import {
   filterDocuments,
 } from './documents.mjs';
 
+export const CRITICAL_STOCK_STATUSES = Object.freeze(['Baixo estoque', 'Sem estoque']);
+
 export const REPORT_CATALOG = Object.freeze([
   {
     id: 'geral',
@@ -183,14 +185,16 @@ function buildSalesDetailReport(definition, data, filters) {
 }
 
 function buildFinancialStatementReport(definition, data, filters) {
+  const financialRows = filterFinancialRows(data, filters);
+  const overviewRows = normalizeFinancialRowsForOverview(financialRows, filters);
   const overview = buildFinancialOverview({
-    sales: data.sales,
-    losses: data.losses,
-    expenses: data.expenses,
-    otherRevenues: data.otherRevenues,
+    sales: overviewRows.sales,
+    losses: overviewRows.losses,
+    expenses: overviewRows.expenses,
+    otherRevenues: overviewRows.otherRevenues,
   }, {
     period: filters.shift ? 'shift' : 'month',
-    referenceDate: resolveReferenceDate(filters),
+    referenceDate: resolveFinancialOverviewReferenceDate(filters),
     shift: filters.shift ?? 'Todos',
   });
   const rows = [
@@ -219,7 +223,7 @@ function buildFinancialStatementReport(definition, data, filters) {
 }
 
 function buildLowStockReport(definition, data, filters) {
-  const rows = data.stockRows.filter((item) => ['Baixo estoque', 'Sem estoque'].includes(item.status));
+  const rows = data.stockRows.filter((item) => isCriticalStockStatus(item.status));
   const metrics = buildStockMetrics(data.stockRows);
 
   return makeReport(definition, filters, {
@@ -307,9 +311,10 @@ function buildOperationStateReport(definition, data, filters) {
   const state = data.operationState ?? {};
   const hasOpenDay = Boolean(state.day);
   const hasOpenShift = Boolean(state.shift);
+  const status = !hasOpenDay ? 'Fechado' : state.canOperate && hasOpenShift ? 'Aberto' : 'Bloqueado';
   const rows = [
     {
-      status: hasOpenDay ? 'Aberto' : 'Fechado',
+      status,
       operationalDate: state.day?.data_operacional ?? '',
       dayOpeningBalance: Number(state.day?.saldo_inicial ?? 0),
       shift: state.shift?.nome ?? '',
@@ -410,7 +415,7 @@ function salesTotals(rows) {
 }
 
 function resolveReferenceDate(filters) {
-  return filters.referenceDate ?? filters.endDate ?? filters.startDate ?? '2026-06-15';
+  return filters.referenceDate ?? filters.endDate ?? filters.startDate ?? todayLocalDateKey();
 }
 
 function matchesDateRange(date, startDate, endDate) {
@@ -423,10 +428,56 @@ function matchesFilter(value, filterValue) {
   return !filterValue || filterValue === 'Todos' || value === filterValue;
 }
 
+function filterFinancialRows(data, filters) {
+  return {
+    sales: filterSales(data.sales, filters),
+    losses: data.losses.filter((row) => (
+      matchesDateRange(row.date, filters.startDate, filters.endDate) &&
+      matchesFilter(row.shift, filters.shift)
+    )),
+    expenses: data.expenses.filter((row) => matchesDateRange(row.date, filters.startDate, filters.endDate)),
+    otherRevenues: data.otherRevenues.filter((row) => matchesDateRange(row.date, filters.startDate, filters.endDate)),
+  };
+}
+
+function normalizeFinancialRowsForOverview(financialRows, filters) {
+  if (!filters.startDate && !filters.endDate) return financialRows;
+
+  const referenceDate = resolveFinancialOverviewReferenceDate(filters);
+  const normalizeDate = (row) => ({ ...row, date: referenceDate });
+
+  return {
+    sales: financialRows.sales.map(normalizeDate),
+    losses: financialRows.losses.map(normalizeDate),
+    expenses: financialRows.expenses.map(normalizeDate),
+    otherRevenues: financialRows.otherRevenues.map(normalizeDate),
+  };
+}
+
+function resolveFinancialOverviewReferenceDate(filters) {
+  const referenceDate = resolveReferenceDate(filters);
+  if (filters.shift || (!filters.startDate && !filters.endDate)) return referenceDate;
+
+  return `${referenceDate.slice(0, 7)}-15`;
+}
+
+function isCriticalStockStatus(status) {
+  return CRITICAL_STOCK_STATUSES.includes(status);
+}
+
 function sumBy(rows, field) {
   return roundMoney(rows.reduce((sum, row) => sum + Number(row[field] ?? 0), 0));
 }
 
 function roundMoney(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function todayLocalDateKey() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
 }

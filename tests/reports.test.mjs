@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  CRITICAL_STOCK_STATUSES,
   REPORT_CATALOG,
   buildReportData,
 } from '../src/data/reports.mjs';
@@ -78,12 +79,70 @@ test('buildReportData generates a sales detail report filtered by period and pay
   assert.equal(report.totals.revenue, 8240);
 });
 
-test('buildReportData generates finance, stock, clients, documents, and operation reports', () => {
+test('buildReportData generates a financial report for the requested month', () => {
   const finance = buildReportData('demonstrativo-financeiro', reportData, {
     startDate: '2026-06-01',
     endDate: '2026-06-30',
+    referenceDate: '2026-06-30',
   });
+
+  assert.equal(finance.totals.netProfit, -225509.1);
+});
+
+test('buildReportData financial report excludes rows outside explicit start and end dates', () => {
+  const finance = buildReportData('demonstrativo-financeiro', {
+    sales: [
+      { product: 'Dentro', category: 'Teste', quantity: 1, revenue: 1000, cost: 400, date: '2026-06-30', shift: 'Manha', paymentMethod: 'TPA' },
+      { product: 'Antes', category: 'Teste', quantity: 1, revenue: 9000, cost: 100, date: '2026-06-29', shift: 'Manha', paymentMethod: 'TPA' },
+      { product: 'Depois', category: 'Teste', quantity: 1, revenue: 8000, cost: 100, date: '2026-07-01', shift: 'Manha', paymentMethod: 'TPA' },
+    ],
+    losses: [
+      { product: 'Dentro', reason: 'Expiracao', quantity: 1, value: 50, date: '2026-06-30', shift: 'Manha' },
+      { product: 'Antes', reason: 'Expiracao', quantity: 1, value: 700, date: '2026-06-29', shift: 'Manha' },
+    ],
+    expenses: [
+      { category: 'Servicos', description: 'Dentro', value: 200, date: '2026-06-30', status: 'Paga' },
+      { category: 'Servicos', description: 'Depois', value: 600, date: '2026-07-01', status: 'Paga' },
+    ],
+    otherRevenues: [
+      { category: 'Servico', description: 'Dentro', value: 25, date: '2026-06-30', status: 'Paga' },
+      { category: 'Servico', description: 'Antes', value: 500, date: '2026-06-29', status: 'Paga' },
+    ],
+  }, {
+    startDate: '2026-06-30',
+    endDate: '2026-06-30',
+  });
+
+  assert.equal(finance.totals.productRevenue, 1000);
+  assert.equal(finance.totals.otherRevenue, 25);
+  assert.equal(finance.totals.losses, 50);
+  assert.equal(finance.totals.expenses, 200);
+  assert.equal(finance.totals.netProfit, 375);
+  assert.deepEqual(finance.rows.map((row) => row.value), [1000, 25, 400, 50, 200, 375]);
+});
+
+test('buildReportData uses provided reference date instead of a hardcoded fallback', () => {
+  const report = buildReportData('resumo-executivo', {
+    ...reportData,
+    clients: [
+      { id: 'CL900', name: 'Novo Cliente', status: 'Activo', createdAt: '2026-07-03', lastPurchase: '03/07/2026', openCredit: 0 },
+    ],
+  }, {
+    referenceDate: '2026-07-03',
+  });
+
+  assert.equal(report.generatedAt, '2026-07-03T00:00:00.000Z');
+  assert.equal(report.totals.openCredit, 0);
+});
+
+test('buildReportData generates stock report with centralized critical statuses', () => {
   const stock = buildReportData('stock-baixo', reportData, {});
+
+  assert.deepEqual(CRITICAL_STOCK_STATUSES, Object.freeze(['Baixo estoque', 'Sem estoque']));
+  assert.ok(stock.rows.every((row) => CRITICAL_STOCK_STATUSES.includes(row.status)));
+});
+
+test('buildReportData generates clients and documents reports with filters', () => {
   const clientsReport = buildReportData('clientes-credito-aberto', reportData, {
     startDate: '2026-06-01',
     endDate: '2026-06-30',
@@ -91,7 +150,15 @@ test('buildReportData generates finance, stock, clients, documents, and operatio
   const documentReport = buildReportData('documentos-emitidos', reportData, {
     startDate: '2026-06-01',
     endDate: '2026-06-30',
+    status: 'ANULADO',
   });
+
+  assert.deepEqual(clientsReport.rows.map((row) => row.name), ['Margarida Albuquerque', 'Dominick Yanser']);
+  assert.deepEqual(documentReport.rows.map((row) => row.number), ['FAT025/26']);
+  assert.equal(documentReport.totals.total, 0);
+});
+
+test('buildReportData generates operation report for open day and shift', () => {
   const operation = buildReportData('estado-operacional', {
     ...reportData,
     operationState: {
@@ -102,9 +169,23 @@ test('buildReportData generates finance, stock, clients, documents, and operatio
     },
   }, {});
 
-  assert.equal(finance.totals.netProfit, -225509.1);
-  assert.ok(stock.rows.every((row) => ['Baixo estoque', 'Sem estoque'].includes(row.status)));
-  assert.deepEqual(clientsReport.rows.map((row) => row.name), ['Margarida Albuquerque', 'Dominick Yanser']);
-  assert.ok(documentReport.rows.length > 0);
   assert.equal(operation.rows[0].status, 'Aberto');
+  assert.equal(operation.rows[0].shift, 'Manha');
+  assert.equal(operation.rows[0].canOperate, true);
+});
+
+test('buildReportData marks operation as blocked when the day is open without a shift', () => {
+  const operation = buildReportData('estado-operacional', {
+    ...reportData,
+    operationState: {
+      canOperate: false,
+      day: { data_operacional: '2026-06-18', saldo_inicial: 10000 },
+      shift: null,
+      message: 'Abra um turno para operar',
+    },
+  }, {});
+
+  assert.equal(operation.rows[0].status, 'Bloqueado');
+  assert.equal(operation.rows[0].shift, '');
+  assert.equal(operation.rows[0].canOperate, false);
 });
