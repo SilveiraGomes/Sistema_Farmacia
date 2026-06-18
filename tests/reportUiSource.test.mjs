@@ -14,3 +14,17 @@ test('ReportA4 renders approved report print sections', async () => {
   assert.match(source, /report-a4-table/);
   assert.match(source, /report-a4-footer/);
 });
+
+test('Relatorios uses catalog report engine and export permissions', async () => {
+  const source = await readFile('src/components/Relatorios.jsx', 'utf8');
+
+  assert.match(source, /REPORT_CATALOG/);
+  assert.match(source, /buildReportData/);
+  assert.match(source, /buildReportCsv/);
+  assert.match(source, /ReportA4/);
+  assert.match(source, /hasPermission\('relatorios\.exportar'\)/);
+  assert.match(source, /aria-label="Exportar Excel"/);
+  assert.match(source, /aria-label="Salvar PDF"/);
+  assert.match(source, /window\.print\(\)/);
+  assert.match(source, /URL\.createObjectURL/);
+});
