@@ -1,0 +1,12 @@
+node_modules/
+dist/
+outputs/
+tmp_pdf_render/
+.superpowers/
+
+*.log
+*.pid
+
+.env
+.env.*
+!.env.example

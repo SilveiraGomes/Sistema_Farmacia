@@ -1,0 +1,34 @@
+{
+  "name": "pharmacy-system",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "npm run build && node scripts/start-electron.js",
+    "dev": "vite --host 127.0.0.1",
+    "browser": "node scripts/start-browser.js",
+    "build": "vite build",
+    "test": "node --test tests",
+    "build:tailwind": "postcss ./src/assets/tailwind.css -o ./src/assets/output.css"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.5.0",
+    "electron": "35.7.5",
+    "postcss": "^8.5.15",
+    "postcss-cli": "^11.0.1",
+    "tailwindcss": "^4.3.0",
+    "vite": "^5.4.19"
+  },
+  "dependencies": {
+    "lucide-react": "^1.17.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "sequelize": "^6.37.8",
+    "sqlite3": "^5.1.7"
+  }
+}

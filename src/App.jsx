@@ -1,0 +1,297 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, ChevronDown, LogOut, Search } from 'lucide-react';
+import { useAuth } from './auth/AuthContext';
+import Navbar from './components/Navbar';
+import ChangePassword from './components/ChangePassword';
+import Dashboard from './components/Dashboard';
+import Estoque from './components/Estoque';
+import Vendas from './components/Vendas';
+import Financeiro from './components/Financeiro';
+import Clientes from './components/Clientes';
+import Login from './components/Login';
+import Relatorios from './components/Relatorios';
+import Documentos from './components/Documentos';
+import Configuracoes from './components/Configuracoes';
+import Usuarios from './components/Usuarios';
+import BrandMark from './components/BrandMark';
+import { confirmLogout } from './utils/confirmations.mjs';
+import {
+  buildDashboardNotifications,
+  financeExpenses,
+  invoices,
+  stockItems,
+} from './data/pharmacyData.mjs';
+
+const viewTitles = {
+  dashboard: 'Dashboard',
+  vendas: 'Vendas',
+  estoque: 'Estoque',
+  financeiro: 'Finanças',
+  clientes: 'Clientes',
+  relatorios: 'Relatórios',
+  documentos: 'Documentos',
+  configuracoes: 'Configurações',
+  usuarios: 'Usuários',
+};
+
+const viewPermissions = {
+  dashboard: 'dashboard.ver',
+  vendas: 'vendas.ver',
+  estoque: 'estoque.ver',
+  financeiro: 'financeiro.ver',
+  clientes: 'clientes.ver',
+  relatorios: 'relatorios.ver',
+  documentos: 'documentos.ver',
+  configuracoes: 'configuracoes.ver',
+  usuarios: 'usuarios.ver',
+};
+
+const canonicalViewOrder = Object.keys(viewPermissions);
+
+function getAllowedViews(hasPermission) {
+  if (typeof hasPermission !== 'function') {
+    return canonicalViewOrder;
+  }
+
+  return canonicalViewOrder.filter((view) => hasPermission(viewPermissions[view]));
+}
+
+function getInitials(user) {
+  const displayName = user?.nome_completo || user?.nome_usuario || 'Usuario';
+  const initials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('');
+
+  return initials.toUpperCase() || 'US';
+}
+
+function App() {
+  const { user, mustChangePassword, isLoading, logout, hasPermission } = useAuth();
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [isMenuCollapsed, setIsMenuCollapsed] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState(() => new Set());
+  const previousUserId = useRef(user?.id);
+  const profileMenuRef = useRef(null);
+  const notificationsRef = useRef(null);
+  const allowedViews = useMemo(() => getAllowedViews(hasPermission), [hasPermission]);
+  const firstAllowedView = allowedViews[0] ?? null;
+  const activeView = allowedViews.includes(currentView) ? currentView : firstAllowedView;
+  const title = activeView ? viewTitles[activeView] ?? 'Dashboard' : 'Sem acesso';
+  const displayName = user?.nome_completo || user?.nome_usuario || 'Usuario';
+  const initials = getInitials(user);
+  const notifications = useMemo(() => buildDashboardNotifications({
+    invoiceRows: invoices,
+    stockRows: stockItems,
+    expenseRows: financeExpenses,
+  }), []);
+  const unreadNotifications = notifications.filter((notification) => !readNotificationIds.has(notification.id));
+
+  useEffect(() => {
+    const fallbackView = firstAllowedView ?? 'dashboard';
+
+    if (previousUserId.current !== user?.id) {
+      previousUserId.current = user?.id;
+      setCurrentView(fallbackView);
+      return;
+    }
+
+    setCurrentView((view) => (allowedViews.includes(view) ? view : fallbackView));
+  }, [allowedViews, firstAllowedView, user?.id]);
+
+  useEffect(() => {
+    function closeTopbarMenus(event) {
+      if (!profileMenuRef.current?.contains(event.target)) {
+        setIsProfileMenuOpen(false);
+      }
+
+      if (!notificationsRef.current?.contains(event.target)) {
+        setIsNotificationsOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', closeTopbarMenus);
+    return () => document.removeEventListener('mousedown', closeTopbarMenus);
+  }, []);
+
+  function markNotificationsRead(ids) {
+    setReadNotificationIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  function handleNotificationAction(notification) {
+    markNotificationsRead([notification.id]);
+    setIsNotificationsOpen(false);
+
+    if (allowedViews.includes(notification.actionView)) {
+      setCurrentView(notification.actionView);
+    }
+  }
+
+  async function handleLogout() {
+    if (!(await confirmLogout())) {
+      return;
+    }
+
+    try {
+      await logout();
+    } catch {
+      // AuthContext keeps the error message for any future shell-level display.
+    }
+  }
+
+  const currentScreen = useMemo(() => {
+    switch (activeView) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'vendas':
+        return <Vendas />;
+      case 'estoque':
+        return <Estoque />;
+      case 'financeiro':
+        return <Financeiro />;
+      case 'clientes':
+        return <Clientes />;
+      case 'relatorios':
+        return <Relatorios />;
+      case 'documentos':
+        return <Documentos />;
+      case 'configuracoes':
+        return <Configuracoes />;
+      case 'usuarios':
+        return <Usuarios />;
+      default:
+        return (
+          <section className="empty-state">
+            <h2>Sem permissoes disponiveis</h2>
+            <p>Contacte um administrador para rever o acesso deste utilizador.</p>
+          </section>
+        );
+    }
+  }, [activeView]);
+
+  if (isLoading) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card compact">
+          <BrandMark className="auth-brand" />
+          <p className="auth-loading">A carregar sessao...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
+  if (mustChangePassword) {
+    return <ChangePassword />;
+  }
+
+  return (
+    <div className={isMenuCollapsed ? 'app-shell menu-collapsed' : 'app-shell'}>
+      <Navbar
+        currentView={activeView}
+        hasPermission={hasPermission}
+        isCollapsed={isMenuCollapsed}
+        setCurrentView={setCurrentView}
+        toggleCollapsed={() => setIsMenuCollapsed((current) => !current)}
+      />
+      <div className="workspace">
+        <header className="topbar">
+          <h1>{title}</h1>
+          <div className="global-search" aria-label="Pesquisar">
+            <Search className="search-icon" size={24} />
+            <input aria-label="Pesquisa global" />
+          </div>
+          <div className="topbar-actions">
+            <div className="notifications-wrapper" ref={notificationsRef}>
+              <button
+                className="notification-button"
+                aria-expanded={isNotificationsOpen}
+                aria-haspopup="menu"
+                aria-label="Notificacoes"
+                type="button"
+                onClick={() => {
+                  setIsNotificationsOpen((current) => !current);
+                  setIsProfileMenuOpen(false);
+                }}
+              >
+                <Bell size={24} />
+                {unreadNotifications.length ? <span aria-label={`${unreadNotifications.length} notificacoes novas`} /> : null}
+              </button>
+              {isNotificationsOpen ? (
+                <div className="notifications-menu" role="menu">
+                  <div className="notifications-menu-header">
+                    <span>Notificacoes</span>
+                    <button
+                      type="button"
+                      onClick={() => markNotificationsRead(notifications.map((notification) => notification.id))}
+                    >
+                      Marcar lidas
+                    </button>
+                  </div>
+                  <div className="notifications-list">
+                    {notifications.map((notification) => (
+                      <article
+                        className={readNotificationIds.has(notification.id) ? 'notification-item read' : `notification-item ${notification.severity}`}
+                        key={notification.id}
+                        role="menuitem"
+                      >
+                        <div>
+                          <span>{notification.title}</span>
+                          <p>{notification.message}</p>
+                          {notification.detail ? <small>{notification.detail}</small> : null}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!allowedViews.includes(notification.actionView)}
+                          onClick={() => handleNotificationAction(notification)}
+                        >
+                          {notification.actionLabel}
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="profile-menu-wrapper" ref={profileMenuRef}>
+              <button
+                className="profile-button"
+                aria-expanded={isProfileMenuOpen}
+                aria-haspopup="menu"
+                aria-label="Perfil do usuario"
+                type="button"
+                onClick={() => setIsProfileMenuOpen((current) => !current)}
+              >
+                <span className="avatar">{initials}</span>
+                <strong>{displayName}</strong>
+                <span className="chevron"><ChevronDown size={18} /></span>
+              </button>
+              {isProfileMenuOpen ? (
+                <div className="profile-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={handleLogout}>
+                    <LogOut size={18} />
+                    Sair do sistema
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </header>
+        <main className="screen-frame">{currentScreen}</main>
+      </div>
+    </div>
+  );
+}
+
+export default App;
