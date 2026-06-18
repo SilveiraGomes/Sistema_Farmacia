@@ -172,3 +172,247 @@ test('syncDatabaseSchema creates operational day and shift tables', async () => 
     await rm(userDataPath, { recursive: true, force: true });
   }
 });
+
+test('syncDatabaseSchema enforces only one open operational day and shift at database level', async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), 'pharmacy-operation-indexes-'));
+  const fakeApp = {
+    getPath(name) {
+      assert.equal(name, 'userData');
+      return userDataPath;
+    },
+  };
+
+  const db = await connectDB(fakeApp, 'development');
+
+  try {
+    await syncDatabaseSchema(db);
+
+    const indexes = [
+      ...(await db.query('PRAGMA index_list(DiaOperacionals)', {
+        type: db.QueryTypes.SELECT,
+      })),
+      ...(await db.query('PRAGMA index_list(TurnoOperacionals)', {
+        type: db.QueryTypes.SELECT,
+      })),
+    ];
+
+    assert.ok(indexes.some((index) => index.name === 'dia_operacional_one_open_unique' && index.unique === 1));
+    assert.ok(indexes.some((index) => index.name === 'turno_operacional_one_open_unique' && index.unique === 1));
+
+    await db.query(`
+      INSERT INTO DiaOperacionals (
+        data_operacional,
+        status,
+        saldo_inicial,
+        total_vendas,
+        total_despesas,
+        total_perdas,
+        diferenca_caixa,
+        createdAt,
+        updatedAt
+      )
+      VALUES ('2026-06-18', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `);
+
+    await assert.rejects(
+      () => db.query(`
+        INSERT INTO DiaOperacionals (
+          data_operacional,
+          status,
+          saldo_inicial,
+          total_vendas,
+          total_despesas,
+          total_perdas,
+          diferenca_caixa,
+          createdAt,
+          updatedAt
+        )
+        VALUES ('2026-06-19', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `),
+      (error) => error.name === 'SequelizeUniqueConstraintError'
+    );
+
+    await db.query(`
+      INSERT INTO DiaOperacionals (
+        data_operacional,
+        status,
+        saldo_inicial,
+        total_vendas,
+        total_despesas,
+        total_perdas,
+        diferenca_caixa,
+        createdAt,
+        updatedAt
+      )
+      VALUES ('2026-06-19', 'Fechado', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `);
+
+    await db.query(`
+      INSERT INTO TurnoOperacionals (
+        dia_operacional_id,
+        nome,
+        status,
+        saldo_inicial,
+        total_vendas,
+        total_despesas,
+        total_perdas,
+        diferenca_caixa,
+        createdAt,
+        updatedAt
+      )
+      VALUES (1, 'Manha', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `);
+
+    await assert.rejects(
+      () => db.query(`
+        INSERT INTO TurnoOperacionals (
+          dia_operacional_id,
+          nome,
+          status,
+          saldo_inicial,
+          total_vendas,
+          total_despesas,
+          total_perdas,
+          diferenca_caixa,
+          createdAt,
+          updatedAt
+        )
+        VALUES (1, 'Tarde', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `),
+      (error) => error.name === 'SequelizeUniqueConstraintError'
+    );
+  } finally {
+    await db.close();
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test('syncDatabaseSchema repairs duplicate open operational rows before adding indexes', async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), 'pharmacy-operation-repair-'));
+  const fakeApp = {
+    getPath(name) {
+      assert.equal(name, 'userData');
+      return userDataPath;
+    },
+  };
+
+  const db = await connectDB(fakeApp, 'development');
+
+  try {
+    await db.query(`
+      CREATE TABLE DiaOperacionals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data_operacional DATE NOT NULL,
+        status VARCHAR(255) NOT NULL DEFAULT 'Aberto',
+        saldo_inicial DECIMAL(10,2) NOT NULL DEFAULT 0,
+        saldo_final_informado DECIMAL(10,2),
+        total_vendas DECIMAL(10,2) NOT NULL DEFAULT 0,
+        total_despesas DECIMAL(10,2) NOT NULL DEFAULT 0,
+        total_perdas DECIMAL(10,2) NOT NULL DEFAULT 0,
+        diferenca_caixa DECIMAL(10,2) NOT NULL DEFAULT 0,
+        observacao_abertura TEXT,
+        observacao_fechamento TEXT,
+        aberto_por_usuario_id INTEGER,
+        fechado_por_usuario_id INTEGER,
+        aberto_em DATETIME,
+        fechado_em DATETIME,
+        createdAt DATETIME NOT NULL,
+        updatedAt DATETIME NOT NULL
+      )
+    `);
+    await db.query(`
+      CREATE TABLE TurnoOperacionals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dia_operacional_id INTEGER NOT NULL,
+        nome VARCHAR(255) NOT NULL,
+        status VARCHAR(255) NOT NULL DEFAULT 'Aberto',
+        saldo_inicial DECIMAL(10,2) NOT NULL DEFAULT 0,
+        saldo_final_informado DECIMAL(10,2),
+        total_vendas DECIMAL(10,2) NOT NULL DEFAULT 0,
+        total_despesas DECIMAL(10,2) NOT NULL DEFAULT 0,
+        total_perdas DECIMAL(10,2) NOT NULL DEFAULT 0,
+        diferenca_caixa DECIMAL(10,2) NOT NULL DEFAULT 0,
+        observacao_abertura TEXT,
+        observacao_fechamento TEXT,
+        aberto_por_usuario_id INTEGER,
+        fechado_por_usuario_id INTEGER,
+        aberto_em DATETIME,
+        fechado_em DATETIME,
+        createdAt DATETIME NOT NULL,
+        updatedAt DATETIME NOT NULL
+      )
+    `);
+
+    await db.query(`
+      INSERT INTO DiaOperacionals (
+        id,
+        data_operacional,
+        status,
+        saldo_inicial,
+        total_vendas,
+        total_despesas,
+        total_perdas,
+        diferenca_caixa,
+        createdAt,
+        updatedAt
+      )
+      VALUES
+        (1, '2026-06-18', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        (2, '2026-06-19', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `);
+    await db.query(`
+      INSERT INTO TurnoOperacionals (
+        id,
+        dia_operacional_id,
+        nome,
+        status,
+        saldo_inicial,
+        total_vendas,
+        total_despesas,
+        total_perdas,
+        diferenca_caixa,
+        createdAt,
+        updatedAt
+      )
+      VALUES
+        (1, 2, 'Manha', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        (2, 2, 'Tarde', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        (3, 1, 'Noite', 'Aberto', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `);
+
+    await syncDatabaseSchema(db);
+
+    const openDays = await db.query(`
+      SELECT id FROM DiaOperacionals WHERE status = 'Aberto' ORDER BY id
+    `, { type: db.QueryTypes.SELECT });
+    const closedDays = await db.query(`
+      SELECT id, status, fechado_em, observacao_fechamento
+      FROM DiaOperacionals
+      WHERE status = 'Fechado'
+      ORDER BY id
+    `, { type: db.QueryTypes.SELECT });
+    const openShifts = await db.query(`
+      SELECT id, dia_operacional_id FROM TurnoOperacionals WHERE status = 'Aberto' ORDER BY id
+    `, { type: db.QueryTypes.SELECT });
+    const closedShifts = await db.query(`
+      SELECT id, status, fechado_em, observacao_fechamento
+      FROM TurnoOperacionals
+      WHERE status = 'Fechado'
+      ORDER BY id
+    `, { type: db.QueryTypes.SELECT });
+
+    assert.deepEqual(openDays.map((day) => day.id), [2]);
+    assert.equal(closedDays.length, 1);
+    assert.ok(closedDays[0].fechado_em);
+    assert.match(closedDays[0].observacao_fechamento, /reparar estado operacional duplicado/);
+
+    assert.deepEqual(openShifts.map((shift) => shift.id), [2]);
+    assert.equal(openShifts[0].dia_operacional_id, 2);
+    assert.equal(closedShifts.length, 2);
+    assert.ok(closedShifts[0].fechado_em);
+    assert.match(closedShifts[0].observacao_fechamento, /reparar estado operacional duplicado/);
+  } finally {
+    await db.close();
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});

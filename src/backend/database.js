@@ -8,6 +8,8 @@ let models = null;
 
 const VENDAS_INVOICE_INDEX = "vendas_numero_factura_unique";
 const PERFIL_PERMISSAO_UNIQUE_INDEX = "perfil_permissao_unique_pair";
+const DIA_OPERACIONAL_ONE_OPEN_INDEX = "dia_operacional_one_open_unique";
+const TURNO_OPERACIONAL_ONE_OPEN_INDEX = "turno_operacional_one_open_unique";
 
 function defineModels(db) {
   const Categoria = db.define("Categoria", {
@@ -342,6 +344,105 @@ async function ensureVendasInvoiceIndex(db) {
   }
 }
 
+async function ensureSqliteOperationalOpenIndexes(db) {
+  if (db.getDialect() !== "sqlite") {
+    return;
+  }
+
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+  const hasOperationalDays = hasTable(tables, "DiaOperacionals");
+  const hasOperationalShifts = hasTable(tables, "TurnoOperacionals");
+
+  await repairDuplicateOpenOperationalRows(db, {
+    hasOperationalDays,
+    hasOperationalShifts,
+  });
+
+  if (hasOperationalDays) {
+    await db.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ${DIA_OPERACIONAL_ONE_OPEN_INDEX}
+      ON DiaOperacionals (status)
+      WHERE status = 'Aberto'
+    `);
+  }
+
+  if (hasOperationalShifts) {
+    await db.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ${TURNO_OPERACIONAL_ONE_OPEN_INDEX}
+      ON TurnoOperacionals (status)
+      WHERE status = 'Aberto'
+    `);
+  }
+}
+
+async function closeOpenOperationalRows(db, tableName, whereClause) {
+  await db.query(`
+    UPDATE ${tableName}
+    SET
+      status = 'Fechado',
+      fechado_em = COALESCE(fechado_em, CURRENT_TIMESTAMP),
+      observacao_fechamento = CASE
+        WHEN observacao_fechamento IS NULL OR TRIM(observacao_fechamento) = ''
+          THEN 'Fechado automaticamente ao reparar estado operacional duplicado.'
+        ELSE observacao_fechamento || CHAR(10) || 'Fechado automaticamente ao reparar estado operacional duplicado.'
+      END,
+      updatedAt = CURRENT_TIMESTAMP
+    WHERE status = 'Aberto'
+      AND (${whereClause})
+  `);
+}
+
+async function repairDuplicateOpenOperationalRows(db, { hasOperationalDays, hasOperationalShifts }) {
+  let keptOpenDayId = null;
+
+  if (hasOperationalDays) {
+    const rows = await db.query(`
+      SELECT id
+      FROM DiaOperacionals
+      WHERE status = 'Aberto'
+      ORDER BY id DESC
+      LIMIT 1
+    `, { type: db.QueryTypes.SELECT });
+
+    keptOpenDayId = rows.length > 0 ? rows[0].id : null;
+
+    if (keptOpenDayId !== null) {
+      await closeOpenOperationalRows(db, "DiaOperacionals", `id <> ${Number(keptOpenDayId)}`);
+    }
+  }
+
+  if (!hasOperationalShifts) {
+    return;
+  }
+
+  if (keptOpenDayId === null) {
+    await closeOpenOperationalRows(db, "TurnoOperacionals", "1 = 1");
+    return;
+  }
+
+  const rows = await db.query(`
+    SELECT id
+    FROM TurnoOperacionals
+    WHERE status = 'Aberto'
+      AND dia_operacional_id = ${Number(keptOpenDayId)}
+    ORDER BY id DESC
+    LIMIT 1
+  `, { type: db.QueryTypes.SELECT });
+  const keptOpenShiftId = rows.length > 0 ? rows[0].id : null;
+
+  if (keptOpenShiftId === null) {
+    await closeOpenOperationalRows(db, "TurnoOperacionals", `dia_operacional_id <> ${Number(keptOpenDayId)}`);
+    return;
+  }
+
+  await closeOpenOperationalRows(
+    db,
+    "TurnoOperacionals",
+    `dia_operacional_id <> ${Number(keptOpenDayId)} OR id <> ${Number(keptOpenShiftId)}`
+  );
+}
+
 async function ensureSqliteFinanceColumns(db) {
   if (db.getDialect() !== "sqlite") {
     return;
@@ -601,6 +702,7 @@ async function syncDatabaseSchema(db) {
   await ensureSqliteUsuarioSecurityColumns(db);
   await syncModels(db);
   await ensureVendasInvoiceIndex(db);
+  await ensureSqliteOperationalOpenIndexes(db);
   await ensurePerfilPermissaoUniqueIndex(db);
   await seedPermissionsAndProfiles();
 }
