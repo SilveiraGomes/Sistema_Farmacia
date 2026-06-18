@@ -120,16 +120,65 @@ const CATALOG_DEFINITIONS = deepFreeze({
   operation_statuses: technical('aberto', 'fechado', 'bloqueado'),
 });
 
-const copyValue = (value) => {
-  if (Array.isArray(value)) return value.map(copyValue);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, copyValue(item)]));
-  }
-  return value;
-};
-
 const invalidType = (key) => {
   throw new TypeError(`Tipo de valor inválido para a configuração "${key}".`);
+};
+
+const invalidObject = (key) => {
+  throw new TypeError(`Valor de objeto inválido para a configuração "${key}".`);
+};
+
+const isPlainObject = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const copyJsonValue = (value, key, ancestors = new WeakSet()) => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) invalidObject(key);
+    return value;
+  }
+  if (!value || typeof value !== 'object') invalidObject(key);
+  if (ancestors.has(value)) invalidObject(key);
+
+  if (Array.isArray(value)) {
+    const ownKeys = Reflect.ownKeys(value);
+    const hasUnsupportedKey = ownKeys.some((ownKey) => {
+      if (ownKey === 'length') return false;
+      if (typeof ownKey !== 'string' || !/^\d+$/.test(ownKey)) return true;
+      return Number(ownKey) >= value.length;
+    });
+    if (hasUnsupportedKey) invalidObject(key);
+
+    ancestors.add(value);
+    try {
+      return Array.from({ length: value.length }, (_, index) => {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) invalidObject(key);
+        return copyJsonValue(value[index], key, ancestors);
+      });
+    } finally {
+      ancestors.delete(value);
+    }
+  }
+
+  if (!isPlainObject(value)) invalidObject(key);
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.some((ownKey) => typeof ownKey !== 'string'
+    || !Object.prototype.propertyIsEnumerable.call(value, ownKey))) {
+    invalidObject(key);
+  }
+
+  ancestors.add(value);
+  try {
+    return Object.fromEntries(ownKeys.map((ownKey) => [
+      ownKey,
+      copyJsonValue(value[ownKey], key, ancestors),
+    ]));
+  } finally {
+    ancestors.delete(value);
+  }
 };
 
 const validateSettingValue = (key, value) => {
@@ -154,8 +203,8 @@ const validateSettingValue = (key, value) => {
       return value;
 
     case 'object':
-      if (!value || typeof value !== 'object' || Array.isArray(value)) invalidType(key);
-      return copyValue(value);
+      if (!isPlainObject(value)) invalidObject(key);
+      return copyJsonValue(value, key);
 
     case 'enum': {
       if (typeof value !== 'string') invalidType(key);
