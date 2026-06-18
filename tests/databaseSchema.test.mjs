@@ -105,3 +105,70 @@ test('syncDatabaseSchema migrates finance transactions with source and classific
     await rm(userDataPath, { recursive: true, force: true });
   }
 });
+
+test('syncDatabaseSchema creates operational day and shift tables', async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), 'pharmacy-operation-schema-'));
+  const fakeApp = {
+    getPath(name) {
+      assert.equal(name, 'userData');
+      return userDataPath;
+    },
+  };
+
+  const db = await connectDB(fakeApp, 'development');
+
+  try {
+    await syncDatabaseSchema(db);
+
+    const dayColumns = await db.query('PRAGMA table_info(DiaOperacionals)', {
+      type: db.QueryTypes.SELECT,
+    });
+    const shiftColumns = await db.query('PRAGMA table_info(TurnoOperacionals)', {
+      type: db.QueryTypes.SELECT,
+    });
+    const dayNames = dayColumns.map((column) => column.name);
+    const shiftNames = shiftColumns.map((column) => column.name);
+
+    for (const column of [
+      'data_operacional',
+      'status',
+      'saldo_inicial',
+      'saldo_final_informado',
+      'total_vendas',
+      'total_despesas',
+      'total_perdas',
+      'diferenca_caixa',
+      'observacao_abertura',
+      'observacao_fechamento',
+      'aberto_por_usuario_id',
+      'fechado_por_usuario_id',
+      'aberto_em',
+      'fechado_em',
+    ]) {
+      assert.ok(dayNames.includes(column), `DiaOperacionals should include ${column}`);
+    }
+
+    for (const column of [
+      'dia_operacional_id',
+      'nome',
+      'status',
+      'saldo_inicial',
+      'saldo_final_informado',
+      'total_vendas',
+      'total_despesas',
+      'total_perdas',
+      'diferenca_caixa',
+      'observacao_abertura',
+      'observacao_fechamento',
+      'aberto_por_usuario_id',
+      'fechado_por_usuario_id',
+      'aberto_em',
+      'fechado_em',
+    ]) {
+      assert.ok(shiftNames.includes(column), `TurnoOperacionals should include ${column}`);
+    }
+  } finally {
+    await db.close();
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});

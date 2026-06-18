@@ -100,6 +100,47 @@ function defineModels(db) {
     fornecedor_id: { type: DataTypes.INTEGER },
   });
 
+  const DiaOperacional = db.define("DiaOperacional", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    data_operacional: { type: DataTypes.DATEONLY, allowNull: false },
+    status: { type: DataTypes.STRING, defaultValue: "Aberto", allowNull: false },
+    saldo_inicial: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    saldo_final_informado: { type: DataTypes.DECIMAL(10, 2) },
+    total_vendas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    total_despesas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    total_perdas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    diferenca_caixa: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    observacao_abertura: { type: DataTypes.TEXT },
+    observacao_fechamento: { type: DataTypes.TEXT },
+    aberto_por_usuario_id: { type: DataTypes.INTEGER },
+    fechado_por_usuario_id: { type: DataTypes.INTEGER },
+    aberto_em: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    fechado_em: { type: DataTypes.DATE },
+  });
+
+  const TurnoOperacional = db.define("TurnoOperacional", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    dia_operacional_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: DiaOperacional, key: "id" },
+    },
+    nome: { type: DataTypes.STRING, allowNull: false },
+    status: { type: DataTypes.STRING, defaultValue: "Aberto", allowNull: false },
+    saldo_inicial: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    saldo_final_informado: { type: DataTypes.DECIMAL(10, 2) },
+    total_vendas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    total_despesas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    total_perdas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    diferenca_caixa: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    observacao_abertura: { type: DataTypes.TEXT },
+    observacao_fechamento: { type: DataTypes.TEXT },
+    aberto_por_usuario_id: { type: DataTypes.INTEGER },
+    fechado_por_usuario_id: { type: DataTypes.INTEGER },
+    aberto_em: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    fechado_em: { type: DataTypes.DATE },
+  });
+
   const Cliente = db.define("Cliente", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     nome: { type: DataTypes.STRING, allowNull: false },
@@ -197,6 +238,13 @@ function defineModels(db) {
   TransacaoFinanceira.belongsTo(Fornecedor, { foreignKey: "fornecedor_id" });
   Fornecedor.hasMany(TransacaoFinanceira, { foreignKey: "fornecedor_id" });
 
+  DiaOperacional.hasMany(TurnoOperacional, { foreignKey: "dia_operacional_id" });
+  TurnoOperacional.belongsTo(DiaOperacional, { foreignKey: "dia_operacional_id" });
+  DiaOperacional.belongsTo(Usuario, { as: "abertoPor", foreignKey: "aberto_por_usuario_id" });
+  DiaOperacional.belongsTo(Usuario, { as: "fechadoPor", foreignKey: "fechado_por_usuario_id" });
+  TurnoOperacional.belongsTo(Usuario, { as: "abertoPor", foreignKey: "aberto_por_usuario_id" });
+  TurnoOperacional.belongsTo(Usuario, { as: "fechadoPor", foreignKey: "fechado_por_usuario_id" });
+
   Perfil.belongsToMany(Permissao, {
     through: { model: PerfilPermissao, unique: false },
     foreignKey: "perfil_id",
@@ -220,6 +268,8 @@ function defineModels(db) {
     Venda,
     ItemVenda,
     TransacaoFinanceira,
+    DiaOperacional,
+    TurnoOperacional,
     Cliente,
     Fornecedor,
     Usuario,
