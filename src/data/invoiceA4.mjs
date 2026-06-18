@@ -127,19 +127,8 @@ export function buildInvoiceA4ViewModel({
 
   return {
     header: {
-      pharmacyName: branding.pharmacyName,
-      companyName: settings.companyName || branding.pharmacyName,
-      companyActivity: settings.companyActivity || '',
+      documentHeaderText: settings.documentHeaderText,
       logoDataUrl: branding.logoDataUrl,
-      taxId: settings.pharmacyTaxId || '',
-      phone: settings.pharmacyPhone || '',
-      email: settings.pharmacyEmail || '',
-      address: settings.pharmacyAddress || '',
-      city: settings.pharmacyCity || '',
-      companyLines: [
-        settings.pharmacyAddress || '',
-        settings.pharmacyCity || '',
-      ].filter(Boolean),
     },
     document: {
       title: getDocumentTitle(document),

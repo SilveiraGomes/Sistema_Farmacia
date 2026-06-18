@@ -76,6 +76,7 @@ test('buildInvoiceA4ViewModel prepares a no-watermark A4 document', () => {
     document,
     branding: { pharmacyName: 'Farmacia Nova Vida', logoDataUrl: '' },
     settings: {
+      documentHeaderText: 'KILSYSTEM ANGOLA, LDA\nCOMERCIO GERAL - PRESTACAO DE SERVICOS\nNIF: 500079734',
       companyName: 'KILSYSTEM ANGOLA, LDA',
       companyActivity: 'COMERCIO GERAL - PRESTACAO DE SERVICOS',
       pharmacyTaxId: '500079734',
@@ -97,15 +98,11 @@ test('buildInvoiceA4ViewModel prepares a no-watermark A4 document', () => {
     referencePrefix: 'lzoe',
   });
 
-  assert.equal(viewModel.header.companyName, 'KILSYSTEM ANGOLA, LDA');
-  assert.equal(viewModel.header.companyActivity, 'COMERCIO GERAL - PRESTACAO DE SERVICOS');
-  assert.equal(viewModel.header.taxId, '500079734');
-  assert.deepEqual(viewModel.header.companyLines, [
-    'Largo Kussy N. 07, Cidade Alta-Huambo',
-    'HUAMBO - ANGOLA',
-  ]);
-  assert.equal(viewModel.header.phone, '(244) 923 909 381; 946 353 386');
-  assert.equal(viewModel.header.email, 'kilsystemangola@gmail.com');
+  assert.equal(
+    viewModel.header.documentHeaderText,
+    'KILSYSTEM ANGOLA, LDA\nCOMERCIO GERAL - PRESTACAO DE SERVICOS\nNIF: 500079734',
+  );
+  assert.equal(viewModel.header.logoDataUrl, '');
   assert.equal(viewModel.document.title, 'Factura');
   assert.equal(viewModel.document.number, 'FAT027/26');
   assert.equal(viewModel.document.viaLabel, 'Original');

@@ -35,6 +35,7 @@ test('uses safe default invoice A4 settings', () => {
   assert.equal(DEFAULT_INVOICE_A4_SETTINGS.pharmacyCity, 'HUAMBO - ANGOLA');
   assert.equal(DEFAULT_INVOICE_A4_SETTINGS.pharmacyPhone, '(244) 923 909 381; 946 353 386');
   assert.equal(DEFAULT_INVOICE_A4_SETTINGS.pharmacyEmail, 'kilsystemangola@gmail.com');
+  assert.match(DEFAULT_INVOICE_A4_SETTINGS.documentHeaderText, /KILSYSTEM ANGOLA, LDA\nCOMERCIO GERAL/);
   assert.equal(DEFAULT_INVOICE_A4_SETTINGS.showWatermark, false);
 });
 
@@ -60,6 +61,15 @@ test('normalizes invoice A4 settings for fiscal footer and options', () => {
   });
 
   assert.deepEqual(result, {
+    documentHeaderText: [
+      'Empresa Exemplo LDA',
+      'Comercio e Servicos',
+      'NIF: 541000999',
+      'Rua 1',
+      'Luanda - Angola',
+      'TEL: 923 000 111',
+      'EMAIL: geral@example.test',
+    ].join('\n'),
     companyName: 'Empresa Exemplo LDA',
     companyActivity: 'Comercio e Servicos',
     pharmacyTaxId: '541000999',
@@ -78,6 +88,36 @@ test('normalizes invoice A4 settings for fiscal footer and options', () => {
       { bank: 'BAI', account: '11126994', iban: 'AO06 0040 0000 1112 6994 1011 6' },
     ],
   });
+});
+
+test('preserves document header line breaks', () => {
+  const result = normalizeInvoiceA4Settings({
+    documentHeaderText: 'Empresa Exemplo\nNIF: 500000000\nRua 1',
+  });
+
+  assert.equal(result.documentHeaderText, 'Empresa Exemplo\nNIF: 500000000\nRua 1');
+});
+
+test('migrates legacy company fields into document header text', () => {
+  const result = normalizeInvoiceA4Settings({
+    companyName: 'Empresa Antiga',
+    companyActivity: 'Comercio',
+    pharmacyTaxId: '500000000',
+    pharmacyAddress: 'Rua 1',
+    pharmacyCity: 'Huambo',
+    pharmacyPhone: '923000000',
+    pharmacyEmail: 'geral@example.test',
+  });
+
+  assert.equal(result.documentHeaderText, [
+    'Empresa Antiga',
+    'Comercio',
+    'NIF: 500000000',
+    'Rua 1',
+    'Huambo',
+    'TEL: 923000000',
+    'EMAIL: geral@example.test',
+  ].join('\n'));
 });
 
 test('saves invoice A4 settings to storage', () => {
