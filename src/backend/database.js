@@ -213,6 +213,47 @@ function defineModels(db) {
     data_evento: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
 
+  const ConfiguracaoSistema = db.define("ConfiguracaoSistema", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    chave: { type: DataTypes.STRING, allowNull: false, unique: true },
+    grupo: { type: DataTypes.STRING, allowNull: false },
+    tipo: { type: DataTypes.STRING, allowNull: false },
+    valor_json: { type: DataTypes.TEXT, allowNull: false },
+    versao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    atualizado_por_usuario_id: { type: DataTypes.INTEGER },
+  }, {
+    tableName: "ConfiguracoesSistema",
+  });
+
+  const OpcaoCatalogo = db.define("OpcaoCatalogo", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    catalogo: { type: DataTypes.STRING, allowNull: false },
+    codigo: { type: DataTypes.STRING, allowNull: false },
+    nome: { type: DataTypes.STRING, allowNull: false },
+    ordem: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    sistema: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    metadados_json: { type: DataTypes.TEXT, allowNull: false, defaultValue: "{}" },
+    versao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    atualizado_por_usuario_id: { type: DataTypes.INTEGER },
+  }, {
+    tableName: "OpcoesCatalogo",
+    indexes: [{ unique: true, fields: ["catalogo", "codigo"] }],
+  });
+
+  const AuditoriaConfiguracao = db.define("AuditoriaConfiguracao", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    ator_usuario_id: { type: DataTypes.INTEGER },
+    tipo_alvo: { type: DataTypes.STRING, allowNull: false },
+    alvo_chave: { type: DataTypes.STRING, allowNull: false },
+    acao: { type: DataTypes.STRING, allowNull: false },
+    valor_anterior_json: { type: DataTypes.TEXT },
+    valor_novo_json: { type: DataTypes.TEXT },
+    data_evento: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  }, {
+    tableName: "AuditoriasConfiguracao",
+  });
+
   Categoria.hasMany(Subcategoria, { foreignKey: "categoria_id" });
   Subcategoria.belongsTo(Categoria, { foreignKey: "categoria_id" });
 
@@ -261,6 +302,18 @@ function defineModels(db) {
   Usuario.belongsTo(Perfil, { foreignKey: "perfil_id" });
   AuditoriaUsuario.belongsTo(Usuario, { as: "ator", foreignKey: "ator_usuario_id" });
   AuditoriaUsuario.belongsTo(Usuario, { as: "usuarioAfetado", foreignKey: "usuario_afetado_id" });
+  ConfiguracaoSistema.belongsTo(Usuario, {
+    as: "atualizadoPorConfiguracao",
+    foreignKey: "atualizado_por_usuario_id",
+  });
+  OpcaoCatalogo.belongsTo(Usuario, {
+    as: "atualizadoPorOpcaoCatalogo",
+    foreignKey: "atualizado_por_usuario_id",
+  });
+  AuditoriaConfiguracao.belongsTo(Usuario, {
+    as: "atorConfiguracao",
+    foreignKey: "ator_usuario_id",
+  });
 
   return {
     Categoria,
@@ -279,6 +332,9 @@ function defineModels(db) {
     Permissao,
     PerfilPermissao,
     AuditoriaUsuario,
+    ConfiguracaoSistema,
+    OpcaoCatalogo,
+    AuditoriaConfiguracao,
   };
 }
 
@@ -708,23 +764,11 @@ async function syncDatabaseSchema(db) {
 }
 
 async function connectDB(app, env = "development") {
-  if (env === "development") {
+  if (env === "development" || env === "production") {
     sequelize = new Sequelize({
       dialect: "sqlite",
       storage: path.join(app.getPath("userData"), "database.sqlite"),
       logging: false,
-    });
-  } else if (env === "production") {
-    sequelize = new Sequelize("database", "username", "password", {
-      host: "localhost",
-      dialect: "mysql",
-      logging: false,
-      pool: {
-        max: 5,
-        min: 0,
-        acquire: 30000,
-        idle: 10000,
-      },
     });
   } else {
     throw new Error(`Ambiente de banco de dados invalido: ${env}`);
@@ -752,6 +796,7 @@ function getModels() {
 
 module.exports = {
   connectDB,
+  defineModels,
   getModels,
   syncDatabaseSchema,
   get sequelize() {
