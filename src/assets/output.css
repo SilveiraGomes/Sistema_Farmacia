@@ -2173,6 +2173,272 @@ tr:nth-child(even) td {
   color: var(--ink);
   font-size: 44px;
 }
+.report-center {
+  gap: 16px;
+}
+.report-workbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(130px, 0.72fr)) minmax(150px, 0.8fr) minmax(170px, 0.9fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.report-workbar label {
+  min-width: 0;
+}
+.report-workbar label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.report-workbar select,
+.report-workbar input {
+  min-height: 42px;
+}
+.report-search {
+  width: 100%;
+}
+.report-center-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.report-catalog {
+  display: grid;
+  gap: 18px;
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+}
+.report-catalog section {
+  display: grid;
+  gap: 7px;
+}
+.report-catalog h2 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.report-catalog button {
+  min-height: 54px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+.report-catalog button:hover,
+.report-catalog button.active {
+  border-color: var(--brand);
+  background: #eef7ef;
+}
+.report-catalog button.active {
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.report-catalog button span,
+.report-catalog button small {
+  display: block;
+}
+.report-catalog button span {
+  font-weight: 500;
+}
+.report-catalog button small {
+  color: var(--muted);
+}
+.report-result {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.report-result-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.report-result-header h2 {
+  margin: 4px 0;
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.report-result-header p,
+.report-result-header span {
+  margin: 0;
+  color: var(--muted);
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.report-comparison-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.report-comparison-strip span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fff;
+}
+.report-table-panel {
+  overflow: auto;
+}
+.report-preview-modal {
+  width: min(1100px, 96vw);
+  max-width: min(1100px, 96vw);
+}
+.reports-print-scope {
+  background: #ecefed;
+}
+.report-a4-page {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 13mm;
+  border: 1px solid #d7d7d7;
+  color: #111;
+  background: #fff;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 22%);
+  font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  line-height: 1.28;
+  letter-spacing: 0;
+  -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+}
+.report-a4-header {
+  display: grid;
+  grid-template-columns: 1.25fr 0.85fr;
+  gap: 18px;
+  align-items: start;
+  padding-bottom: 12px;
+  border-bottom: 3px solid #111;
+}
+.report-a4-company {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.report-a4-logo {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #111;
+  border-radius: 8px;
+  font-size: 24px;
+  font-weight: 700;
+}
+.report-a4-company h1,
+.report-a4-document-box h2,
+.report-a4-page h1,
+.report-a4-page h2,
+.report-a4-page h3 {
+  margin: 0 0 5px;
+  font-size: 13px;
+  line-height: 1.15;
+  font-weight: 400;
+}
+.report-a4-company p,
+.report-a4-document-box span,
+.report-a4-footer span {
+  display: block;
+  margin: 2px 0;
+}
+.report-a4-document-box {
+  text-align: right;
+}
+.report-a4-document-box strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 15px;
+}
+.report-a4-document-box em {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid #111;
+  border-radius: 999px;
+  font-style: normal;
+}
+.report-a4-filters,
+.report-a4-comparison,
+.report-a4-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.report-a4-filters span,
+.report-a4-comparison span,
+.report-a4-kpis span {
+  display: grid;
+  gap: 3px;
+  min-height: 48px;
+  padding: 8px;
+  border: 1px solid #d2d2d2;
+  background: #f7f7f7;
+}
+.report-a4-filters strong,
+.report-a4-comparison strong,
+.report-a4-kpis strong {
+  color: #111;
+  font-size: 12px;
+}
+.report-a4-table {
+  width: 100%;
+  margin-top: 14px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  border-block: 2px solid #111;
+}
+.report-a4-table th,
+.report-a4-table td {
+  padding: 5px 6px;
+  border-block: 1px solid #d2d2d2;
+  vertical-align: top;
+  word-break: break-word;
+}
+.report-a4-table th {
+  color: #111;
+  background: #a5a5a5;
+  border-bottom: 2px solid #111;
+  font-weight: 700;
+  text-align: left;
+}
+.report-a4-table tbody tr:nth-child(even) td {
+  background: #ededed;
+}
+.report-a4-empty {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px dashed #777;
+  text-align: center;
+}
+.report-a4-footer {
+  margin-top: 18px;
+  padding-top: 8px;
+  border-top: 2px solid #111;
+  text-align: center;
+  font-size: 9px;
+}
 .mini-chart {
   height: 145px;
   display: flex;
@@ -4280,6 +4546,50 @@ button :is(strong, b) {
     box-shadow: none;
   }
 }
+@media print {
+  body:has(.reports-print-scope) * {
+    visibility: hidden;
+  }
+  body:has(.reports-print-scope) .app-shell,
+  body:has(.reports-print-scope) .workspace,
+  body:has(.reports-print-scope) .screen-frame,
+  body:has(.reports-print-scope) .modal-backdrop {
+    display: block;
+    background: white;
+  }
+  body:has(.reports-print-scope) .sidebar,
+  body:has(.reports-print-scope) .topbar,
+  body:has(.reports-print-scope) .modal-title-row,
+  body:has(.reports-print-scope) .modal-actions,
+  body:has(.reports-print-scope) .invoice-a4-actions {
+    display: none;
+  }
+  body:has(.reports-print-scope) .reports-print-scope,
+  body:has(.reports-print-scope) .reports-print-scope * {
+    visibility: visible;
+  }
+  body:has(.reports-print-scope) .reports-print-scope {
+    position: absolute;
+    inset: 0;
+    background: white;
+  }
+  body:has(.reports-print-scope) .reports-print-scope .modal-card {
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  body:has(.reports-print-scope) .report-a4-page {
+    width: auto;
+    min-height: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+}
 @media (max-width: 1180px) {
   .operation-state-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4295,6 +4605,24 @@ button :is(strong, b) {
   }
   .documents-filter-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .report-workbar,
+  .report-catalog,
+  .report-a4-filters,
+  .report-a4-comparison,
+  .report-a4-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .report-center-layout {
+    grid-template-columns: 1fr;
+  }
+  .report-catalog {
+    max-height: none;
+  }
+  .report-a4-page {
+    width: 100%;
+    min-height: auto;
+    padding: 18px;
   }
   .document-detail-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -4316,6 +4644,23 @@ button :is(strong, b) {
   .documents-filter-panel,
   .document-detail-grid {
     grid-template-columns: 1fr;
+  }
+  .report-workbar,
+  .report-catalog,
+  .report-a4-header,
+  .report-a4-company,
+  .report-a4-filters,
+  .report-a4-comparison,
+  .report-a4-kpis {
+    grid-template-columns: 1fr;
+  }
+  .report-result-header,
+  .report-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .report-a4-document-box {
+    text-align: left;
   }
 }
 @property --tw-border-style {

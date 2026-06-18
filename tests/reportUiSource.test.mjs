@@ -28,3 +28,17 @@ test('Relatorios uses catalog report engine and export permissions', async () =>
   assert.match(source, /window\.print\(\)/);
   assert.match(source, /URL\.createObjectURL/);
 });
+
+test('report center and print styles are defined', async () => {
+  const css = await readFile('src/assets/tailwind.css', 'utf8');
+
+  assert.match(css, /\.report-center/);
+  assert.match(css, /\.report-workbar/);
+  assert.match(css, /\.report-catalog/);
+  assert.match(css, /\.report-result-header/);
+  assert.match(css, /\.report-comparison-strip/);
+  assert.match(css, /\.reports-print-scope/);
+  assert.match(css, /\.report-a4-page/);
+  assert.match(css, /@media print/);
+  assert.match(css, /body:has\(\.reports-print-scope\)/);
+});
