@@ -27,7 +27,6 @@ export const REPORT_CATALOG = Object.freeze([
     reports: [
       { id: 'resumo-executivo', title: 'Resumo executivo', mode: 'summary' },
       { id: 'relatorio-diario', title: 'Relatorio diario', mode: 'table' },
-      { id: 'diferenca-entre-datas', title: 'Diferenca entre datas', mode: 'comparison' },
     ],
   },
   {
@@ -82,11 +81,11 @@ const REPORT_LOOKUP = new Map(
 
 export function buildReportData(reportId, data = {}, filters = {}) {
   const definition = REPORT_LOOKUP.get(reportId) ?? REPORT_LOOKUP.get('resumo-executivo');
+  const normalizedFilters = normalizeReportFilters(filters);
 
   const builders = {
     'resumo-executivo': buildExecutiveSummaryReport,
     'relatorio-diario': buildDailyReport,
-    'diferenca-entre-datas': buildDateDifferenceReport,
     'vendas-detalhadas': buildSalesDetailReport,
     'demonstrativo-financeiro': buildFinancialStatementReport,
     'stock-baixo': buildLowStockReport,
@@ -95,7 +94,22 @@ export function buildReportData(reportId, data = {}, filters = {}) {
     'estado-operacional': buildOperationStateReport,
   };
 
-  return builders[definition.id](definition, normalizeData(data), filters);
+  return builders[definition.id](definition, normalizeData(data), normalizedFilters);
+}
+
+export function normalizeReportFilters(filters = {}) {
+  const startDate = normalizeDateKey(filters.startDate);
+  const endDate = normalizeDateKey(filters.endDate);
+
+  if (startDate && endDate && startDate > endDate) {
+    return { ...filters, startDate: endDate, endDate: startDate };
+  }
+
+  return {
+    ...filters,
+    startDate: startDate || filters.startDate,
+    endDate: endDate || filters.endDate,
+  };
 }
 
 export function buildReportExportRows(report) {
@@ -152,46 +166,13 @@ function buildExecutiveSummaryReport(definition, data, filters) {
 }
 
 function buildDailyReport(definition, data, filters) {
-  const date = filters.startDate ?? filters.endDate ?? resolveReferenceDate(filters);
-  const rows = filterSales(data.sales, { ...filters, startDate: date, endDate: date });
+  const rows = filterSales(data.sales, filters);
 
   return makeReport(definition, filters, {
     kpis: salesKpis(rows),
     columns: salesColumns(),
     rows,
     totals: salesTotals(rows),
-  });
-}
-
-function buildDateDifferenceReport(definition, data, filters) {
-  const startRows = filters.startDate ? filterSales(data.sales, { ...filters, endDate: filters.startDate }) : [];
-  const endRows = filters.endDate ? filterSales(data.sales, { ...filters, startDate: filters.endDate }) : [];
-  const startTotals = salesTotals(startRows);
-  const endTotals = salesTotals(endRows);
-
-  return makeReport(definition, filters, {
-    kpis: [
-      { key: 'startRevenue', label: 'Receita inicial', value: startTotals.revenue },
-      { key: 'endRevenue', label: 'Receita final', value: endTotals.revenue },
-      { key: 'difference', label: 'Diferenca', value: roundMoney(endTotals.revenue - startTotals.revenue) },
-    ],
-    columns: [
-      { key: 'label', label: 'Periodo' },
-      { key: 'revenue', label: 'Receita' },
-      { key: 'quantity', label: 'Quantidade' },
-    ],
-    rows: [
-      { label: filters.startDate ?? 'Inicio', ...startTotals },
-      { label: filters.endDate ?? 'Fim', ...endTotals },
-    ],
-    totals: {
-      revenue: roundMoney(endTotals.revenue - startTotals.revenue),
-      quantity: endTotals.quantity - startTotals.quantity,
-    },
-    comparison: {
-      start: startTotals,
-      end: endTotals,
-    },
   });
 }
 

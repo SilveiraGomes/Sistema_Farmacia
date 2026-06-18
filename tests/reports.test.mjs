@@ -42,9 +42,35 @@ test('REPORT_CATALOG exposes all required report groups', () => {
   const reportIds = REPORT_CATALOG.flatMap((group) => group.reports.map((report) => report.id));
   assert.ok(reportIds.includes('resumo-executivo'));
   assert.ok(reportIds.includes('relatorio-diario'));
-  assert.ok(reportIds.includes('diferenca-entre-datas'));
+  assert.equal(reportIds.includes('diferenca-entre-datas'), false);
   assert.ok(reportIds.includes('vendas-detalhadas'));
   assert.ok(reportIds.includes('documentos-emitidos'));
+});
+
+test('buildReportData includes both ends of an inverted inclusive interval', () => {
+  const report = buildReportData('vendas-detalhadas', {
+    sales: [
+      { product: 'Inicio', date: '2026-06-01T08:00:00', quantity: 1, revenue: 100, cost: 20 },
+      { product: 'Meio', date: '2026-06-08', quantity: 1, revenue: 200, cost: 30 },
+      { product: 'Fim', date: '2026-06-15T19:00:00', quantity: 1, revenue: 300, cost: 40 },
+      { product: 'Fora', date: '2026-06-16', quantity: 1, revenue: 400, cost: 50 },
+    ],
+  }, { startDate: '2026-06-15', endDate: '2026-06-01' });
+
+  assert.deepEqual(report.rows.map((row) => row.product), ['Inicio', 'Meio', 'Fim']);
+  assert.equal(report.filters.startDate, '2026-06-01');
+  assert.equal(report.filters.endDate, '2026-06-15');
+});
+
+test('daily report uses the selected interval instead of only the first date', () => {
+  const report = buildReportData('relatorio-diario', {
+    sales: [
+      { product: 'Primeiro', date: '2026-06-01', quantity: 1, revenue: 100, cost: 20 },
+      { product: 'Segundo', date: '2026-06-02', quantity: 1, revenue: 200, cost: 30 },
+    ],
+  }, { startDate: '2026-06-01', endDate: '2026-06-02' });
+
+  assert.deepEqual(report.rows.map((row) => row.product), ['Primeiro', 'Segundo']);
 });
 
 test('buildReportData falls back to resumo-executivo for unknown reports', () => {
