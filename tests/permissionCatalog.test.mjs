@@ -72,6 +72,43 @@ test('document annulment is exclusive to administrator and stock manager profile
   assert.deepEqual(profilesWithDocumentAnnulment, [ADMINISTRATOR_PROFILE, 'Gestor de Stock'].sort());
 });
 
+test('operation permissions are cataloged and assigned by profile', () => {
+  const keys = getPermissionKeys();
+  const admin = DEFAULT_PROFILES.find((profile) => profile.nome === ADMINISTRATOR_PROFILE);
+  const pharmacist = DEFAULT_PROFILES.find((profile) => profile.nome === 'Farmaceutico');
+  const cashier = DEFAULT_PROFILES.find((profile) => profile.nome === 'Caixa');
+  const stockManager = DEFAULT_PROFILES.find((profile) => profile.nome === 'Gestor de Stock');
+  const operationPermissions = [
+    'operacao.ver',
+    'operacao.abrir_dia',
+    'operacao.fechar_dia',
+    'operacao.abrir_turno',
+    'operacao.fechar_turno',
+  ];
+
+  for (const permission of operationPermissions) {
+    assert.ok(keys.includes(permission), `${permission} should exist`);
+    assert.ok(admin.permissoes.includes(permission), `admin should include ${permission}`);
+  }
+
+  assert.ok(pharmacist.permissoes.includes('operacao.ver'));
+  assert.ok(pharmacist.permissoes.includes('operacao.abrir_turno'));
+  assert.ok(pharmacist.permissoes.includes('operacao.fechar_turno'));
+  assert.equal(pharmacist.permissoes.includes('operacao.abrir_dia'), false);
+  assert.equal(pharmacist.permissoes.includes('operacao.fechar_dia'), false);
+
+  assert.ok(cashier.permissoes.includes('operacao.ver'));
+  assert.ok(cashier.permissoes.includes('operacao.abrir_turno'));
+  assert.ok(cashier.permissoes.includes('operacao.fechar_turno'));
+  assert.equal(cashier.permissoes.includes('operacao.abrir_dia'), false);
+  assert.equal(cashier.permissoes.includes('operacao.fechar_dia'), false);
+
+  assert.deepEqual(
+    operationPermissions.filter((permission) => stockManager.permissoes.includes(permission)),
+    ['operacao.ver'],
+  );
+});
+
 test('cashier profile does not receive admin permissions', () => {
   const cashier = DEFAULT_PROFILES.find((profile) => profile.nome === 'Caixa');
 

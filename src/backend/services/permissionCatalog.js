@@ -9,6 +9,11 @@ function freezeProfile(profile) {
 
 const PERMISSIONS = Object.freeze([
   { chave: 'dashboard.ver', modulo: 'Dashboard', acao: 'ver', descricao: 'Ver dashboard' },
+  { chave: 'operacao.ver', modulo: 'Operacao', acao: 'ver', descricao: 'Ver abertura e fechamento operacional' },
+  { chave: 'operacao.abrir_dia', modulo: 'Operacao', acao: 'abrir_dia', descricao: 'Abrir dia operacional' },
+  { chave: 'operacao.fechar_dia', modulo: 'Operacao', acao: 'fechar_dia', descricao: 'Fechar dia operacional' },
+  { chave: 'operacao.abrir_turno', modulo: 'Operacao', acao: 'abrir_turno', descricao: 'Abrir turno operacional' },
+  { chave: 'operacao.fechar_turno', modulo: 'Operacao', acao: 'fechar_turno', descricao: 'Fechar turno operacional' },
   { chave: 'vendas.ver', modulo: 'Vendas', acao: 'ver', descricao: 'Ver vendas' },
   { chave: 'vendas.criar', modulo: 'Vendas', acao: 'criar', descricao: 'Criar vendas' },
   { chave: 'vendas.cancelar', modulo: 'Vendas', acao: 'cancelar', descricao: 'Cancelar vendas' },
@@ -58,6 +63,9 @@ const DEFAULT_PROFILES = Object.freeze([
     sistema: true,
     permissoes: [
       'dashboard.ver',
+      'operacao.ver',
+      'operacao.abrir_turno',
+      'operacao.fechar_turno',
       'vendas.ver',
       'vendas.criar',
       'vendas.desconto',
@@ -79,6 +87,9 @@ const DEFAULT_PROFILES = Object.freeze([
     sistema: true,
     permissoes: [
       'dashboard.ver',
+      'operacao.ver',
+      'operacao.abrir_turno',
+      'operacao.fechar_turno',
       'vendas.ver',
       'vendas.criar',
       'clientes.ver',
@@ -93,6 +104,7 @@ const DEFAULT_PROFILES = Object.freeze([
     sistema: true,
     permissoes: [
       'dashboard.ver',
+      'operacao.ver',
       'estoque.ver',
       'estoque.criar',
       'estoque.editar',
