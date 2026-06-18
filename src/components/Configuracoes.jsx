@@ -57,8 +57,9 @@ function Configuracoes() {
     setActiveSetting(null);
   }
 
-  function handleSaveInvoiceA4(nextSettings) {
+  function handleSaveDocumentHeader(nextSettings, logoDataUrl) {
     setInvoiceA4Settings(saveStoredInvoiceA4Settings(nextSettings));
+    setBranding(saveStoredBranding({ ...branding, logoDataUrl }));
     setActiveSetting(null);
   }
 
@@ -110,7 +111,7 @@ function Configuracoes() {
           invoiceA4Settings={invoiceA4Settings}
           onClose={() => setActiveSetting(null)}
           onSaveBranding={handleSaveBranding}
-          onSaveInvoiceA4={handleSaveInvoiceA4}
+          onSaveDocumentHeader={handleSaveDocumentHeader}
           setting={activeSetting}
         />
       )}
@@ -118,7 +119,14 @@ function Configuracoes() {
   );
 }
 
-function SettingsModal({ branding, invoiceA4Settings, setting, onClose, onSaveBranding, onSaveInvoiceA4 }) {
+function SettingsModal({
+  branding,
+  invoiceA4Settings,
+  setting,
+  onClose,
+  onSaveBranding,
+  onSaveDocumentHeader,
+}) {
   const [logoPreview, setLogoPreview] = useState(branding.logoDataUrl);
   const [pharmacyName, setPharmacyName] = useState(branding.pharmacyName);
   const [invoiceSettingsForm, setInvoiceSettingsForm] = useState(invoiceA4Settings);
@@ -145,7 +153,7 @@ function SettingsModal({ branding, invoiceA4Settings, setting, onClose, onSaveBr
     }
 
     if (setting.id === 'invoiceA4') {
-      onSaveInvoiceA4(invoiceSettingsForm);
+      onSaveDocumentHeader(invoiceSettingsForm, logoPreview);
       return;
     }
 
@@ -238,41 +246,21 @@ function SettingsModal({ branding, invoiceA4Settings, setting, onClose, onSaveBr
 
           {setting.id === 'invoiceA4' && (
             <>
-              <input
-                value={invoiceSettingsForm.companyName}
-                onChange={(event) => updateInvoiceSettings('companyName', event.target.value)}
-                placeholder="Nome fiscal da empresa"
-              />
-              <input
-                value={invoiceSettingsForm.companyActivity}
-                onChange={(event) => updateInvoiceSettings('companyActivity', event.target.value)}
-                placeholder="Actividade comercial"
-              />
-              <input
-                value={invoiceSettingsForm.pharmacyTaxId}
-                onChange={(event) => updateInvoiceSettings('pharmacyTaxId', event.target.value)}
-                placeholder="NIF"
-              />
-              <input
-                value={invoiceSettingsForm.pharmacyPhone}
-                onChange={(event) => updateInvoiceSettings('pharmacyPhone', event.target.value)}
-                placeholder="Telefone"
-              />
-              <input
-                value={invoiceSettingsForm.pharmacyEmail}
-                onChange={(event) => updateInvoiceSettings('pharmacyEmail', event.target.value)}
-                placeholder="Email"
-              />
-              <input
-                value={invoiceSettingsForm.pharmacyCity}
-                onChange={(event) => updateInvoiceSettings('pharmacyCity', event.target.value)}
-                placeholder="Cidade e pais"
-              />
-              <textarea
-                value={invoiceSettingsForm.pharmacyAddress}
-                onChange={(event) => updateInvoiceSettings('pharmacyAddress', event.target.value)}
-                placeholder="Endereco completo"
-              />
+              <label className="settings-document-header-field">
+                <span>Dados da empresa</span>
+                <textarea
+                  value={invoiceSettingsForm.documentHeaderText}
+                  onChange={(event) => updateInvoiceSettings('documentHeaderText', event.target.value)}
+                  placeholder={'Nome da empresa\nActividade\nNIF\nEndereco\nContactos'}
+                />
+              </label>
+              <label className="image-picker settings-document-logo">
+                <span className={logoPreview ? 'image-preview' : 'image-preview empty'}>
+                  {logoPreview ? <img src={logoPreview} alt="Pre-visualizacao do logotipo" /> : <ImagePlus size={34} />}
+                </span>
+                <input type="file" accept="image/*" onChange={previewLogo} />
+                <strong>Inserir logotipo</strong>
+              </label>
               <input
                 value={invoiceSettingsForm.validationNumber}
                 onChange={(event) => updateInvoiceSettings('validationNumber', event.target.value)}

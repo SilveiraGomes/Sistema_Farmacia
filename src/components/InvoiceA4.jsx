@@ -13,14 +13,7 @@ function InvoiceA4({ viewModel }) {
           {viewModel.header.logoDataUrl ? (
             <img className="invoice-a4-company-logo" src={viewModel.header.logoDataUrl} alt="" />
           ) : null}
-          <h1>{viewModel.header.companyName}</h1>
-          {viewModel.header.companyActivity ? <p className="invoice-a4-company-activity">{viewModel.header.companyActivity}</p> : null}
-          {viewModel.header.taxId ? <p><strong>NIF:</strong> {viewModel.header.taxId}</p> : null}
-          {viewModel.header.companyLines.map((line) => (
-            <p key={line}>{line}</p>
-          ))}
-          {viewModel.header.phone ? <p><strong>TEL:</strong> {viewModel.header.phone}</p> : null}
-          {viewModel.header.email ? <p><strong>EMAIL:</strong> {viewModel.header.email}</p> : null}
+          <p className="invoice-a4-company-text">{viewModel.header.documentHeaderText}</p>
         </section>
 
         <section className="invoice-a4-document-box">

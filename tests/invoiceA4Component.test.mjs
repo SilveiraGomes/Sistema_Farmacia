@@ -15,16 +15,13 @@ test('InvoiceA4 renders the approved A4 sections without watermark markup', asyn
   assert.doesNotMatch(source, /watermark/i);
 });
 
-test('InvoiceA4 renders company data with commercial activity, NIF and contacts', async () => {
+test('InvoiceA4 renders the shared multiline company header', async () => {
   const source = await readFile('src/components/InvoiceA4.jsx', 'utf8');
 
   assert.match(source, /invoice-a4-company-logo/);
-  assert.match(source, /viewModel\.header\.companyName/);
-  assert.match(source, /viewModel\.header\.companyActivity/);
-  assert.match(source, /NIF:/);
-  assert.match(source, /TEL:/);
-  assert.match(source, /EMAIL:/);
-  assert.match(source, /companyLines\.map/);
+  assert.match(source, /viewModel\.header\.documentHeaderText/);
+  assert.match(source, /invoice-a4-company-text/);
+  assert.doesNotMatch(source, /viewModel\.header\.companyLines/);
 });
 
 test('InvoiceA4 item table keeps fiscal details in summary instead of item columns', async () => {
@@ -170,13 +167,12 @@ test('Configuracoes exposes the Modelo de Factura A4 settings', async () => {
   assert.match(source, /saveStoredInvoiceA4Settings/);
   assert.match(source, /validationNumber/);
   assert.match(source, /softwareName/);
-  assert.match(source, /companyName/);
-  assert.match(source, /companyActivity/);
-  assert.match(source, /pharmacyTaxId/);
-  assert.match(source, /pharmacyAddress/);
-  assert.match(source, /pharmacyCity/);
-  assert.match(source, /pharmacyPhone/);
-  assert.match(source, /pharmacyEmail/);
+  assert.match(source, /documentHeaderText/);
+  assert.match(source, /Dados da empresa/);
+  assert.match(source, /image-picker/);
+  assert.match(source, /onSaveDocumentHeader/);
+  assert.doesNotMatch(source, /updateInvoiceSettings\('companyName'/);
+  assert.doesNotMatch(source, /updateInvoiceSettings\('pharmacyAddress'/);
   assert.match(source, /showQrCode/);
   assert.match(source, /showTotalInWords/);
   assert.doesNotMatch(source, /Mostrar lote e validade/);
