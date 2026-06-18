@@ -100,7 +100,10 @@ export function buildReportData(reportId, data = {}, filters = {}) {
 
 function buildExecutiveSummaryReport(definition, data, filters) {
   const referenceDate = resolveReferenceDate(filters);
-  const overview = buildReportsOverview(data, { referenceDate });
+  const overview = buildReportsOverview({
+    ...data,
+    ...filterFinancialRows(data, filters),
+  }, { referenceDate });
   const rows = [
     { metric: 'Receita de vendas', value: overview.sales.totalRevenue },
     { metric: 'Lucro bruto', value: overview.finance.grossProfit },
@@ -419,8 +422,9 @@ function resolveReferenceDate(filters) {
 }
 
 function matchesDateRange(date, startDate, endDate) {
-  if (startDate && date < startDate) return false;
-  if (endDate && date > endDate) return false;
+  const dateKey = normalizeDateKey(date);
+  if (startDate && dateKey < startDate) return false;
+  if (endDate && dateKey > endDate) return false;
   return true;
 }
 
@@ -471,6 +475,10 @@ function sumBy(rows, field) {
 
 function roundMoney(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeDateKey(value) {
+  return String(value ?? '').slice(0, 10);
 }
 
 function todayLocalDateKey() {

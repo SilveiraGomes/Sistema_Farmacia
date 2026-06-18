@@ -79,6 +79,51 @@ test('buildReportData generates a sales detail report filtered by period and pay
   assert.equal(report.totals.revenue, 8240);
 });
 
+test('buildReportData includes ISO datetime sales inside same-day ranges', () => {
+  const report = buildReportData('vendas-detalhadas', {
+    sales: [
+      { product: 'Venda com hora', category: 'Teste', quantity: 2, revenue: 5000, cost: 2000, date: '2026-06-15T10:00:00', shift: 'Manha', paymentMethod: 'TPA' },
+      { product: 'Outro dia', category: 'Teste', quantity: 1, revenue: 9000, cost: 3000, date: '2026-06-16T08:00:00', shift: 'Manha', paymentMethod: 'TPA' },
+    ],
+  }, {
+    startDate: '2026-06-15',
+    endDate: '2026-06-15',
+  });
+
+  assert.deepEqual(report.rows.map((row) => row.product), ['Venda com hora']);
+  assert.equal(report.totals.revenue, 5000);
+  assert.equal(report.totals.quantity, 2);
+});
+
+test('buildReportData executive summary uses the same sales range as the detailed report', () => {
+  const data = {
+    sales: [
+      { product: 'Dia filtrado', category: 'Teste', quantity: 3, revenue: 3000, cost: 1200, date: '2026-06-15', shift: 'Manha', paymentMethod: 'Dinheiro' },
+      { product: 'Fora do dia', category: 'Teste', quantity: 9, revenue: 9000, cost: 3000, date: '2026-06-16', shift: 'Manha', paymentMethod: 'Dinheiro' },
+    ],
+    losses: [
+      { product: 'Dia filtrado', reason: 'Expiracao', quantity: 1, value: 100, date: '2026-06-15', shift: 'Manha' },
+      { product: 'Fora do dia', reason: 'Expiracao', quantity: 1, value: 900, date: '2026-06-16', shift: 'Manha' },
+    ],
+    expenses: [
+      { category: 'Servicos', description: 'Dia filtrado', value: 250, date: '2026-06-15', status: 'Paga' },
+      { category: 'Servicos', description: 'Fora do dia', value: 800, date: '2026-06-16', status: 'Paga' },
+    ],
+  };
+  const filters = {
+    startDate: '2026-06-15',
+    endDate: '2026-06-15',
+  };
+
+  const summary = buildReportData('resumo-executivo', data, filters);
+  const details = buildReportData('vendas-detalhadas', data, filters);
+
+  assert.equal(summary.totals.totalRevenue, details.totals.revenue);
+  assert.equal(summary.kpis.find((kpi) => kpi.key === 'transactions').value, details.totals.quantity);
+  assert.equal(summary.totals.losses, 100);
+  assert.equal(summary.totals.expenses, 250);
+});
+
 test('buildReportData generates a financial report for the requested month', () => {
   const finance = buildReportData('demonstrativo-financeiro', reportData, {
     startDate: '2026-06-01',
