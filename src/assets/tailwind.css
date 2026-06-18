@@ -2257,32 +2257,11 @@ tr:nth-child(even) td {
 }
 
 .report-center {
-  gap: 16px;
-}
-
-.report-workbar {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(130px, 0.72fr)) minmax(150px, 0.8fr) minmax(170px, 0.9fr) auto;
-  gap: 10px;
-  align-items: end;
-}
-
-.report-workbar label {
   min-width: 0;
-}
-
-.report-workbar label span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.report-workbar select,
-.report-workbar input {
-  min-height: 42px;
-}
-
-.report-search {
-  width: 100%;
+  max-height: calc(100vh - 80px);
+  gap: 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .report-center-layout {
@@ -2296,7 +2275,8 @@ tr:nth-child(even) td {
   display: grid;
   gap: 18px;
   max-height: calc(100vh - 210px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .report-catalog section {
@@ -2378,6 +2358,28 @@ tr:nth-child(even) td {
   color: var(--muted);
 }
 
+.report-period-control {
+  width: max-content;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(132px, 160px));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.report-period-control label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.report-period-control input {
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
 .report-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2385,25 +2387,49 @@ tr:nth-child(even) td {
   gap: 8px;
 }
 
-.report-comparison-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.report-comparison-strip span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  background: #fff;
-}
-
 .report-table-panel {
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+.report-table-panel table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.report-table-panel th,
+.report-table-panel td {
+  padding: 6px 8px;
+  overflow-wrap: anywhere;
+}
+
+.report-summary-metrics {
+  gap: 8px;
+}
+
+.report-summary-metrics .standard-metric {
+  min-height: 78px;
+  padding: 10px 12px;
+}
+
+.report-summary-metrics .standard-metric > span {
+  min-width: 42px;
+  height: 42px;
+}
+
+.report-summary-metrics .standard-metric svg {
+  width: 22px;
+  height: 22px;
+}
+
+.report-summary-metrics .standard-metric h2 {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.report-summary-metrics .standard-metric strong {
+  font-size: 18px;
 }
 
 .report-preview-modal {
@@ -2425,8 +2451,8 @@ tr:nth-child(even) td {
   background: #fff;
   box-shadow: 0 16px 48px rgb(0 0 0 / 22%);
   font-family: "Segoe UI", Arial, Helvetica, sans-serif;
-  font-size: 12px;
-  line-height: 1.28;
+  font-size: 9px;
+  line-height: 1.2;
   letter-spacing: 0;
   print-color-adjust: exact;
 }
@@ -2450,12 +2476,7 @@ tr:nth-child(even) td {
 .report-a4-logo {
   width: 64px;
   height: 64px;
-  display: grid;
-  place-items: center;
-  border: 2px solid #111;
-  border-radius: 8px;
-  font-size: 24px;
-  font-weight: 700;
+  object-fit: contain;
 }
 
 .report-a4-company h1,
@@ -2474,6 +2495,13 @@ tr:nth-child(even) td {
 .report-a4-footer span {
   display: block;
   margin: 2px 0;
+}
+
+.invoice-a4-company-text,
+.report-a4-company-text {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .report-a4-document-box {
@@ -2495,44 +2523,24 @@ tr:nth-child(even) td {
   font-style: normal;
 }
 
-.report-a4-filters,
-.report-a4-comparison,
-.report-a4-kpis {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.report-a4-filters span,
-.report-a4-comparison span,
-.report-a4-kpis span {
-  display: grid;
-  gap: 3px;
-  min-height: 48px;
-  padding: 8px;
-  border: 1px solid #d2d2d2;
-  background: #f7f7f7;
-}
-
-.report-a4-filters strong,
-.report-a4-comparison strong,
-.report-a4-kpis strong {
-  color: #111;
-  font-size: 12px;
+.report-a4-data-title {
+  margin: 10px 0 5px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .report-a4-table {
   width: 100%;
-  margin-top: 14px;
+  margin-top: 0;
   border-collapse: collapse;
   table-layout: fixed;
   border-block: 2px solid #111;
+  font-size: 8px;
 }
 
 .report-a4-table th,
 .report-a4-table td {
-  padding: 5px 6px;
+  padding: 3px 4px;
   border-block: 1px solid #d2d2d2;
   vertical-align: top;
   word-break: break-word;
@@ -2544,6 +2552,10 @@ tr:nth-child(even) td {
   border-bottom: 2px solid #111;
   font-weight: 700;
   text-align: left;
+}
+
+.report-a4-table thead {
+  display: table-header-group;
 }
 
 .report-a4-table tbody tr:nth-child(even) td {
@@ -2589,6 +2601,22 @@ tr:nth-child(even) td {
   padding: 16px;
   border: 0;
   text-align: left;
+}
+
+.settings-document-header-field {
+  grid-column: span 2;
+  display: grid;
+  gap: 6px;
+}
+
+.settings-document-header-field textarea {
+  min-height: 180px;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.settings-document-logo {
+  align-self: stretch;
 }
 
 .settings-card > span {
@@ -4676,11 +4704,18 @@ button :is(strong, b) {
   border-bottom: 3px solid #111;
 }
 
+.invoice-a4-company {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
 .invoice-a4-company img {
   max-width: 90px;
   max-height: 70px;
   object-fit: contain;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .invoice-a4-company h1,
@@ -5096,11 +5131,7 @@ button :is(strong, b) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .report-workbar,
-  .report-catalog,
-  .report-a4-filters,
-  .report-a4-comparison,
-  .report-a4-kpis {
+  .report-catalog {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -5144,13 +5175,14 @@ button :is(strong, b) {
     grid-template-columns: 1fr;
   }
 
-  .report-workbar,
   .report-catalog,
   .report-a4-header,
-  .report-a4-company,
-  .report-a4-filters,
-  .report-a4-comparison,
-  .report-a4-kpis {
+  .report-a4-company {
+    grid-template-columns: 1fr;
+  }
+
+  .report-period-control {
+    width: 100%;
     grid-template-columns: 1fr;
   }
 

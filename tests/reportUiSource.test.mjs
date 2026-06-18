@@ -43,11 +43,16 @@ test('report center and print styles are defined', async () => {
   const css = await readFile('src/assets/tailwind.css', 'utf8');
 
   assert.match(css, /\.report-center/);
-  assert.match(css, /\.report-workbar/);
+  assert.match(css, /\.report-center\s*\{[^}]*overflow-x:\s*hidden/s);
+  assert.match(css, /\.report-center\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(css, /\.report-period-control\s*\{[^}]*width:\s*max-content/s);
   assert.match(css, /\.report-catalog/);
   assert.match(css, /\.report-result-header/);
+  assert.match(css, /\.report-table-panel\s*\{[^}]*overflow-x:\s*hidden/s);
   assert.match(css, /\.reports-print-scope/);
   assert.match(css, /\.report-a4-page/);
+  assert.match(css, /\.report-a4-company-text\s*\{[^}]*white-space:\s*pre-line/s);
+  assert.match(css, /\.invoice-a4-company-text[^{]*\{[^}]*white-space:\s*pre-line/s);
   assert.match(css, /@media print/);
   assert.match(css, /body:has\(\.reports-print-scope\)/);
 });
