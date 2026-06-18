@@ -9,15 +9,13 @@ const deepFreeze = (value) => {
 const titleFromCode = (code) => code
   .split(/[_-]/)
   .filter(Boolean)
-  .map((word) => word.toUpperCase() === 'TPA'
-    ? 'TPA'
-    : `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+  .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
   .join(' ');
 
 const catalogOptions = (codes, system) => codes.map((code, index) => ({
   code,
   name: titleFromCode(code),
-  order: index + 1,
+  order: index,
   system,
 }));
 
@@ -33,8 +31,9 @@ const technical = (...codes) => ({
 
 const SETTING_DEFINITIONS = deepFreeze({
   'company.identity': {
+    group: 'company',
     type: 'object',
-    default: {
+    defaultValue: {
       pharmacyName: 'Sistema de Farmacia',
       taxId: '',
       address: '',
@@ -43,11 +42,12 @@ const SETTING_DEFINITIONS = deepFreeze({
       logoDataUrl: '',
     },
   },
-  'documents.headerText': { type: 'text', default: 'Sistema de Farmacia' },
-  'documents.currency': { type: 'text', default: 'AKZ' },
+  'documents.headerText': { group: 'documents', type: 'text', defaultValue: 'Sistema de Farmacia' },
+  'documents.currency': { group: 'documents', type: 'text', defaultValue: 'AKZ' },
   'documents.fiscal': {
+    group: 'documents',
     type: 'object',
-    default: {
+    defaultValue: {
       validationNumber: '999/AGT/2026',
       softwareName: 'KILSYSTEM',
       fiscalRegime: 'Regime: Exclusao',
@@ -58,27 +58,36 @@ const SETTING_DEFINITIONS = deepFreeze({
     },
   },
   'sales.defaultPaymentMethod': {
+    group: 'sales',
     type: 'catalog-code',
     catalog: 'payment_methods',
-    default: 'dinheiro',
+    defaultValue: 'dinheiro',
   },
-  'sales.defaultTaxRate': { type: 'number', min: 0, max: 100, default: 0 },
-  'sales.maxDiscount': { type: 'number', min: 0, default: 580.2 },
+  'sales.defaultTaxRate': {
+    group: 'sales', type: 'number', min: 0, max: 100, defaultValue: 0,
+  },
+  'sales.maxDiscount': { group: 'sales', type: 'number', min: 0, defaultValue: 580.2 },
   'sales.rounding': {
+    group: 'sales',
     type: 'enum',
     values: ['centimos', 'unidade'],
-    default: 'centimos',
+    defaultValue: 'centimos',
   },
-  'sales.finalConsumerLabel': { type: 'text', default: 'Consumidor final' },
-  'stock.lowStockThreshold': { type: 'number', min: 0, default: 25 },
-  'stock.expiryAlertDays': { type: 'number', min: 0, default: 30 },
-  'alerts.dashboardEnabled': { type: 'boolean', default: true },
-  'alerts.defaultMessage': { type: 'text', default: '' },
+  'sales.finalConsumerLabel': {
+    group: 'sales', type: 'text', defaultValue: 'Consumidor final',
+  },
+  'stock.lowStockThreshold': { group: 'stock', type: 'number', min: 0, defaultValue: 25 },
+  'stock.expiryAlertDays': { group: 'stock', type: 'number', min: 0, defaultValue: 30 },
+  'alerts.dashboardEnabled': { group: 'alerts', type: 'boolean', defaultValue: true },
+  'alerts.defaultMessage': { group: 'alerts', type: 'text', defaultValue: '' },
   'backup.options': {
+    group: 'backup',
     type: 'object',
-    default: { frequency: 'manual', folderPath: '', retentionCount: 7 },
+    defaultValue: { frequency: 'manual', folderPath: '', retentionCount: 7 },
   },
-  'migration.legacyLocalStorageVersion': { type: 'number', min: 0, default: 0 },
+  'migration.legacyLocalStorageVersion': {
+    group: 'migration', type: 'number', min: 0, defaultValue: 0,
+  },
 });
 
 const CATALOG_DEFINITIONS = deepFreeze({
