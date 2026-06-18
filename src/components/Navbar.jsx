@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BarChart3,
   Boxes,
+  CalendarClock,
   ChevronRight,
   ChevronLeft,
   Coins,
@@ -17,6 +18,7 @@ import BrandMark from './BrandMark';
 
 const menuItems = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge, permission: 'dashboard.ver' },
+  { id: 'operacao', label: 'Operacao', icon: CalendarClock, permission: 'operacao.ver' },
   { id: 'vendas', label: 'Vendas', icon: ReceiptText, permission: 'vendas.ver' },
   { id: 'estoque', label: 'Estoque', icon: Boxes, permission: 'estoque.ver' },
   { id: 'financeiro', label: 'Finanças', icon: Coins, permission: 'financeiro.ver' },

@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../auth/AuthContext';
 import { request } from '../services/ipcClient';
 
 const OperationContext = createContext(null);
@@ -20,6 +21,7 @@ function normalizeOperationState(nextState) {
 }
 
 export function OperationProvider({ children }) {
+  const { user, mustChangePassword } = useAuth();
   const [operationState, setOperationState] = useState(INITIAL_STATE);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -42,8 +44,15 @@ export function OperationProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    if (!user || mustChangePassword) {
+      setOperationState(INITIAL_STATE);
+      setError('');
+      setIsLoading(false);
+      return;
+    }
+
     refresh().catch(() => {});
-  }, [refresh]);
+  }, [mustChangePassword, refresh, user]);
 
   const openDay = useCallback(async (data) => {
     setError('');

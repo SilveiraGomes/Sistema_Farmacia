@@ -4,6 +4,7 @@ import { useAuth } from './auth/AuthContext';
 import Navbar from './components/Navbar';
 import ChangePassword from './components/ChangePassword';
 import Dashboard from './components/Dashboard';
+import Operacao from './components/Operacao';
 import Estoque from './components/Estoque';
 import Vendas from './components/Vendas';
 import Financeiro from './components/Financeiro';
@@ -24,6 +25,7 @@ import {
 
 const viewTitles = {
   dashboard: 'Dashboard',
+  operacao: 'Operacao',
   vendas: 'Vendas',
   estoque: 'Estoque',
   financeiro: 'Finanças',
@@ -36,6 +38,7 @@ const viewTitles = {
 
 const viewPermissions = {
   dashboard: 'dashboard.ver',
+  operacao: 'operacao.ver',
   vendas: 'vendas.ver',
   estoque: 'estoque.ver',
   financeiro: 'financeiro.ver',
@@ -151,6 +154,8 @@ function App() {
     switch (activeView) {
       case 'dashboard':
         return <Dashboard />;
+      case 'operacao':
+        return <Operacao />;
       case 'vendas':
         return <Vendas />;
       case 'estoque':

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, BarChart3, Boxes, MoreHorizontal, WalletCards } from 'lucide-react';
+import { AlertTriangle, BarChart3, Boxes, CalendarClock, MoreHorizontal, WalletCards } from 'lucide-react';
 import {
   buildDashboardMetrics,
   buildDashboardNotifications,
@@ -14,6 +14,7 @@ import {
   invoices,
   stockItems,
 } from '../data/pharmacyData.mjs';
+import { useOperation } from '../operation/OperationContext';
 
 const periodOptions = [
   { id: 'week', label: 'Semanal' },
@@ -23,6 +24,7 @@ const periodOptions = [
 ];
 
 function Dashboard() {
+  const operation = useOperation();
   const [selectedPeriod, setSelectedPeriod] = useState('month');
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const metrics = buildDashboardMetrics(invoices, stockItems);
@@ -93,7 +95,19 @@ function Dashboard() {
             value={metrics.pendingInvoices}
             detail="por concluir"
           />
+          <MetricCard
+            icon={<CalendarClock size={34} />}
+            title="Estado operacional"
+            value={operation.canOperate ? 'Aberto' : 'Bloqueado'}
+            detail={operation.shift?.nome || operation.message || 'Sem turno aberto'}
+          />
         </div>
+
+        {!operation.canOperate ? (
+          <div className="operation-blocked-banner dashboard-operation-alert">
+            {operation.message || 'Abra o dia e o turno antes de executar operacoes.'}
+          </div>
+        ) : null}
 
         <div className="dashboard-chart-panel panel">
           <div className="dashboard-panel-header">

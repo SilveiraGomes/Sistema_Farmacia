@@ -26,6 +26,7 @@ import {
   transactions,
 } from '../data/pharmacyData.mjs';
 import { confirmDelete } from '../utils/confirmations.mjs';
+import { useOperation } from '../operation/OperationContext';
 
 const periodOptions = [
   { value: 'month', label: 'Mes' },
@@ -60,6 +61,7 @@ const paymentIcons = {
 };
 
 function Financeiro() {
+  const operation = useOperation();
   const [showModal, setShowModal] = useState(false);
   const [rows, setRows] = useState(transactions);
   const [manualExpenses, setManualExpenses] = useState([]);
@@ -80,6 +82,7 @@ function Financeiro() {
   );
 
   function openManualEntryModal() {
+    if (!operation.canOperate) return;
     setManualEntry((current) => ({ ...manualEntryDefaults, date: referenceDate, type: current.type }));
     setShowModal(true);
   }
@@ -89,6 +92,7 @@ function Financeiro() {
   }
 
   function saveManualEntry() {
+    if (!operation.canOperate) return;
     const value = Number(manualEntry.value);
     if (!Number.isFinite(value) || value <= 0 || !manualEntry.description.trim()) return;
 
@@ -179,6 +183,12 @@ function Financeiro() {
           ))}
         </select>
       </div>
+
+      {!operation.canOperate ? (
+        <div className="operation-blocked-banner finance-operation-block">
+          {operation.message || 'Abra o dia e o turno antes de lancar movimentos financeiros.'}
+        </div>
+      ) : null}
 
       <div className="standard-metrics finance-metrics">
         <Metric title="Receita Total" value={formatKwanza(overview.totals.revenue)} tone="green" icon={ArrowUpCircle} />
@@ -318,7 +328,7 @@ function Financeiro() {
         <div className="panel-title-row">
           <h2>Movimentos Financeiros</h2>
           <div className="stock-toolbar-actions">
-            <button type="button" onClick={openManualEntryModal}><PlusCircle size={17} /> Novo Lancamento</button>
+            <button type="button" onClick={openManualEntryModal} disabled={!operation.canOperate}><PlusCircle size={17} /> Novo Lancamento</button>
             <button type="button"><Download size={17} /> Exportar</button>
           </div>
         </div>
@@ -415,7 +425,7 @@ function Financeiro() {
                 type="button"
                 className="primary-button"
                 onClick={saveManualEntry}
-                disabled={!manualEntry.description.trim() || !Number(manualEntry.value)}
+                disabled={!operation.canOperate || !manualEntry.description.trim() || !Number(manualEntry.value)}
               >
                 Guardar
               </button>

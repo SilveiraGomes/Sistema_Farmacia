@@ -52,6 +52,7 @@ import {
 import { buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
 import { getStoredInvoiceA4Settings } from '../data/invoiceSettings.mjs';
 import { confirmDelete } from '../utils/confirmations.mjs';
+import { useOperation } from '../operation/OperationContext';
 import InvoiceA4 from './InvoiceA4';
 
 const paymentMethods = [
@@ -83,6 +84,7 @@ const initialHeldSales = invoices
   }));
 
 function Vendas() {
+  const operation = useOperation();
   const [activeCategory, setActiveCategory] = useState(null);
   const [categoryOffset, setCategoryOffset] = useState(0);
   const [cart, setCart] = useState(initialCart);
@@ -119,6 +121,7 @@ function Vendas() {
   });
 
   function holdSale() {
+    if (!operation.canOperate) return;
     if (!cart.length) return;
 
     const invoiceNumber = `FAT${String(heldSales.length + 27).padStart(3, '0')}/26`;
@@ -178,6 +181,7 @@ function Vendas() {
   }
 
   function choosePaymentMethod(mode) {
+    if (!operation.canOperate) return;
     if (!cart.length) return;
 
     if (mode === 'Dinheiro') {
@@ -195,6 +199,7 @@ function Vendas() {
   }
 
   function finalizeSale(paymentMethod = 'Dinheiro', checkoutData = checkout) {
+    if (!operation.canOperate) return;
     if (!cart.length || !checkoutData.canFinalize) return;
 
     const document = buildFinalizedSaleDocument({
@@ -222,6 +227,12 @@ function Vendas() {
   return (
     <section className="sales-screen">
       <div className="sales-main">
+        {!operation.canOperate ? (
+          <div className="operation-blocked-banner sales-operation-block">
+            {operation.message || 'Abra o dia e o turno antes de vender.'}
+          </div>
+        ) : null}
+
         <div className="category-carousel">
           <button className="circle-action" type="button" aria-label="Categoria anterior" onClick={() => rotateCategories(-1)}>
             <ChevronLeft size={20} />
@@ -272,6 +283,7 @@ function Vendas() {
                 key={product.id}
                 className="product-card"
                 type="button"
+                disabled={!operation.canOperate}
                 onClick={() => setCart((current) => addCartItem(current, product))}
               >
                 <ProductIllustration tone={product.imageTone} />
@@ -289,7 +301,7 @@ function Vendas() {
         </div>
 
         <div className="sales-actions">
-          <button type="button" onClick={holdSale} className="soft-button">
+          <button type="button" onClick={holdSale} className="soft-button" disabled={!operation.canOperate}>
             <Wallet size={18} />
             Colocar em Espera
           </button>
@@ -309,6 +321,7 @@ function Vendas() {
             setReceived={setReceived}
             onBack={() => setShowCheckout(false)}
             onFinalize={() => finalizeSale('Dinheiro', checkout)}
+            canOperate={operation.canOperate}
           />
         ) : (
           <InvoiceDetails
@@ -325,6 +338,8 @@ function Vendas() {
             }}
             onClient={openClientPicker}
             onPaymentMethod={choosePaymentMethod}
+            canOperate={operation.canOperate}
+            operationMessage={operation.message}
           />
         )}
       </aside>
@@ -431,6 +446,8 @@ function InvoiceDetails({
   onChangeQuantity,
   onClient,
   onPaymentMethod,
+  canOperate,
+  operationMessage,
 }) {
   return (
     <>
@@ -489,10 +506,10 @@ function InvoiceDetails({
               key={method.id}
               type="button"
               onClick={() => onPaymentMethod(method.id)}
-              disabled={!cart.length}
+              disabled={!canOperate || !cart.length}
               aria-label={`Pagar com ${method.label}`}
               data-tooltip={method.label}
-              title={method.label}
+              title={!canOperate ? operationMessage : method.label}
             >
               <method.icon size={30} />
             </button>
@@ -626,6 +643,7 @@ function CheckoutPanel({
   setReceived,
   onBack,
   onFinalize,
+  canOperate,
 }) {
   function pressKey(key) {
     setReceived((current) => appendReceivedDigit(current, key));
@@ -663,7 +681,7 @@ function CheckoutPanel({
         ))}
       </div>
 
-      <button type="button" className="checkout-finalize" disabled={!checkout.canFinalize} onClick={onFinalize}>
+      <button type="button" className="checkout-finalize" disabled={!canOperate || !checkout.canFinalize} onClick={onFinalize}>
         <Banknote size={22} />
         <span>Finalizar</span>
         <CheckCircle2 size={22} />
