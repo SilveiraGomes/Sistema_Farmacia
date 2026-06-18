@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import {
   CRITICAL_STOCK_STATUSES,
   REPORT_CATALOG,
+  buildReportCsv,
   buildReportData,
+  buildReportExportRows,
 } from '../src/data/reports.mjs';
 import {
   clients,
@@ -233,4 +235,35 @@ test('buildReportData marks operation as blocked when the day is open without a 
   assert.equal(operation.rows[0].status, 'Bloqueado');
   assert.equal(operation.rows[0].shift, '');
   assert.equal(operation.rows[0].canOperate, false);
+});
+
+test('buildReportExportRows formats rows using report column labels', () => {
+  const report = buildReportData('vendas-detalhadas', reportData, {
+    startDate: '2026-06-15',
+    endDate: '2026-06-15',
+  });
+
+  const rows = buildReportExportRows(report);
+
+  assert.equal(rows[0].Produto, 'C-12 Plus');
+  assert.equal(rows[0].Receita, '7620.9');
+  assert.ok(Object.hasOwn(rows[0], 'Pagamento'));
+});
+
+test('buildReportCsv exports semicolon CSV with BOM and escaped values', () => {
+  const csv = buildReportCsv({
+    title: 'Teste',
+    columns: [
+      { key: 'name', label: 'Nome' },
+      { key: 'note', label: 'Nota' },
+      { key: 'value', label: 'Valor' },
+    ],
+    rows: [
+      { name: 'Produto; Especial', note: 'Linha "A"\nLinha B', value: 1200 },
+    ],
+  });
+
+  assert.ok(csv.startsWith('\uFEFF'));
+  assert.match(csv, /^﻿Nome;Nota;Valor/m);
+  assert.match(csv, /"Produto; Especial";"Linha ""A"" Linha B";1200/);
 });

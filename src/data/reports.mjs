@@ -98,6 +98,25 @@ export function buildReportData(reportId, data = {}, filters = {}) {
   return builders[definition.id](definition, normalizeData(data), filters);
 }
 
+export function buildReportExportRows(report) {
+  const columns = report.columns ?? [];
+
+  return (report.rows ?? []).map((row) =>
+    columns.reduce((output, column) => {
+      output[column.label] = serializeCellValue(row[column.key]);
+      return output;
+    }, {}));
+}
+
+export function buildReportCsv(report) {
+  const columns = report.columns ?? [];
+  const header = columns.map((column) => escapeCsvCell(column.label)).join(';');
+  const body = (report.rows ?? []).map((row) =>
+    columns.map((column) => escapeCsvCell(serializeCellValue(row[column.key]))).join(';'));
+
+  return `\uFEFF${[header, ...body].join('\n')}`;
+}
+
 function buildExecutiveSummaryReport(definition, data, filters) {
   const referenceDate = resolveReferenceDate(filters);
   const overview = buildReportsOverview({
@@ -488,4 +507,16 @@ function todayLocalDateKey() {
   const day = String(date.getDate()).padStart(2, '0');
 
   return `${year}-${month}-${day}`;
+}
+
+function serializeCellValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return String(value);
+  return String(value).replace(/\r?\n/g, ' ');
+}
+
+function escapeCsvCell(value) {
+  const text = String(value ?? '');
+  if (!/[;"\r\n]/.test(text)) return text;
+  return `"${text.replace(/"/g, '""')}"`;
 }
