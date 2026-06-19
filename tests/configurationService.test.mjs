@@ -29,7 +29,11 @@ describe('configurationService', () => {
       senha_hash: 'test-only',
       nome_completo: 'Configuration Admin',
     });
-    service = createConfigurationService({ db, models });
+    service = createConfigurationService({
+      db,
+      models,
+      now: () => new Date('2026-06-19T00:00:00.000Z'),
+    });
   });
 
   afterEach(async () => {
@@ -70,7 +74,7 @@ describe('configurationService', () => {
     assert.ok(snapshot.settings.sales.defaultTaxRate.updatedAt);
     assert.deepEqual(
       Object.keys(snapshot.catalogs.payment_methods[0]).sort(),
-      ['active', 'code', 'id', 'metadata', 'name', 'order', 'system', 'version'].sort(),
+      ['active', 'code', 'id', 'metadata', 'metadataReadable', 'name', 'order', 'system', 'version'].sort(),
     );
     assert.equal(snapshot.definitions.catalogs.payment_methods.editable, true);
     assert.equal(snapshot.definitions.catalogs.document_types.editable, false);
@@ -89,6 +93,24 @@ describe('configurationService', () => {
     const snapshot = await service.getSnapshot();
     assert.equal(snapshot.settings.sales.defaultTaxRate.value, 0);
     assert.equal(snapshot.settings.sales.defaultTaxRate.readable, false);
+  });
+
+  test('getSnapshot falls back for valid JSON with the wrong semantic type and invalid metadata', async () => {
+    await service.seedDefaults();
+    await models.ConfiguracaoSistema.update(
+      { valor_json: '"not-a-number"' },
+      { where: { chave: 'sales.defaultTaxRate' } },
+    );
+    await models.OpcaoCatalogo.update(
+      { metadados_json: '[]' },
+      { where: { catalogo: 'payment_methods', codigo: 'dinheiro' } },
+    );
+
+    const snapshot = await service.getSnapshot();
+    assert.equal(snapshot.settings.sales.defaultTaxRate.value, 0);
+    assert.equal(snapshot.settings.sales.defaultTaxRate.readable, false);
+    assert.deepEqual(snapshot.catalogs.payment_methods[0].metadata, {});
+    assert.equal(snapshot.catalogs.payment_methods[0].metadataReadable, false);
   });
 
   test('updateSection updates atomically, increments versions and audits old/new values', async () => {
@@ -127,17 +149,22 @@ describe('configurationService', () => {
     assert.equal(await models.AuditoriaConfiguracao.count(), 0);
   });
 
-  test('updateSection validates all values before committing and rolls back every key', async () => {
+  test('updateSection rolls back setting changes and audits after a mid-transaction failure', async () => {
     await service.seedDefaults();
-    await assert.rejects(
-      service.updateSection({
+    const originalCreate = models.AuditoriaConfiguracao.create;
+    models.AuditoriaConfiguracao.create = async () => {
+      throw new Error('injected audit failure');
+    };
+    try {
+      await assert.rejects(service.updateSection({
         actorUserId: actor.id,
         section: 'sales',
-        values: { 'sales.defaultTaxRate': 14, 'sales.maxDiscount': -1 },
+        values: { 'sales.defaultTaxRate': 14, 'sales.maxDiscount': 10 },
         expectedVersions: { 'sales.defaultTaxRate': 1, 'sales.maxDiscount': 1 },
-      }),
-      (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
-    );
+      }), /injected audit failure/);
+    } finally {
+      models.AuditoriaConfiguracao.create = originalCreate;
+    }
     const rows = await models.ConfiguracaoSistema.findAll({
       where: { chave: ['sales.defaultTaxRate', 'sales.maxDiscount'] },
       order: [['chave', 'ASC']],
@@ -179,5 +206,87 @@ describe('configurationService', () => {
     assert.equal(fiscal.versao, 3);
     const audits = await models.AuditoriaConfiguracao.findAll({ where: { acao: 'reserve' } });
     assert.equal(audits.length, 2);
+  });
+
+  test('reserveNextDocumentNumber resets the sequence on an injected year rollover', async () => {
+    service = createConfigurationService({
+      db,
+      models,
+      now: () => new Date('2027-01-02T00:00:00.000Z'),
+    });
+    await service.seedDefaults();
+    const fiscal = await models.ConfiguracaoSistema.findOne({ where: { chave: 'documents.fiscal' } });
+    const configured = JSON.parse(fiscal.valor_json);
+    configured.series.factura = { prefix: 'FAT', year: '26', nextNumber: 99, padding: 3 };
+    await fiscal.update({ valor_json: JSON.stringify(configured) });
+
+    assert.equal(
+      await service.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
+      'FAT001/27',
+    );
+    await fiscal.reload();
+    assert.deepEqual(JSON.parse(fiscal.valor_json).series.factura, {
+      prefix: 'FAT', year: '27', nextNumber: 2, padding: 3,
+    });
+  });
+
+  test('reserveNextDocumentNumber rejects unsafe series fields and overflow', async () => {
+    await service.seedDefaults();
+    const fiscal = await models.ConfiguracaoSistema.findOne({ where: { chave: 'documents.fiscal' } });
+    const invalidSeries = [
+      { prefix: 'fat', year: '26', nextNumber: 1, padding: 3 },
+      { prefix: 'FAT/EVIL', year: '26', nextNumber: 1, padding: 3 },
+      { prefix: 'FAT', year: '2026', nextNumber: 1, padding: 3 },
+      { prefix: 'FAT', year: '26', nextNumber: Number.MAX_SAFE_INTEGER, padding: 3 },
+      { prefix: 'FAT', year: '26', nextNumber: Number.POSITIVE_INFINITY, padding: 3 },
+    ];
+
+    for (const series of invalidSeries) {
+      const configured = JSON.parse(fiscal.valor_json);
+      configured.series.factura = series;
+      await fiscal.update({ valor_json: JSON.stringify(configured) });
+      await assert.rejects(
+        service.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
+      );
+    }
+  });
+
+  test('two service instances reserve distinct numbers concurrently', async () => {
+    const secondService = createConfigurationService({
+      db,
+      models,
+      now: () => new Date('2026-06-19T00:00:00.000Z'),
+    });
+    await service.seedDefaults();
+
+    const numbers = await Promise.all([
+      service.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
+      secondService.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
+    ]);
+
+    assert.deepEqual(numbers, ['FAT001/26', 'FAT002/26']);
+  });
+
+  test('the shared mutation queue recovers after failed update and reservation operations', async () => {
+    await service.seedDefaults();
+    await assert.rejects(
+      service.updateSection({
+        actorUserId: actor.id,
+        section: 'sales',
+        values: { 'sales.defaultTaxRate': 14 },
+        expectedVersions: { 'sales.defaultTaxRate': 0 },
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+    );
+    await assert.rejects(
+      service.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'unsupported' }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
+    );
+
+    assert.equal(
+      await service.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
+      'FAT001/26',
+    );
   });
 });
