@@ -400,11 +400,11 @@ describe('configurationService', () => {
     assert.equal(updated.code, 'multicaixa-express');
     assert.equal(updated.name, 'Multicaixa Xpress');
     const inactive = await service.deactivateCatalogOption({
-      actorUserId: actor.id, optionId: created.id, expectedVersion: updated.version,
+      actorUserId: actor.id, optionId: created.id,
     });
     assert.equal(inactive.active, false);
     const active = await service.activateCatalogOption({
-      actorUserId: actor.id, optionId: created.id, expectedVersion: inactive.version,
+      actorUserId: actor.id, optionId: created.id,
     });
     assert.equal(active.active, true);
     assert.deepEqual(
@@ -596,7 +596,6 @@ describe('configurationService', () => {
       actorUserId: actor.id,
       catalogKey: 'payment_methods',
       optionIds: reversedIds,
-      expectedVersions,
     });
     assert.deepEqual(ordered.map((option) => option.id), reversedIds);
     assert.equal(ordered.find((option) => option.id === created.id).order, 0);
@@ -655,22 +654,19 @@ describe('configurationService', () => {
     );
   });
 
-  test('catalog mutations require complete current optimistic versions', async () => {
+  test('catalog mutations support approved signatures and reject optional stale versions', async () => {
     await service.seedDefaults();
     const created = await service.createCatalogOption({
       actorUserId: actor.id, catalogKey: 'payment_methods', data: { name: 'Cheque' },
     });
     const auditCount = await models.AuditoriaConfiguracao.count();
 
-    for (const request of [
-      { actorUserId: actor.id, optionId: created.id },
-      { actorUserId: actor.id, optionId: created.id, expectedVersion: 99 },
-    ]) {
-      await assert.rejects(
-        service.deactivateCatalogOption(request),
-        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
-      );
-    }
+    await assert.rejects(
+      service.deactivateCatalogOption({
+        actorUserId: actor.id, optionId: created.id, expectedVersion: 99,
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+    );
     for (const request of [
       { actorUserId: actor.id, optionId: created.id, data: { name: 'Cheque Bancário' } },
       {
@@ -687,43 +683,49 @@ describe('configurationService', () => {
     }
 
     const inactive = await service.deactivateCatalogOption({
-      actorUserId: actor.id, optionId: created.id, expectedVersion: created.version,
+      actorUserId: actor.id, optionId: created.id,
     });
-    for (const request of [
-      { actorUserId: actor.id, optionId: inactive.id },
-      { actorUserId: actor.id, optionId: inactive.id, expectedVersion: created.version },
-    ]) {
-      await assert.rejects(
-        service.activateCatalogOption(request),
-        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
-      );
-    }
+    await assert.rejects(
+      service.activateCatalogOption({
+        actorUserId: actor.id, optionId: inactive.id, expectedVersion: created.version,
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+    );
+    const active = await service.activateCatalogOption({
+      actorUserId: actor.id, optionId: inactive.id,
+    });
     const persisted = await models.OpcaoCatalogo.findByPk(created.id);
-    assert.deepEqual([persisted.nome, persisted.ativo, persisted.versao], ['Cheque', false, 2]);
-    assert.equal(await models.AuditoriaConfiguracao.count(), auditCount + 1);
+    assert.deepEqual([active.active, persisted.nome, persisted.ativo, persisted.versao], [
+      true, 'Cheque', true, 3,
+    ]);
+    assert.equal(await models.AuditoriaConfiguracao.count(), auditCount + 2);
   });
 
-  test('reorder rejects missing or stale version maps without partial changes', async () => {
+  test('reorder supports the approved signature and rejects an optional stale version map', async () => {
     await service.seedDefaults();
     const active = await service.listCatalog({ catalogKey: 'payment_methods' });
     const optionIds = active.map((option) => option.id).reverse();
     const expectedVersions = Object.fromEntries(active.map((option) => [option.id, option.version]));
     const before = active.map((option) => [option.id, option.order, option.version]);
 
-    for (const versions of [undefined, { ...expectedVersions, [active[0].id]: 99 }]) {
-      await assert.rejects(
-        service.reorderCatalogOptions({
-          actorUserId: actor.id,
-          catalogKey: 'payment_methods',
-          optionIds,
-          expectedVersions: versions,
-        }),
-        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
-      );
-    }
+    await assert.rejects(
+      service.reorderCatalogOptions({
+        actorUserId: actor.id,
+        catalogKey: 'payment_methods',
+        optionIds,
+        expectedVersions: { ...expectedVersions, [active[0].id]: 99 },
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+    );
     const after = await service.listCatalog({ catalogKey: 'payment_methods' });
     assert.deepEqual(after.map((option) => [option.id, option.order, option.version]), before);
     assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+
+    const reordered = await service.reorderCatalogOptions({
+      actorUserId: actor.id, catalogKey: 'payment_methods', optionIds,
+    });
+    assert.deepEqual(reordered.map((option) => option.id), optionIds);
+    assert.equal(await models.AuditoriaConfiguracao.count(), 1);
   });
 
   test('catalog metadata rejects values that are not plain finite JSON data', async () => {

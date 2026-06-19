@@ -529,10 +529,12 @@ function createConfigurationService({
 
   const changeCatalogActivation = (action, active) => (request = {}) => serializeMutation(async () => {
     const { actorUserId, optionId, expectedVersion } = request;
-    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) throw conflictError();
+    if (expectedVersion !== undefined
+      && (!Number.isInteger(expectedVersion) || expectedVersion < 1)) throw conflictError();
     return db.transaction(async (transaction) => {
       const row = await findCatalogOption(optionId, transaction);
-      if (row.versao !== expectedVersion) throw conflictError();
+      if (expectedVersion !== undefined && row.versao !== expectedVersion) throw conflictError();
+      const mutationVersion = row.versao;
       if (!active) await assertCanDeactivate(row, transaction);
       else {
         assertEditableOption(row);
@@ -543,7 +545,7 @@ function createConfigurationService({
         ativo: active,
         versao: row.versao + 1,
         atualizado_por_usuario_id: actorUserId ?? null,
-      }, { where: { id: row.id, versao: expectedVersion }, transaction });
+      }, { where: { id: row.id, versao: mutationVersion }, transaction });
       if (updated !== 1) throw conflictError();
       await row.reload({ transaction });
       const after = catalogOptionValue(row);
@@ -561,8 +563,9 @@ function createConfigurationService({
     if (!Array.isArray(optionIds) || optionIds.some((id) => !Number.isInteger(id) || id < 1)) {
       throw validationError('Ordem do catálogo inválida.');
     }
-    if (!expectedVersions || typeof expectedVersions !== 'object'
-      || Array.isArray(expectedVersions)) throw conflictError();
+    if (expectedVersions !== undefined
+      && (!expectedVersions || typeof expectedVersions !== 'object'
+        || Array.isArray(expectedVersions))) throw conflictError();
     return db.transaction(async (transaction) => {
       const activeRows = await OpcaoCatalogo.findAll({
         where: { catalogo: catalogKey, ativo: true }, transaction,
@@ -573,11 +576,16 @@ function createConfigurationService({
         || expected.some((id, index) => id !== received[index])) {
         throw validationError('A ordem deve conter exatamente todas as opções ativas, uma vez cada.');
       }
-      const versionKeys = Object.keys(expectedVersions);
-      if (versionKeys.length !== activeRows.length
-        || activeRows.some((row) => !Object.prototype.hasOwnProperty.call(expectedVersions, row.id)
-          || !Number.isInteger(expectedVersions[row.id])
-          || expectedVersions[row.id] !== row.versao)) throw conflictError();
+      if (expectedVersions !== undefined) {
+        const versionKeys = Object.keys(expectedVersions);
+        if (versionKeys.length !== activeRows.length
+          || activeRows.some((row) => !Object.prototype.hasOwnProperty.call(expectedVersions, row.id)
+            || !Number.isInteger(expectedVersions[row.id])
+            || expectedVersions[row.id] !== row.versao)) throw conflictError();
+      }
+      const mutationVersions = expectedVersions || Object.fromEntries(
+        activeRows.map((row) => [row.id, row.versao]),
+      );
       if (activeRows.some((row) => row.sistema)) {
         throw codedError(
           CONFIGURATION_ERROR_CODES.PROTECTED,
@@ -593,7 +601,7 @@ function createConfigurationService({
           versao: row.versao + 1,
           atualizado_por_usuario_id: actorUserId ?? null,
         }, {
-          where: { id: row.id, versao: expectedVersions[row.id] }, transaction,
+          where: { id: row.id, versao: mutationVersions[row.id] }, transaction,
         });
         if (updated !== 1) throw conflictError();
         await row.reload({ transaction });
