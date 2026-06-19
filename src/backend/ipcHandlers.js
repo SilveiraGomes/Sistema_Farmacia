@@ -4,6 +4,20 @@ const userService = require("./services/userService");
 const profileService = require("./services/profileService");
 const operationService = require("./services/operationService");
 const { assertPermission } = require("./services/authorizationService");
+const {
+  CONFIGURATION_ERROR_CODES,
+  createConfigurationService,
+} = require("./services/configurationService");
+
+const CONFIGURATION_SAFE_ERROR_MESSAGES = Object.freeze({
+  [CONFIGURATION_ERROR_CODES.VALIDATION]: "Dados de configuracao invalidos.",
+  [CONFIGURATION_ERROR_CODES.CONFLICT]: "A configuracao foi alterada por outra sessao.",
+  [CONFIGURATION_ERROR_CODES.NOT_FOUND]: "Configuracao nao encontrada.",
+  [CONFIGURATION_ERROR_CODES.CORRUPT_DATA]: "Os dados de configuracao estao invalidos.",
+  [CONFIGURATION_ERROR_CODES.PROTECTED]: "Esta configuracao e protegida.",
+  [CONFIGURATION_ERROR_CODES.IN_USE]: "Esta configuracao esta em uso.",
+  [CONFIGURATION_ERROR_CODES.INVARIANT]: "A alteracao viola uma regra de configuracao.",
+});
 
 const SAFE_ERROR_MESSAGES = new Set([
   "Acao IPC desconhecida.",
@@ -27,6 +41,7 @@ const SAFE_ERROR_MESSAGES = new Set([
   "Permissoes invalidas.",
   "Chaves de permissao invalidas.",
   "Nao e possivel remover permissoes essenciais do Administrador.",
+  ...Object.values(CONFIGURATION_SAFE_ERROR_MESSAGES),
   ...operationService.SAFE_OPERATION_ERRORS,
 ]);
 
@@ -40,11 +55,12 @@ const SAFE_ERROR_CODES = new Set([
 function serializeError(error) {
   const code = error && error.code ? error.code : "IPC_REQUEST_FAILED";
   const message = error && error.message ? error.message : "";
+  const configurationMessage = CONFIGURATION_SAFE_ERROR_MESSAGES[code];
   const isSafeMessage = SAFE_ERROR_CODES.has(code) || SAFE_ERROR_MESSAGES.has(message)
     || message.startsWith("Permissoes desconhecidas:");
 
   return {
-    message: isSafeMessage ? message : "Erro ao processar requisicao.",
+    message: configurationMessage || (isSafeMessage ? message : "Erro ao processar requisicao."),
     code,
   };
 }
@@ -110,6 +126,7 @@ function buildRouteMap(overrides = {}) {
     userService,
     profileService,
     operationService,
+    configurationService: null,
     assertPermission,
     ...overrides,
   };
@@ -176,6 +193,34 @@ function buildRouteMap(overrides = {}) {
     )),
     "operation.closeShift": (data = {}) => withPermission(dependencies, "operacao.fechar_turno", (actorUserId) => (
       dependencies.operationService.closeShift({ actorUserId, data })
+    )),
+
+    "configuration.snapshot": () => withPermission(dependencies, "configuracoes.ver", () => (
+      dependencies.configurationService.getSnapshot()
+    )),
+    "configuration.updateSection": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
+      dependencies.configurationService.updateSection({ ...data, actorUserId })
+    )),
+    "configuration.importLegacy": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
+      dependencies.configurationService.importLegacySettings({ ...data, actorUserId })
+    )),
+    "configuration.document.reserveNumber": (data = {}) => withPermission(dependencies, "vendas.criar", (actorUserId) => (
+      dependencies.configurationService.reserveNextDocumentNumber({ ...data, actorUserId })
+    )),
+    "configuration.catalog.create": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
+      dependencies.configurationService.createCatalogOption({ ...data, actorUserId })
+    )),
+    "configuration.catalog.update": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
+      dependencies.configurationService.updateCatalogOption({ ...data, actorUserId })
+    )),
+    "configuration.catalog.reorder": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
+      dependencies.configurationService.reorderCatalogOptions({ ...data, actorUserId })
+    )),
+    "configuration.catalog.activate": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
+      dependencies.configurationService.activateCatalogOption({ ...data, actorUserId })
+    )),
+    "configuration.catalog.deactivate": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
+      dependencies.configurationService.deactivateCatalogOption({ ...data, actorUserId })
     )),
   };
 }
@@ -283,13 +328,20 @@ function registerLegacyRoutes(ipc, { Categoria, Subcategoria, Produto }, overrid
 
 function init(models, options = {}) {
   const ipc = options.ipcMain || ipcMain;
-  const routes = buildRouteMap();
+  const configurationService = options.configurationService
+    || (options.createConfigurationService || createConfigurationService)({ db: models.db, models });
+  const dependencies = {
+    configurationService,
+    ...(options.authService ? { authService: options.authService } : {}),
+    ...(options.assertPermission ? { assertPermission: options.assertPermission } : {}),
+  };
+  const routes = buildRouteMap(dependencies);
 
   if (typeof ipc.removeHandler === "function") {
     ipc.removeHandler("app:request");
   }
   ipc.handle("app:request", (_event, request) => handleAppRequest(routes, request));
-  registerLegacyRoutes(ipc, models);
+  registerLegacyRoutes(ipc, models, dependencies);
 }
 
 module.exports = {

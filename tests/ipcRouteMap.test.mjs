@@ -10,7 +10,7 @@ const {
   registerLegacyRoutes,
 } = require('../src/backend/ipcHandlers.js');
 
-test('buildRouteMap exposes auth, user, profile, and operation IPC actions', () => {
+test('buildRouteMap exposes auth, user, profile, operation, and configuration IPC actions', () => {
   const routes = buildRouteMap();
 
   const expectedActions = [
@@ -34,6 +34,15 @@ test('buildRouteMap exposes auth, user, profile, and operation IPC actions', () 
     'operation.closeDay',
     'operation.openShift',
     'operation.closeShift',
+    'configuration.snapshot',
+    'configuration.updateSection',
+    'configuration.importLegacy',
+    'configuration.document.reserveNumber',
+    'configuration.catalog.create',
+    'configuration.catalog.update',
+    'configuration.catalog.reorder',
+    'configuration.catalog.activate',
+    'configuration.catalog.deactivate',
   ];
 
   for (const action of expectedActions) {
@@ -429,8 +438,9 @@ test('init replaces existing app request handlers and legacy listeners', () => {
     Produto: {},
   };
 
-  init(models, { ipcMain: fakeIpcMain });
-  init(models, { ipcMain: fakeIpcMain });
+  const configurationService = {};
+  init(models, { ipcMain: fakeIpcMain, configurationService });
+  init(models, { ipcMain: fakeIpcMain, configurationService });
 
   assert.deepEqual(calls, [
     ['removeHandler', 'app:request'],
