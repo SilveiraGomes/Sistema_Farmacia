@@ -366,4 +366,222 @@ describe('configurationService', () => {
       'FAT001/26',
     );
   });
+
+  test('catalog CRUD normalizes names, preserves stable codes and audits mutations', async () => {
+    await service.seedDefaults();
+    const created = await service.createCatalogOption({
+      actorUserId: actor.id,
+      catalogKey: 'payment_methods',
+      data: { name: '  Multicáixa   Express ', metadata: { channel: 'app' } },
+    });
+    assert.deepEqual([created.code, created.name, created.active], [
+      'multicaixa-express', 'Multicáixa Express', true,
+    ]);
+
+    const updated = await service.updateCatalogOption({
+      actorUserId: actor.id,
+      optionId: created.id,
+      expectedVersion: created.version,
+      data: { name: 'Multicaixa Xpress', code: 'must-be-ignored', metadata: { channel: 'web' } },
+    });
+    assert.equal(updated.code, 'multicaixa-express');
+    assert.equal(updated.name, 'Multicaixa Xpress');
+    const inactive = await service.deactivateCatalogOption({
+      actorUserId: actor.id, optionId: created.id, expectedVersion: updated.version,
+    });
+    assert.equal(inactive.active, false);
+    const active = await service.activateCatalogOption({
+      actorUserId: actor.id, optionId: created.id, expectedVersion: inactive.version,
+    });
+    assert.equal(active.active, true);
+    assert.deepEqual(
+      (await models.AuditoriaConfiguracao.findAll({ order: [['id', 'ASC']] }))
+        .map((entry) => entry.acao),
+      ['create', 'update', 'deactivate', 'activate'],
+    );
+  });
+
+  test('catalog creation rejects normalized name collisions and semantic code reuse', async () => {
+    await service.seedDefaults();
+    await service.createCatalogOption({
+      actorUserId: actor.id, catalogKey: 'payment_methods', data: { name: 'Multicáixa Express' },
+    });
+    for (const name of ['multicaixa   express', 'MULTICÁIXA EXPRESS']) {
+      await assert.rejects(
+        service.createCatalogOption({ actorUserId: actor.id, catalogKey: 'payment_methods', data: { name } }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+      );
+    }
+    const row = await models.OpcaoCatalogo.findOne({
+      where: { catalogo: 'payment_methods', codigo: 'multicaixa-express' },
+    });
+    await row.update({ nome: 'Nome historicamente diferente', ativo: false });
+    await assert.rejects(
+      service.createCatalogOption({
+        actorUserId: actor.id, catalogKey: 'payment_methods', data: { name: 'Multicaixa Express' },
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+    );
+  });
+
+  test('technical and protected seed entries reject edits and deactivation', async () => {
+    await service.seedDefaults();
+    for (const [catalogo, codigo] of [['document_statuses', 'anulado'], ['payment_methods', 'dinheiro']]) {
+      const row = await models.OpcaoCatalogo.findOne({ where: { catalogo, codigo } });
+      if (catalogo === 'payment_methods') await row.update({ sistema: true });
+      await assert.rejects(
+        service.updateCatalogOption({
+          actorUserId: actor.id, optionId: row.id, expectedVersion: row.versao, data: { name: 'Outro' },
+        }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
+      );
+      await assert.rejects(
+        service.deactivateCatalogOption({ actorUserId: actor.id, optionId: row.id }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
+      );
+    }
+    assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+  });
+
+  test('deactivation protects the last payment method and the current default', async () => {
+    await service.seedDefaults();
+    const dinheiro = await models.OpcaoCatalogo.findOne({
+      where: { catalogo: 'payment_methods', codigo: 'dinheiro' },
+    });
+    await dinheiro.update({ sistema: false });
+    await assert.rejects(
+      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: dinheiro.id }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
+    );
+    await models.ConfiguracaoSistema.update(
+      { valor_json: JSON.stringify('credito') },
+      { where: { chave: 'sales.defaultPaymentMethod' } },
+    );
+    await models.OpcaoCatalogo.update(
+      { ativo: false },
+      { where: { catalogo: 'payment_methods' } },
+    );
+    await models.OpcaoCatalogo.update({ ativo: true }, { where: { id: dinheiro.id } });
+    await assert.rejects(
+      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: dinheiro.id }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.INVARIANT,
+    );
+  });
+
+  test('deactivation rejects an operational shift used by a currently open shift', async () => {
+    await service.seedDefaults();
+    const option = await models.OpcaoCatalogo.findOne({
+      where: { catalogo: 'operation_shifts', codigo: 'manha' },
+    });
+    await option.update({ sistema: false });
+    const day = await models.DiaOperacional.create({ data_operacional: '2026-06-19' });
+    await models.TurnoOperacional.create({
+      dia_operacional_id: day.id, nome: ' Manhã ', status: 'Aberto',
+    });
+    await assert.rejects(
+      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: option.id }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
+    );
+  });
+
+  test('reorder requires exactly the complete active set and persists deterministic order', async () => {
+    await service.seedDefaults();
+    const created = await service.createCatalogOption({
+      actorUserId: actor.id, catalogKey: 'payment_methods', data: { name: 'Voucher' },
+    });
+    const active = await service.listCatalog({ catalogKey: 'payment_methods' });
+    const reversedIds = active.map((option) => option.id).reverse();
+    for (const invalid of [reversedIds.slice(1), [...reversedIds, reversedIds[0]]]) {
+      await assert.rejects(
+        service.reorderCatalogOptions({
+          actorUserId: actor.id, catalogKey: 'payment_methods', optionIds: invalid,
+        }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
+      );
+    }
+    const ordered = await service.reorderCatalogOptions({
+      actorUserId: actor.id, catalogKey: 'payment_methods', optionIds: reversedIds,
+    });
+    assert.deepEqual(ordered.map((option) => option.id), reversedIds);
+    assert.equal(ordered.find((option) => option.id === created.id).order, 0);
+  });
+
+  test('catalog audit failure rolls back the mutation and audit', async () => {
+    await service.seedDefaults();
+    const originalCreate = models.AuditoriaConfiguracao.create;
+    models.AuditoriaConfiguracao.create = async () => { throw new Error('catalog audit failed'); };
+    try {
+      await assert.rejects(service.createCatalogOption({
+        actorUserId: actor.id, catalogKey: 'payment_methods', data: { name: 'Voucher' },
+      }), /catalog audit failed/);
+    } finally {
+      models.AuditoriaConfiguracao.create = originalCreate;
+    }
+    assert.equal(await models.OpcaoCatalogo.count({ where: { codigo: 'voucher' } }), 0);
+    assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+  });
+
+  test('legacy migration maps values, honors SQLite priority, deduplicates and is idempotent', async () => {
+    await service.seedDefaults();
+    const identity = await models.ConfiguracaoSistema.findOne({ where: { chave: 'company.identity' } });
+    const customIdentity = { ...JSON.parse(identity.valor_json), pharmacyName: 'SQLite Pharmacy' };
+    await identity.update({ valor_json: JSON.stringify(customIdentity), versao: 2 });
+
+    const first = await service.importLegacySettings({
+      actorUserId: actor.id,
+      migrationVersion: 1,
+      data: {
+        branding: { pharmacyName: 'Legacy Pharmacy', taxId: '5000', logoDataUrl: 'data:image/png;base64,AA==' },
+        invoiceA4: {
+          documentHeaderText: 'Legacy Pharmacy\nNIF: 5000',
+          validationNumber: '123/AGT/2026',
+          fiscalRegime: 'Regime Geral',
+        },
+        discoveredCatalogValues: {
+          payment_methods: ['TPA', ' tpa ', 'Multicáixa', 'MULTICAIXA'],
+        },
+      },
+    });
+    assert.deepEqual(first, { applied: true, skipped: false, migrationVersion: 1 });
+    const snapshot = await service.getSnapshot();
+    assert.equal(snapshot.settings.company.identity.value.pharmacyName, 'SQLite Pharmacy');
+    assert.equal(snapshot.settings.documents.headerText.value, 'Legacy Pharmacy\nNIF: 5000');
+    assert.equal(snapshot.settings.documents.fiscal.value.validationNumber, '123/AGT/2026');
+    assert.equal(snapshot.catalogs.payment_methods.filter((item) => item.code === 'tpa').length, 1);
+    assert.equal(snapshot.catalogs.payment_methods.filter((item) => item.code === 'multicaixa').length, 1);
+    assert.equal(snapshot.migrations.legacyLocalStoragePending, false);
+    const countBefore = await models.OpcaoCatalogo.count();
+    const second = await service.importLegacySettings({ migrationVersion: 1, data: {} });
+    assert.deepEqual(second, { applied: false, skipped: true, migrationVersion: 1 });
+    assert.equal(await models.OpcaoCatalogo.count(), countBefore);
+  });
+
+  test('legacy migration rolls back settings, catalogs, marker and audits on failure', async () => {
+    await service.seedDefaults();
+    const originalCreate = models.AuditoriaConfiguracao.create;
+    let calls = 0;
+    models.AuditoriaConfiguracao.create = async (...args) => {
+      calls += 1;
+      if (calls === 2) throw new Error('migration audit failed');
+      return originalCreate.call(models.AuditoriaConfiguracao, ...args);
+    };
+    try {
+      await assert.rejects(service.importLegacySettings({
+        actorUserId: actor.id,
+        migrationVersion: 1,
+        data: {
+          branding: { pharmacyName: 'Legacy Pharmacy' },
+          discoveredCatalogValues: { payment_methods: ['Voucher'] },
+        },
+      }), /migration audit failed/);
+    } finally {
+      models.AuditoriaConfiguracao.create = originalCreate;
+    }
+    const marker = await models.ConfiguracaoSistema.findOne({
+      where: { chave: 'migration.legacyLocalStorageVersion' },
+    });
+    assert.equal(marker.valor_json, '0');
+    assert.equal(await models.OpcaoCatalogo.count({ where: { codigo: 'voucher' } }), 0);
+    assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+  });
 });
