@@ -1,7 +1,12 @@
 const { Sequelize, DataTypes } = require("sequelize");
 const path = require("path");
 const { hashPassword } = require("./security/passwords");
-const { PERMISSIONS, DEFAULT_PROFILES, ADMINISTRATOR_PROFILE } = require("./services/permissionCatalog");
+const {
+  PERMISSIONS,
+  DEFAULT_PROFILES,
+  ADMINISTRATOR_PROFILE,
+  AUTHENTICATED_BASELINE_PERMISSIONS,
+} = require("./services/permissionCatalog");
 
 let sequelize = null;
 let models = null;
@@ -716,6 +721,15 @@ async function seedPermissionsAndProfiles() {
         perfil_id: perfil.id,
         permissao_id: permission.id,
       })), { ignoreDuplicates: true });
+    }
+
+    if (profile.nome !== ADMINISTRATOR_PROFILE) {
+      for (const permissionKey of AUTHENTICATED_BASELINE_PERMISSIONS) {
+        const baselinePermission = await Permissao.findOne({ where: { chave: permissionKey } });
+        await PerfilPermissao.findOrCreate({
+          where: { perfil_id: perfil.id, permissao_id: baselinePermission.id },
+        });
+      }
     }
   }
 

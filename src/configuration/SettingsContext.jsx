@@ -6,11 +6,11 @@ import { getStoredBranding } from '../data/branding.mjs';
 import { getStoredInvoiceA4Settings } from '../data/invoiceSettings.mjs';
 import { request } from '../services/ipcClient';
 import { createSafeDefaultSnapshot, filterCatalogOptions } from './catalogKeys.mjs';
+import { loadSettingsSnapshot } from './settingsLifecycle.mjs';
 
 const SettingsContext = createContext(null);
 const EMPTY_CATALOG_OPTIONS = Object.freeze([]);
 const LEGACY_MIGRATION_VERSION = 1;
-let legacyMigrationPromise = null;
 
 function errorMessage(error) {
   return error?.message || 'Nao foi possivel carregar as configuracoes.';
@@ -33,35 +33,15 @@ export function readLegacySettings() {
   };
 }
 
-async function migrateLegacyIfNeeded(snapshot) {
-  if (!snapshot?.migrations?.legacyLocalStoragePending) return snapshot;
-
-  if (!legacyMigrationPromise) {
-    legacyMigrationPromise = (async () => {
-      const legacyData = readLegacySettings();
-      const migrationResult = await request('configuration.importLegacy', {
-        migrationVersion: LEGACY_MIGRATION_VERSION,
-        data: legacyData,
-      });
-
-      if (migrationResult?.settings && migrationResult?.catalogs) return migrationResult;
-      return request('configuration.snapshot');
-    })().finally(() => {
-      legacyMigrationPromise = null;
-    });
-  }
-
-  return legacyMigrationPromise;
-}
-
 export function SettingsProvider({ children }) {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const requestGenerationRef = useRef(0);
+  const inFlightLoadRef = useRef(null);
   const [state, setState] = useState(() => ({
     snapshot: null,
     isLoading: Boolean(user),
     error: '',
-    readOnly: false,
+    readOnly: !hasPermission('configuracoes.editar'),
   }));
 
   const refresh = useCallback(async () => {
@@ -76,12 +56,25 @@ export function SettingsProvider({ children }) {
 
     setState((current) => ({ ...current, isLoading: true, error: '' }));
     try {
-      const loadedSnapshot = await request('configuration.snapshot');
-      const snapshot = await migrateLegacyIfNeeded(loadedSnapshot);
+      const canEdit = hasPermission('configuracoes.editar');
+      const loadKey = `${userId}:${canEdit}`;
+      if (inFlightLoadRef.current?.key !== loadKey) {
+        const promise = loadSettingsSnapshot({
+          loadSnapshot: () => request('configuration.snapshot'),
+          importLegacy: (payload) => request('configuration.importLegacy', payload),
+          readLegacy: readLegacySettings,
+          canEdit,
+          migrationVersion: LEGACY_MIGRATION_VERSION,
+        }).finally(() => {
+          if (inFlightLoadRef.current?.promise === promise) inFlightLoadRef.current = null;
+        });
+        inFlightLoadRef.current = { key: loadKey, promise };
+      }
+      const result = await inFlightLoadRef.current.promise;
       if (requestGenerationRef.current !== generation) return null;
 
-      setState({ snapshot, isLoading: false, error: '', readOnly: false });
-      return snapshot;
+      setState({ ...result, isLoading: false });
+      return result.snapshot;
     } catch (error) {
       if (requestGenerationRef.current !== generation) return null;
 
@@ -93,22 +86,32 @@ export function SettingsProvider({ children }) {
       });
       return null;
     }
-  }, [user?.id]);
+  }, [hasPermission, user?.id]);
 
   useEffect(() => {
     requestGenerationRef.current += 1;
-    setState({ snapshot: null, isLoading: Boolean(user?.id), error: '', readOnly: false });
+    setState({
+      snapshot: null,
+      isLoading: Boolean(user?.id),
+      error: '',
+      readOnly: Boolean(user?.id) && !hasPermission('configuracoes.editar'),
+    });
     refresh();
     return () => {
       requestGenerationRef.current += 1;
     };
-  }, [refresh]);
+  }, [hasPermission, refresh, user?.id]);
 
   const applySnapshot = useCallback((snapshot) => {
     if (!snapshot?.settings || !snapshot?.catalogs) return;
     requestGenerationRef.current += 1;
-    setState({ snapshot, isLoading: false, error: '', readOnly: false });
-  }, []);
+    setState({
+      snapshot,
+      isLoading: false,
+      error: '',
+      readOnly: !hasPermission('configuracoes.editar'),
+    });
+  }, [hasPermission]);
 
   const value = useMemo(() => ({ ...state, refresh, applySnapshot }), [state, refresh, applySnapshot]);
 
@@ -136,12 +139,20 @@ export function useSetting(settingKey, fallbackValue) {
 
 export function useCatalog(
   catalogKey,
-  { includeInactive = false, selectedCode = '' } = {},
+  {
+    includeInactive = false,
+    selectedCode = '',
+    includeEmpty = false,
+    emptyLabel = 'Selecionar',
+    sort = 'catalog',
+  } = {},
 ) {
   const { snapshot, isLoading } = useSettings();
 
   return useMemo(() => {
     if (isLoading || !snapshot) return EMPTY_CATALOG_OPTIONS;
-    return filterCatalogOptions(snapshot, catalogKey, { includeInactive, selectedCode });
-  }, [catalogKey, includeInactive, isLoading, selectedCode, snapshot]);
+    return filterCatalogOptions(snapshot, catalogKey, {
+      includeInactive, selectedCode, includeEmpty, emptyLabel, sort,
+    });
+  }, [catalogKey, emptyLabel, includeEmpty, includeInactive, isLoading, selectedCode, snapshot, sort]);
 }

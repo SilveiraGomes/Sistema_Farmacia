@@ -7,6 +7,7 @@ import {
   createSafeDefaultSnapshot,
   filterCatalogOptions,
 } from '../src/configuration/catalogKeys.mjs';
+import { loadSettingsSnapshot } from '../src/configuration/settingsLifecycle.mjs';
 
 test('catalog keys are complete, canonical and frozen', () => {
   assert.equal(Object.isFrozen(CATALOG_KEYS), true);
@@ -63,27 +64,120 @@ test('catalog filtering is deterministic and preserves only selected inactive op
   );
   assert.deepEqual(
     filterCatalogOptions(snapshot, 'payment_methods', { selectedCode: 'old' }).map(({ code }) => code),
-    ['cash', 'old', 'card'],
+    ['cash', 'card', 'old'],
   );
   assert.deepEqual(
     filterCatalogOptions(snapshot, 'payment_methods', { includeInactive: true }).map(({ code }) => code),
-    ['cash', 'old', 'card', 'other-old'],
+    ['cash', 'card', 'old', 'other-old'],
   );
   assert.deepEqual(filterCatalogOptions(null, 'payment_methods'), []);
+});
+
+test('catalog filtering supports empty choices, name sort and caller comparators', () => {
+  const snapshot = {
+    catalogs: {
+      payment_methods: [
+        { code: 'cash', name: 'Dinheiro', order: 2, active: true },
+        { code: 'card', name: 'Cartao', order: 1, active: true },
+      ],
+    },
+  };
+
+  const withEmpty = filterCatalogOptions(snapshot, 'payment_methods', {
+    includeEmpty: true,
+    emptyLabel: 'Sem forma definida',
+  });
+  assert.deepEqual(withEmpty.map(({ code }) => code), ['', 'card', 'cash']);
+  assert.equal(withEmpty[0].name, 'Sem forma definida');
+  assert.deepEqual(
+    filterCatalogOptions(snapshot, 'payment_methods', { sort: 'name' }).map(({ code }) => code),
+    ['card', 'cash'],
+  );
+  assert.deepEqual(
+    filterCatalogOptions(snapshot, 'payment_methods', {
+      sort: (left, right) => right.code.localeCompare(left.code),
+    }).map(({ code }) => code),
+    ['cash', 'card'],
+  );
+});
+
+test('settings lifecycle never reads legacy storage for completed or read-only snapshots', async () => {
+  for (const { pending, canEdit } of [
+    { pending: false, canEdit: true },
+    { pending: true, canEdit: false },
+  ]) {
+    const calls = [];
+    const snapshot = { settings: {}, catalogs: {}, migrations: { legacyLocalStoragePending: pending } };
+    const result = await loadSettingsSnapshot({
+      loadSnapshot: async () => { calls.push('snapshot'); return snapshot; },
+      importLegacy: async () => { calls.push('import'); },
+      readLegacy: () => { calls.push('legacy'); return {}; },
+      canEdit,
+    });
+    assert.equal(result.snapshot, snapshot);
+    assert.deepEqual(calls, ['snapshot']);
+    assert.equal(result.readOnly, !canEdit);
+  }
+});
+
+test('settings lifecycle imports pending legacy data then recalls SQLite snapshot', async () => {
+  const calls = [];
+  const initial = { settings: {}, catalogs: {}, migrations: { legacyLocalStoragePending: true } };
+  const migrated = { settings: { company: {} }, catalogs: {}, migrations: { legacyLocalStoragePending: false } };
+  let snapshotCall = 0;
+  const result = await loadSettingsSnapshot({
+    loadSnapshot: async () => {
+      calls.push('snapshot');
+      snapshotCall += 1;
+      return snapshotCall === 1 ? initial : migrated;
+    },
+    importLegacy: async (payload) => { calls.push(['import', payload]); return { applied: true }; },
+    readLegacy: () => { calls.push('legacy'); return { branding: { pharmacyName: 'ESAYOS' } }; },
+    canEdit: true,
+    migrationVersion: 1,
+  });
+
+  assert.equal(result.snapshot, migrated);
+  assert.deepEqual(calls, [
+    'snapshot',
+    'legacy',
+    ['import', { migrationVersion: 1, data: { branding: { pharmacyName: 'ESAYOS' } } }],
+    'snapshot',
+  ]);
+  assert.equal(result.error, '');
+  assert.equal(result.readOnly, false);
+});
+
+test('settings lifecycle preserves loaded snapshot when legacy import fails', async () => {
+  const snapshot = { settings: {}, catalogs: {}, migrations: { legacyLocalStoragePending: true } };
+  const result = await loadSettingsSnapshot({
+    loadSnapshot: async () => snapshot,
+    importLegacy: async () => { throw new Error('permission denied internals'); },
+    readLegacy: () => ({}),
+    canEdit: true,
+  });
+
+  assert.equal(result.snapshot, snapshot);
+  assert.equal(result.readOnly, true);
+  assert.match(result.error, /migra/i);
+  assert.doesNotMatch(result.error, /permission denied/);
 });
 
 test('SettingsContext gates migration, protects async state and exposes hooks', async () => {
   const source = await readFile('src/configuration/SettingsContext.jsx', 'utf8');
 
   assert.match(source, /request\('configuration\.snapshot'/);
-  assert.match(source, /legacyLocalStoragePending/);
   assert.match(source, /readLegacySettings/);
   assert.match(source, /configuration\.importLegacy/);
   assert.match(source, /migrationVersion:\s*LEGACY_MIGRATION_VERSION/);
   assert.match(source, /requestGenerationRef/);
+  assert.match(source, /inFlightLoadRef/);
+  assert.match(source, /setState\(\{[\s\S]*snapshot:\s*null/);
   assert.match(source, /export function useCatalog/);
   assert.match(source, /includeInactive/);
   assert.match(source, /selectedCode/);
+  assert.match(source, /includeEmpty/);
+  assert.match(source, /emptyLabel/);
   assert.match(source, /export function useSetting/);
 });
 

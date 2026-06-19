@@ -1,4 +1,5 @@
 const ADMINISTRATOR_PROFILE = 'Administrador';
+const AUTHENTICATED_BASELINE_PERMISSIONS = Object.freeze(['configuracoes.ver']);
 
 function freezeProfile(profile) {
   return Object.freeze({
@@ -79,6 +80,7 @@ const DEFAULT_PROFILES = Object.freeze([
       'documentos.imprimir',
       'documentos.exportar',
       'relatorios.ver',
+      'configuracoes.ver',
     ],
   },
   {
@@ -96,6 +98,7 @@ const DEFAULT_PROFILES = Object.freeze([
       'clientes.criar',
       'documentos.ver',
       'documentos.imprimir',
+      'configuracoes.ver',
     ],
   },
   {
@@ -116,6 +119,7 @@ const DEFAULT_PROFILES = Object.freeze([
       'documentos.exportar',
       'documentos.converter',
       'relatorios.ver',
+      'configuracoes.ver',
     ],
   },
 ].map(freezeProfile));
@@ -130,6 +134,7 @@ function getEssentialAdminPermissions() {
 
 module.exports = {
   ADMINISTRATOR_PROFILE,
+  AUTHENTICATED_BASELINE_PERMISSIONS,
   PERMISSIONS,
   DEFAULT_PROFILES,
   getPermissionKeys,

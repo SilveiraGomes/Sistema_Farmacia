@@ -278,7 +278,31 @@ test('syncDatabaseSchema preserves custom non-admin profile permissions on later
       .map((permission) => permission.chave)
       .sort();
 
-    assert.deepEqual(permissionKeysAfterSecondSync, ['dashboard.ver']);
+    assert.deepEqual(permissionKeysAfterSecondSync, ['configuracoes.ver', 'dashboard.ver']);
+    await assertProfilePermissionInvariant(db, models);
+  });
+});
+
+test('syncDatabaseSchema adds snapshot baseline to existing nonempty operational profiles', async () => {
+  await withDatabase(async (db, models) => {
+    const baseline = await models.Permissao.findOne({ where: { chave: 'configuracoes.ver' } });
+    const custom = await models.Permissao.findOne({ where: { chave: 'dashboard.ver' } });
+
+    for (const profileName of ['Caixa', 'Farmaceutico']) {
+      const profile = await models.Perfil.findOne({ where: { nome: profileName } });
+      await models.PerfilPermissao.destroy({ where: { perfil_id: profile.id } });
+      await models.PerfilPermissao.create({ perfil_id: profile.id, permissao_id: custom.id });
+    }
+
+    await syncDatabaseSchema(db);
+
+    for (const profileName of ['Caixa', 'Farmaceutico']) {
+      const profile = await models.Perfil.findOne({ where: { nome: profileName } });
+      const keys = (await profile.getPermissaos()).map(({ chave }) => chave).sort();
+      assert.deepEqual(keys, ['configuracoes.ver', 'dashboard.ver'], profileName);
+      assert.equal(keys.includes('configuracoes.editar'), false);
+      assert.ok(baseline.id);
+    }
     await assertProfilePermissionInvariant(db, models);
   });
 });

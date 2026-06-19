@@ -148,27 +148,46 @@ export function createSafeDefaultSnapshot() {
   };
 }
 
-const optionOrder = (left, right) => (
+const catalogOrder = (left, right) => (
   (Number(left.order) || 0) - (Number(right.order) || 0)
+  || (Number(left.id) || 0) - (Number(right.id) || 0)
   || String(left.name || '').localeCompare(String(right.name || ''), 'pt')
   || String(left.code || '').localeCompare(String(right.code || ''), 'pt')
+);
+
+const nameOrder = (left, right) => (
+  String(left.name || '').localeCompare(String(right.name || ''), 'pt')
+  || catalogOrder(left, right)
 );
 
 export function filterCatalogOptions(
   snapshot,
   catalogKey,
-  { includeInactive = false, selectedCode = '' } = {},
+  {
+    includeInactive = false,
+    selectedCode = '',
+    includeEmpty = false,
+    emptyLabel = 'Selecionar',
+    sort = 'catalog',
+  } = {},
 ) {
   const options = snapshot?.catalogs?.[catalogKey];
-  if (!Array.isArray(options)) return [];
+  if (!Array.isArray(options)) return includeEmpty ? [{ code: '', name: emptyLabel, active: true }] : [];
+
+  const comparator = typeof sort === 'function' ? sort : sort === 'name' ? nameOrder : catalogOrder;
 
   const includedCodes = new Set();
-  return [...options]
-    .sort(optionOrder)
+  const filtered = [...options]
+    .sort(comparator)
     .filter((option) => {
       if (!option || typeof option.code !== 'string' || includedCodes.has(option.code)) return false;
       if (!includeInactive && !option.active && option.code !== selectedCode) return false;
       includedCodes.add(option.code);
       return true;
     });
+
+  if (includeEmpty && !includedCodes.has('')) {
+    filtered.unshift({ code: '', name: String(emptyLabel || ''), active: true, system: true });
+  }
+  return filtered;
 }

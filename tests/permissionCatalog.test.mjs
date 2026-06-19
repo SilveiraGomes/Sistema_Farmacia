@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   PERMISSIONS,
   DEFAULT_PROFILES,
+  AUTHENTICATED_BASELINE_PERMISSIONS,
   ADMINISTRATOR_PROFILE,
   getPermissionKeys,
   getEssentialAdminPermissions,
@@ -117,6 +118,16 @@ test('cashier profile does not receive admin permissions', () => {
 
   for (const permission of getEssentialAdminPermissions()) {
     assert.equal(cashier.permissoes.includes(permission), false);
+  }
+});
+
+test('every operational default profile can view but not edit central settings', () => {
+  assert.deepEqual(AUTHENTICATED_BASELINE_PERMISSIONS, ['configuracoes.ver']);
+  for (const profile of DEFAULT_PROFILES) {
+    assert.ok(profile.permissoes.includes('configuracoes.ver'), profile.nome);
+    if (profile.nome !== ADMINISTRATOR_PROFILE) {
+      assert.equal(profile.permissoes.includes('configuracoes.editar'), false, profile.nome);
+    }
   }
 });
 
