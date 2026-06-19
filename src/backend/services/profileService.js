@@ -1,6 +1,7 @@
 const { getModels } = require('../database');
 const {
   ADMINISTRATOR_PROFILE,
+  AUTHENTICATED_BASELINE_PERMISSIONS,
   getEssentialAdminPermissions,
 } = require('./permissionCatalog');
 
@@ -80,17 +81,20 @@ async function updateProfilePermissions({ actorUserId, profileId, permissionKeys
   }
 
   const normalizedKeys = normalizePermissionKeys(permissionKeys);
+  const effectiveKeys = profile.ativo
+    ? [...new Set([...normalizedKeys, ...AUTHENTICATED_BASELINE_PERMISSIONS])]
+    : normalizedKeys;
   const permissions = await Permissao.findAll({
-    where: { chave: normalizedKeys },
+    where: { chave: effectiveKeys },
   });
   const existingKeys = new Set(permissions.map((permission) => permission.chave));
-  const missingKeys = normalizedKeys.filter((key) => !existingKeys.has(key));
+  const missingKeys = effectiveKeys.filter((key) => !existingKeys.has(key));
   if (missingKeys.length > 0) {
     throw new Error(`Permissoes desconhecidas: ${missingKeys.join(', ')}`);
   }
 
   if (profile.nome === ADMINISTRATOR_PROFILE) {
-    const nextKeys = new Set(normalizedKeys);
+    const nextKeys = new Set(effectiveKeys);
     const missingEssential = getEssentialAdminPermissions()
       .filter((permissionKey) => !nextKeys.has(permissionKey));
 
@@ -99,7 +103,7 @@ async function updateProfilePermissions({ actorUserId, profileId, permissionKeys
     }
   }
 
-  const sortedPermissionKeys = [...normalizedKeys].sort();
+  const sortedPermissionKeys = [...effectiveKeys].sort();
   await Perfil.sequelize.transaction(async (transaction) => {
     await PerfilPermissao.destroy({
       where: { perfil_id: profile.id },

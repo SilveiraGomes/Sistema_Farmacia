@@ -556,7 +556,7 @@ test('updateProfilePermissions replaces a non-administrator profile permission s
   await withServices(async ({ AuditoriaUsuario, Perfil, Usuario }) => {
     const actor = await getAdminUser(Usuario);
     const cashierProfile = await getProfileByName(Perfil, 'Caixa');
-    const nextPermissions = ['dashboard.ver', 'vendas.ver'];
+    const nextPermissions = ['configuracoes.ver', 'dashboard.ver', 'vendas.ver'];
 
     const profiles = await updateProfilePermissions({
       actorUserId: actor.id,
@@ -566,11 +566,13 @@ test('updateProfilePermissions replaces a non-administrator profile permission s
     const cashier = profiles.find((profile) => profile.id === cashierProfile.id);
 
     assert.deepEqual(cashier.permissoes, nextPermissions);
+    assert.equal(cashier.permissoes.includes('configuracoes.editar'), false);
 
     const audit = await AuditoriaUsuario.findOne({
       where: { acao: 'PERMISSOES_PERFIL_ALTERADAS' },
     });
     assert.equal(audit.ator_usuario_id, actor.id);
+    assert.deepEqual(JSON.parse(audit.detalhes).permissoes, nextPermissions);
   });
 });
 
