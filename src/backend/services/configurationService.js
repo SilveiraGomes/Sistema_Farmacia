@@ -83,15 +83,50 @@ const normalizedMeaning = (value) => normalizeCatalogName(value)
 const slugCode = (name) => normalizedMeaning(name)
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
+const copyMetadataValue = (value, ancestors = new WeakSet()) => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw validationError('Metadados devem conter números finitos.');
+    return value;
+  }
+  if (!value || typeof value !== 'object' || ancestors.has(value)) {
+    throw validationError('Metadados devem conter apenas dados JSON válidos.');
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw validationError('Metadados devem usar apenas objetos simples.');
+  }
+  const keys = Reflect.ownKeys(value);
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (keys.some((key) => key !== 'length'
+        && (typeof key !== 'string' || !/^\d+$/.test(key) || Number(key) >= value.length
+          || !Object.prototype.propertyIsEnumerable.call(value, key)))) {
+        throw validationError('Metadados devem usar listas JSON simples.');
+      }
+      return Array.from({ length: value.length }, (_, index) => {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) {
+          throw validationError('Metadados não podem conter posições vazias.');
+        }
+        return copyMetadataValue(value[index], ancestors);
+      });
+    }
+    if (keys.some((key) => typeof key !== 'string'
+      || !Object.prototype.propertyIsEnumerable.call(value, key))) {
+      throw validationError('Metadados devem conter apenas propriedades JSON enumeráveis.');
+    }
+    return Object.fromEntries(keys.map((key) => [key, copyMetadataValue(value[key], ancestors)]));
+  } finally {
+    ancestors.delete(value);
+  }
+};
+
 const validateMetadata = (metadata = {}) => {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     throw validationError('Metadados da opção de catálogo inválidos.');
   }
-  try {
-    return JSON.parse(JSON.stringify(metadata));
-  } catch (error) {
-    throw validationError('Metadados da opção de catálogo inválidos.', error);
-  }
+  return copyMetadataValue(metadata);
 };
 
 const catalogOptionValue = (row) => ({
@@ -127,10 +162,11 @@ const validateMutationShape = (request) => {
   }
   const { section, values, expectedVersions } = request;
   if (typeof section !== 'string' || !values || typeof values !== 'object'
-    || Array.isArray(values) || !expectedVersions || typeof expectedVersions !== 'object'
-    || Array.isArray(expectedVersions)) {
+    || Array.isArray(values)) {
     throw validationError('Pedido de atualização de configuração inválido.');
   }
+  if (!expectedVersions || typeof expectedVersions !== 'object'
+    || Array.isArray(expectedVersions)) throw conflictError();
 
   const keys = Object.keys(values);
   if (keys.length === 0) throw validationError('Nenhuma configuração foi informada.');
@@ -141,7 +177,7 @@ const validateMutationShape = (request) => {
       throw validationError(`Configuração inválida para a secção "${section}".`);
     }
     if (!Number.isInteger(expectedVersions[key]) || expectedVersions[key] < 0) {
-      throw validationError(`Versão esperada inválida para a configuração "${key}".`);
+      throw conflictError();
     }
   }
 
@@ -242,11 +278,27 @@ function createConfigurationService({
       OpcaoCatalogo.findAll({ order: [['catalogo', 'ASC'], ['ordem', 'ASC'], ['id', 'ASC']] }),
     ]);
     const settings = {};
+    const activeCatalogCodes = new Map();
+    for (const row of catalogRows) {
+      if (!row.ativo) continue;
+      if (!activeCatalogCodes.has(row.catalogo)) activeCatalogCodes.set(row.catalogo, new Set());
+      activeCatalogCodes.get(row.catalogo).add(row.codigo);
+    }
 
     for (const row of settingRows) {
       const definition = SETTING_DEFINITIONS[row.chave];
       if (!definition) continue;
-      const parsed = parseSettingJson(row.chave, row.valor_json);
+      let parsed;
+      if (definition.type === 'catalog-code') {
+        const raw = parseJson(row.valor_json, definition.defaultValue);
+        const value = typeof raw.value === 'string' ? raw.value.trim() : raw.value;
+        parsed = raw.readable && typeof value === 'string'
+          && activeCatalogCodes.get(definition.catalog)?.has(value)
+          ? { value, readable: true }
+          : { value: jsonClone(definition.defaultValue), readable: false };
+      } else {
+        parsed = parseSettingJson(row.chave, row.valor_json);
+      }
       settings[definition.group] ||= {};
       settings[definition.group][row.chave.slice(definition.group.length + 1)] = {
         key: row.chave,
@@ -340,6 +392,23 @@ function createConfigurationService({
       && identities.has(normalizedMeaning(shift.nome)));
   };
 
+  const validatePersistedSettingValue = async (key, value, transaction) => {
+    const definition = SETTING_DEFINITIONS[key];
+    if (definition.type !== 'catalog-code') return validateSettingValue(key, value);
+    if (typeof value !== 'string' || !value.trim()) {
+      throw validationError(`Código de catálogo inválido para a configuração "${key}".`);
+    }
+    const normalized = value.trim();
+    const option = await OpcaoCatalogo.findOne({
+      where: { catalogo: definition.catalog, codigo: normalized, ativo: true },
+      transaction,
+    });
+    if (!option) {
+      throw validationError(`Código de catálogo inválido para a configuração "${key}".`);
+    }
+    return normalized;
+  };
+
   const createCatalogOption = (request = {}) => serializeMutation(async () => {
     const { actorUserId, catalogKey, data } = request;
     assertEditableCatalog(catalogKey);
@@ -383,10 +452,10 @@ function createConfigurationService({
 
   const updateCatalogOption = (request = {}) => serializeMutation(async () => {
     const { actorUserId, optionId, data, expectedVersion } = request;
-    if (!data || typeof data !== 'object' || Array.isArray(data)
-      || !Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
       throw validationError('Pedido de edição de catálogo inválido.');
     }
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) throw conflictError();
     return db.transaction(async (transaction) => {
       const row = await findCatalogOption(optionId, transaction);
       assertEditableOption(row);
@@ -428,7 +497,9 @@ function createConfigurationService({
     for (const [key, definition] of Object.entries(SETTING_DEFINITIONS)) {
       if (definition.type !== 'catalog-code' || definition.catalog !== row.catalogo) continue;
       const setting = await ConfiguracaoSistema.findOne({ where: { chave: key }, transaction });
-      if (setting && parseSettingJson(key, setting.valor_json).value === row.codigo) {
+      const stored = setting ? parseJson(setting.valor_json, null) : { readable: false };
+      if (stored.readable && typeof stored.value === 'string'
+        && stored.value.trim() === row.codigo) {
         throw codedError(
           CONFIGURATION_ERROR_CODES.IN_USE,
           'Altere primeiro a opção padrão atualmente selecionada.',
@@ -458,21 +529,23 @@ function createConfigurationService({
 
   const changeCatalogActivation = (action, active) => (request = {}) => serializeMutation(async () => {
     const { actorUserId, optionId, expectedVersion } = request;
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) throw conflictError();
     return db.transaction(async (transaction) => {
       const row = await findCatalogOption(optionId, transaction);
-      if (expectedVersion !== undefined
-        && (!Number.isInteger(expectedVersion) || row.versao !== expectedVersion)) throw conflictError();
+      if (row.versao !== expectedVersion) throw conflictError();
       if (!active) await assertCanDeactivate(row, transaction);
       else {
         assertEditableOption(row);
         if (row.ativo) throw validationError('A opção já está ativa.');
       }
       const before = catalogOptionValue(row);
-      await row.update({
+      const [updated] = await OpcaoCatalogo.update({
         ativo: active,
         versao: row.versao + 1,
         atualizado_por_usuario_id: actorUserId ?? null,
-      }, { transaction });
+      }, { where: { id: row.id, versao: expectedVersion }, transaction });
+      if (updated !== 1) throw conflictError();
+      await row.reload({ transaction });
       const after = catalogOptionValue(row);
       await writeCatalogAudit(transaction, actorUserId, row, action, before, after);
       return after;
@@ -483,36 +556,47 @@ function createConfigurationService({
   const activateCatalogOption = changeCatalogActivation('activate', true);
 
   const reorderCatalogOptions = (request = {}) => serializeMutation(async () => {
-    const { actorUserId, catalogKey, optionIds } = request;
+    const { actorUserId, catalogKey, optionIds, expectedVersions } = request;
     assertEditableCatalog(catalogKey);
     if (!Array.isArray(optionIds) || optionIds.some((id) => !Number.isInteger(id) || id < 1)) {
       throw validationError('Ordem do catálogo inválida.');
     }
+    if (!expectedVersions || typeof expectedVersions !== 'object'
+      || Array.isArray(expectedVersions)) throw conflictError();
     return db.transaction(async (transaction) => {
       const activeRows = await OpcaoCatalogo.findAll({
         where: { catalogo: catalogKey, ativo: true }, transaction,
       });
-      if (activeRows.some((row) => row.sistema)) {
-        throw codedError(
-          CONFIGURATION_ERROR_CODES.PROTECTED,
-          'Opções técnicas protegidas não podem ser reordenadas.',
-        );
-      }
       const expected = activeRows.map((row) => row.id).sort((a, b) => a - b);
       const received = [...optionIds].sort((a, b) => a - b);
       if (expected.length !== received.length
         || expected.some((id, index) => id !== received[index])) {
         throw validationError('A ordem deve conter exatamente todas as opções ativas, uma vez cada.');
       }
+      const versionKeys = Object.keys(expectedVersions);
+      if (versionKeys.length !== activeRows.length
+        || activeRows.some((row) => !Object.prototype.hasOwnProperty.call(expectedVersions, row.id)
+          || !Number.isInteger(expectedVersions[row.id])
+          || expectedVersions[row.id] !== row.versao)) throw conflictError();
+      if (activeRows.some((row) => row.sistema)) {
+        throw codedError(
+          CONFIGURATION_ERROR_CODES.PROTECTED,
+          'Opções técnicas protegidas não podem ser reordenadas.',
+        );
+      }
       const byId = new Map(activeRows.map((row) => [row.id, row]));
       const before = activeRows.map(catalogOptionValue);
       for (let order = 0; order < optionIds.length; order += 1) {
         const row = byId.get(optionIds[order]);
-        await row.update({
+        const [updated] = await OpcaoCatalogo.update({
           ordem: order,
           versao: row.versao + 1,
           atualizado_por_usuario_id: actorUserId ?? null,
-        }, { transaction });
+        }, {
+          where: { id: row.id, versao: expectedVersions[row.id] }, transaction,
+        });
+        if (updated !== 1) throw conflictError();
+        await row.reload({ transaction });
       }
       const after = optionIds.map((id) => catalogOptionValue(byId.get(id)));
       await AuditoriaConfiguracao.create({
@@ -539,12 +623,6 @@ function createConfigurationService({
         throw validationError(`Dados legados inválidos em "${field}".`);
       }
     }
-    const discoveredByAdapter = await discoverCatalogValues();
-    if (!discoveredByAdapter || typeof discoveredByAdapter !== 'object'
-      || Array.isArray(discoveredByAdapter)) {
-      throw validationError('Valores descobertos pelo adaptador são inválidos.');
-    }
-
     return db.transaction(async (transaction) => {
       const markerKey = 'migration.legacyLocalStorageVersion';
       const marker = await ConfiguracaoSistema.findOne({ where: { chave: markerKey }, transaction });
@@ -552,6 +630,11 @@ function createConfigurationService({
       const currentVersion = parseSettingJson(markerKey, marker.valor_json).value;
       if (currentVersion >= migrationVersion) {
         return { applied: false, skipped: true, migrationVersion };
+      }
+      const discoveredByAdapter = await discoverCatalogValues();
+      if (!discoveredByAdapter || typeof discoveredByAdapter !== 'object'
+        || Array.isArray(discoveredByAdapter)) {
+        throw validationError('Valores descobertos pelo adaptador são inválidos.');
       }
 
       const candidates = [];
@@ -591,8 +674,9 @@ function createConfigurationService({
           : legacyPartial;
         let validated;
         try {
-          validated = validateSettingValue(key, candidate);
+          validated = await validatePersistedSettingValue(key, candidate, transaction);
         } catch (error) {
+          if (error instanceof ConfigurationError) throw error;
           throw validationError(`Valor legado inválido para "${key}".`, error);
         }
         const before = parsed.value;
@@ -667,16 +751,9 @@ function createConfigurationService({
 
   const updateSection = (request) => serializeMutation(async () => {
     const keys = validateMutationShape(request);
-    const validated = {};
-    for (const key of keys) {
-      try {
-        validated[key] = validateSettingValue(key, request.values[key]);
-      } catch (error) {
-        throw validationError(error.message, error);
-      }
-    }
-
     await db.transaction(async (transaction) => {
+      const validated = {};
+      const rows = new Map();
       for (const key of keys) {
         const row = await ConfiguracaoSistema.findOne({ where: { chave: key }, transaction });
         if (!row) {
@@ -686,7 +763,19 @@ function createConfigurationService({
           );
         }
         if (row.versao !== request.expectedVersions[key]) throw conflictError();
+        rows.set(key, row);
+        try {
+          validated[key] = await validatePersistedSettingValue(
+            key, request.values[key], transaction,
+          );
+        } catch (error) {
+          if (error instanceof ConfigurationError) throw error;
+          throw validationError(error.message, error);
+        }
+      }
 
+      for (const key of keys) {
+        const row = rows.get(key);
         const oldValue = parseJson(row.valor_json, SETTING_DEFINITIONS[key].defaultValue).value;
         const [updated] = await ConfiguracaoSistema.update({
           valor_json: JSON.stringify(validated[key]),

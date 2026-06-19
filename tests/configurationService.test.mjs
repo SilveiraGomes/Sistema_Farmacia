@@ -152,6 +152,19 @@ describe('configurationService', () => {
     assert.equal(await models.AuditoriaConfiguracao.count(), 0);
   });
 
+  test('updateSection rejects a missing optimistic version as a conflict', async () => {
+    await service.seedDefaults();
+    await assert.rejects(
+      service.updateSection({
+        actorUserId: actor.id,
+        section: 'sales',
+        values: { 'sales.defaultTaxRate': 14 },
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+    );
+    assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+  });
+
   test('updateSection rolls back setting changes and audits after a mid-transaction failure', async () => {
     await service.seedDefaults();
     const originalCreate = models.AuditoriaConfiguracao.create;
@@ -436,7 +449,9 @@ describe('configurationService', () => {
         (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
       );
       await assert.rejects(
-        service.deactivateCatalogOption({ actorUserId: actor.id, optionId: row.id }),
+        service.deactivateCatalogOption({
+          actorUserId: actor.id, optionId: row.id, expectedVersion: row.versao,
+        }),
         (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
       );
     }
@@ -451,7 +466,9 @@ describe('configurationService', () => {
     await protectedOption.update({ sistema: true, ativo: false });
 
     await assert.rejects(
-      service.activateCatalogOption({ actorUserId: actor.id, optionId: protectedOption.id }),
+      service.activateCatalogOption({
+        actorUserId: actor.id, optionId: protectedOption.id, expectedVersion: protectedOption.versao,
+      }),
       (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
     );
     await protectedOption.reload();
@@ -459,11 +476,13 @@ describe('configurationService', () => {
 
     await protectedOption.update({ ativo: true });
     const active = await service.listCatalog({ catalogKey: 'payment_methods' });
+    const expectedVersions = Object.fromEntries(active.map((option) => [option.id, option.version]));
     await assert.rejects(
       service.reorderCatalogOptions({
         actorUserId: actor.id,
         catalogKey: 'payment_methods',
         optionIds: active.map((option) => option.id).reverse(),
+        expectedVersions,
       }),
       (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
     );
@@ -480,7 +499,9 @@ describe('configurationService', () => {
     });
     await dinheiro.update({ sistema: false });
     await assert.rejects(
-      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: dinheiro.id }),
+      service.deactivateCatalogOption({
+        actorUserId: actor.id, optionId: dinheiro.id, expectedVersion: dinheiro.versao,
+      }),
       (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
     );
     await models.ConfiguracaoSistema.update(
@@ -493,7 +514,9 @@ describe('configurationService', () => {
     );
     await models.OpcaoCatalogo.update({ ativo: true }, { where: { id: dinheiro.id } });
     await assert.rejects(
-      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: dinheiro.id }),
+      service.deactivateCatalogOption({
+        actorUserId: actor.id, optionId: dinheiro.id, expectedVersion: dinheiro.versao,
+      }),
       (error) => error.code === CONFIGURATION_ERROR_CODES.INVARIANT,
     );
   });
@@ -509,7 +532,9 @@ describe('configurationService', () => {
       dia_operacional_id: day.id, nome: ' Manhã ', status: 'Aberto',
     });
     await assert.rejects(
-      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: option.id }),
+      service.deactivateCatalogOption({
+        actorUserId: actor.id, optionId: option.id, expectedVersion: option.versao,
+      }),
       (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
     );
   });
@@ -539,7 +564,9 @@ describe('configurationService', () => {
       (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
     );
     await assert.rejects(
-      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: option.id }),
+      service.deactivateCatalogOption({
+        actorUserId: actor.id, optionId: option.id, expectedVersion: option.version,
+      }),
       (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
     );
 
@@ -555,19 +582,182 @@ describe('configurationService', () => {
     });
     const active = await service.listCatalog({ catalogKey: 'payment_methods' });
     const reversedIds = active.map((option) => option.id).reverse();
+    const expectedVersions = Object.fromEntries(active.map((option) => [option.id, option.version]));
     for (const invalid of [reversedIds.slice(1), [...reversedIds, reversedIds[0]]]) {
       await assert.rejects(
         service.reorderCatalogOptions({
           actorUserId: actor.id, catalogKey: 'payment_methods', optionIds: invalid,
+          expectedVersions,
         }),
         (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
       );
     }
     const ordered = await service.reorderCatalogOptions({
-      actorUserId: actor.id, catalogKey: 'payment_methods', optionIds: reversedIds,
+      actorUserId: actor.id,
+      catalogKey: 'payment_methods',
+      optionIds: reversedIds,
+      expectedVersions,
     });
     assert.deepEqual(ordered.map((option) => option.id), reversedIds);
     assert.equal(ordered.find((option) => option.id === created.id).order, 0);
+  });
+
+  test('dynamic active catalog codes are valid settings and remain protected as defaults', async () => {
+    await service.seedDefaults();
+    const dynamic = await service.createCatalogOption({
+      actorUserId: actor.id,
+      catalogKey: 'payment_methods',
+      data: { name: 'Voucher Empresa' },
+    });
+    const updated = await service.updateSection({
+      actorUserId: actor.id,
+      section: 'sales',
+      values: { 'sales.defaultPaymentMethod': dynamic.code },
+      expectedVersions: { 'sales.defaultPaymentMethod': 1 },
+    });
+    assert.equal(updated.settings.sales.defaultPaymentMethod.value, 'voucher-empresa');
+    assert.equal((await service.getSnapshot()).settings.sales.defaultPaymentMethod.readable, true);
+    await assert.rejects(
+      service.deactivateCatalogOption({
+        actorUserId: actor.id,
+        optionId: dynamic.id,
+        expectedVersion: dynamic.version,
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
+    );
+
+    const inactive = await service.createCatalogOption({
+      actorUserId: actor.id,
+      catalogKey: 'payment_methods',
+      data: { name: 'Pagamento Inativo' },
+    });
+    await service.deactivateCatalogOption({
+      actorUserId: actor.id,
+      optionId: inactive.id,
+      expectedVersion: inactive.version,
+    });
+    const auditCount = await models.AuditoriaConfiguracao.count();
+    for (const code of [inactive.code, 'codigo-desconhecido']) {
+      await assert.rejects(
+        service.updateSection({
+          actorUserId: actor.id,
+          section: 'sales',
+          values: { 'sales.defaultPaymentMethod': code },
+          expectedVersions: { 'sales.defaultPaymentMethod': 2 },
+        }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
+      );
+    }
+    assert.equal(await models.AuditoriaConfiguracao.count(), auditCount);
+    assert.equal(
+      (await service.getSnapshot()).settings.sales.defaultPaymentMethod.value,
+      dynamic.code,
+    );
+  });
+
+  test('catalog mutations require complete current optimistic versions', async () => {
+    await service.seedDefaults();
+    const created = await service.createCatalogOption({
+      actorUserId: actor.id, catalogKey: 'payment_methods', data: { name: 'Cheque' },
+    });
+    const auditCount = await models.AuditoriaConfiguracao.count();
+
+    for (const request of [
+      { actorUserId: actor.id, optionId: created.id },
+      { actorUserId: actor.id, optionId: created.id, expectedVersion: 99 },
+    ]) {
+      await assert.rejects(
+        service.deactivateCatalogOption(request),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+      );
+    }
+    for (const request of [
+      { actorUserId: actor.id, optionId: created.id, data: { name: 'Cheque Bancário' } },
+      {
+        actorUserId: actor.id,
+        optionId: created.id,
+        expectedVersion: 99,
+        data: { name: 'Cheque Bancário' },
+      },
+    ]) {
+      await assert.rejects(
+        service.updateCatalogOption(request),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+      );
+    }
+
+    const inactive = await service.deactivateCatalogOption({
+      actorUserId: actor.id, optionId: created.id, expectedVersion: created.version,
+    });
+    for (const request of [
+      { actorUserId: actor.id, optionId: inactive.id },
+      { actorUserId: actor.id, optionId: inactive.id, expectedVersion: created.version },
+    ]) {
+      await assert.rejects(
+        service.activateCatalogOption(request),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+      );
+    }
+    const persisted = await models.OpcaoCatalogo.findByPk(created.id);
+    assert.deepEqual([persisted.nome, persisted.ativo, persisted.versao], ['Cheque', false, 2]);
+    assert.equal(await models.AuditoriaConfiguracao.count(), auditCount + 1);
+  });
+
+  test('reorder rejects missing or stale version maps without partial changes', async () => {
+    await service.seedDefaults();
+    const active = await service.listCatalog({ catalogKey: 'payment_methods' });
+    const optionIds = active.map((option) => option.id).reverse();
+    const expectedVersions = Object.fromEntries(active.map((option) => [option.id, option.version]));
+    const before = active.map((option) => [option.id, option.order, option.version]);
+
+    for (const versions of [undefined, { ...expectedVersions, [active[0].id]: 99 }]) {
+      await assert.rejects(
+        service.reorderCatalogOptions({
+          actorUserId: actor.id,
+          catalogKey: 'payment_methods',
+          optionIds,
+          expectedVersions: versions,
+        }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.CONFLICT,
+      );
+    }
+    const after = await service.listCatalog({ catalogKey: 'payment_methods' });
+    assert.deepEqual(after.map((option) => [option.id, option.order, option.version]), before);
+    assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+  });
+
+  test('catalog metadata rejects values that are not plain finite JSON data', async () => {
+    await service.seedDefaults();
+    const circular = {};
+    circular.self = circular;
+    const invalidMetadata = [
+      { value: undefined },
+      { value: () => true },
+      { value: Number.NaN },
+      { value: Number.POSITIVE_INFINITY },
+      { value: new Date() },
+      circular,
+    ];
+    for (let index = 0; index < invalidMetadata.length; index += 1) {
+      await assert.rejects(
+        service.createCatalogOption({
+          actorUserId: actor.id,
+          catalogKey: 'payment_methods',
+          data: { name: `Metadado ${index}`, metadata: invalidMetadata[index] },
+        }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
+      );
+    }
+    assert.equal(await models.OpcaoCatalogo.count({
+      where: { catalogo: 'payment_methods' },
+    }), CATALOG_DEFINITIONS.payment_methods.options.length);
+
+    const valid = await service.createCatalogOption({
+      actorUserId: actor.id,
+      catalogKey: 'payment_methods',
+      data: { name: 'JSON Válido', metadata: { tags: ['app', 2, null, true] } },
+    });
+    assert.deepEqual(valid.metadata, { tags: ['app', 2, null, true] });
   });
 
   test('catalog audit failure rolls back the mutation and audit', async () => {
@@ -647,5 +837,27 @@ describe('configurationService', () => {
     assert.equal(marker.valor_json, '0');
     assert.equal(await models.OpcaoCatalogo.count({ where: { codigo: 'voucher' } }), 0);
     assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+  });
+
+  test('completed legacy migration skips before invoking discovery adapters', async () => {
+    let adapterCalls = 0;
+    service = createConfigurationService({
+      db,
+      models,
+      now: () => new Date('2026-06-19T00:00:00.000Z'),
+      discoverCatalogValues: async () => {
+        adapterCalls += 1;
+        if (adapterCalls > 1) throw new Error('adapter must not run after migration');
+        return {};
+      },
+    });
+    await service.seedDefaults();
+    await service.importLegacySettings({ migrationVersion: 1, data: {} });
+
+    assert.deepEqual(
+      await service.importLegacySettings({ migrationVersion: 1, data: {} }),
+      { applied: false, skipped: true, migrationVersion: 1 },
+    );
+    assert.equal(adapterCalls, 1);
   });
 });
