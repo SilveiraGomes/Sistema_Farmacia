@@ -443,6 +443,36 @@ describe('configurationService', () => {
     assert.equal(await models.AuditoriaConfiguracao.count(), 0);
   });
 
+  test('protected technical entries cannot be activated or included in reordering', async () => {
+    await service.seedDefaults();
+    const protectedOption = await models.OpcaoCatalogo.findOne({
+      where: { catalogo: 'payment_methods', codigo: 'tpa' },
+    });
+    await protectedOption.update({ sistema: true, ativo: false });
+
+    await assert.rejects(
+      service.activateCatalogOption({ actorUserId: actor.id, optionId: protectedOption.id }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
+    );
+    await protectedOption.reload();
+    assert.equal(protectedOption.ativo, false);
+
+    await protectedOption.update({ ativo: true });
+    const active = await service.listCatalog({ catalogKey: 'payment_methods' });
+    await assert.rejects(
+      service.reorderCatalogOptions({
+        actorUserId: actor.id,
+        catalogKey: 'payment_methods',
+        optionIds: active.map((option) => option.id).reverse(),
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED,
+    );
+    await protectedOption.reload();
+    assert.equal(protectedOption.ordem, 1);
+    assert.equal(protectedOption.versao, 1);
+    assert.equal(await models.AuditoriaConfiguracao.count(), 0);
+  });
+
   test('deactivation protects the last payment method and the current default', async () => {
     await service.seedDefaults();
     const dinheiro = await models.OpcaoCatalogo.findOne({
@@ -482,6 +512,40 @@ describe('configurationService', () => {
       service.deactivateCatalogOption({ actorUserId: actor.id, optionId: option.id }),
       (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
     );
+  });
+
+  test('an open shift prevents renaming its option and cannot bypass later deactivation', async () => {
+    await service.seedDefaults();
+    const option = await service.createCatalogOption({
+      actorUserId: actor.id,
+      catalogKey: 'operation_shifts',
+      data: { name: 'Madrugada' },
+    });
+    const day = await models.DiaOperacional.create({ data_operacional: '2026-06-19' });
+    await models.TurnoOperacional.create({
+      dia_operacional_id: day.id,
+      nome: 'madrugada',
+      status: 'ABERTO',
+    });
+    const auditsBefore = await models.AuditoriaConfiguracao.count();
+
+    await assert.rejects(
+      service.updateCatalogOption({
+        actorUserId: actor.id,
+        optionId: option.id,
+        expectedVersion: option.version,
+        data: { name: 'Turno Zero' },
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
+    );
+    await assert.rejects(
+      service.deactivateCatalogOption({ actorUserId: actor.id, optionId: option.id }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.IN_USE,
+    );
+
+    const persisted = await models.OpcaoCatalogo.findByPk(option.id);
+    assert.deepEqual([persisted.nome, persisted.ativo, persisted.versao], ['Madrugada', true, 1]);
+    assert.equal(await models.AuditoriaConfiguracao.count(), auditsBefore);
   });
 
   test('reorder requires exactly the complete active set and persists deterministic order', async () => {

@@ -332,6 +332,14 @@ function createConfigurationService({
     }
   };
 
+  const isUsedByOpenShift = async (row, transaction) => {
+    if (row.catalogo !== 'operation_shifts' || !TurnoOperacional) return false;
+    const shifts = await TurnoOperacional.findAll({ transaction });
+    const identities = new Set([normalizedMeaning(row.nome), normalizedMeaning(row.codigo)]);
+    return shifts.some((shift) => normalizedMeaning(shift.status) === 'aberto'
+      && identities.has(normalizedMeaning(shift.nome)));
+  };
+
   const createCatalogOption = (request = {}) => serializeMutation(async () => {
     const { actorUserId, catalogKey, data } = request;
     assertEditableCatalog(catalogKey);
@@ -387,6 +395,13 @@ function createConfigurationService({
       const updates = {};
       if (Object.prototype.hasOwnProperty.call(data, 'name')) {
         updates.nome = normalizeCatalogName(data.name);
+        if (normalizedMeaning(updates.nome) !== normalizedMeaning(row.nome)
+          && await isUsedByOpenShift(row, transaction)) {
+          throw codedError(
+            CONFIGURATION_ERROR_CODES.IN_USE,
+            'Não é possível renomear uma opção usada por um turno atualmente aberto.',
+          );
+        }
         await assertUniqueCatalogName(row.catalogo, updates.nome, transaction, row.id);
       }
       if (Object.prototype.hasOwnProperty.call(data, 'metadata')) {
@@ -433,16 +448,11 @@ function createConfigurationService({
       }
     }
 
-    if (row.catalogo === 'operation_shifts' && TurnoOperacional) {
-      const shifts = await TurnoOperacional.findAll({ transaction });
-      const openShifts = shifts.filter((shift) => normalizedMeaning(shift.status) === 'aberto');
-      const meanings = new Set([normalizedMeaning(row.nome), normalizedMeaning(row.codigo)]);
-      if (openShifts.some((shift) => meanings.has(normalizedMeaning(shift.nome)))) {
-        throw codedError(
-          CONFIGURATION_ERROR_CODES.IN_USE,
-          'A opção está a ser usada por um turno atualmente aberto.',
-        );
-      }
+    if (await isUsedByOpenShift(row, transaction)) {
+      throw codedError(
+        CONFIGURATION_ERROR_CODES.IN_USE,
+        'A opção está a ser usada por um turno atualmente aberto.',
+      );
     }
   };
 
@@ -454,7 +464,7 @@ function createConfigurationService({
         && (!Number.isInteger(expectedVersion) || row.versao !== expectedVersion)) throw conflictError();
       if (!active) await assertCanDeactivate(row, transaction);
       else {
-        assertEditableCatalog(row.catalogo);
+        assertEditableOption(row);
         if (row.ativo) throw validationError('A opção já está ativa.');
       }
       const before = catalogOptionValue(row);
@@ -482,6 +492,12 @@ function createConfigurationService({
       const activeRows = await OpcaoCatalogo.findAll({
         where: { catalogo: catalogKey, ativo: true }, transaction,
       });
+      if (activeRows.some((row) => row.sistema)) {
+        throw codedError(
+          CONFIGURATION_ERROR_CODES.PROTECTED,
+          'Opções técnicas protegidas não podem ser reordenadas.',
+        );
+      }
       const expected = activeRows.map((row) => row.id).sort((a, b) => a - b);
       const received = [...optionIds].sort((a, b) => a - b);
       if (expected.length !== received.length
