@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { createRequire } from 'node:module';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Sequelize } from 'sequelize';
 
 const require = createRequire(import.meta.url);
@@ -152,8 +155,11 @@ describe('configurationService', () => {
   test('updateSection rolls back setting changes and audits after a mid-transaction failure', async () => {
     await service.seedDefaults();
     const originalCreate = models.AuditoriaConfiguracao.create;
-    models.AuditoriaConfiguracao.create = async () => {
-      throw new Error('injected audit failure');
+    let auditCalls = 0;
+    models.AuditoriaConfiguracao.create = async (...args) => {
+      auditCalls += 1;
+      if (auditCalls === 2) throw new Error('injected second audit failure');
+      return originalCreate.call(models.AuditoriaConfiguracao, ...args);
     };
     try {
       await assert.rejects(service.updateSection({
@@ -161,7 +167,7 @@ describe('configurationService', () => {
         section: 'sales',
         values: { 'sales.defaultTaxRate': 14, 'sales.maxDiscount': 10 },
         expectedVersions: { 'sales.defaultTaxRate': 1, 'sales.maxDiscount': 1 },
-      }), /injected audit failure/);
+      }), /injected second audit failure/);
     } finally {
       models.AuditoriaConfiguracao.create = originalCreate;
     }
@@ -173,6 +179,7 @@ describe('configurationService', () => {
       ['sales.defaultTaxRate', '0', 1],
       ['sales.maxDiscount', '580.2', 1],
     ]);
+    assert.equal(auditCalls, 2);
     assert.equal(await models.AuditoriaConfiguracao.count(), 0);
   });
 
@@ -186,6 +193,13 @@ describe('configurationService', () => {
         expectedVersions: { [key]: 1 },
       }), (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION);
     }
+  });
+
+  test('updateSection returns a coded validation error for an undefined request', async () => {
+    await assert.rejects(
+      service.updateSection(),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
+    );
   });
 
   test('reserveNextDocumentNumber serializes concurrent reservations and audits each one', async () => {
@@ -252,6 +266,30 @@ describe('configurationService', () => {
     }
   });
 
+  test('reserveNextDocumentNumber rejects present falsy series without mutating config or audit', async () => {
+    await service.seedDefaults();
+    const fiscal = await models.ConfiguracaoSistema.findOne({ where: { chave: 'documents.fiscal' } });
+
+    for (const corruptSeries of [null, false, 0, '']) {
+      const configured = JSON.parse(fiscal.valor_json);
+      configured.series.factura = corruptSeries;
+      await fiscal.update({ valor_json: JSON.stringify(configured) });
+      const beforeJson = fiscal.valor_json;
+      const beforeVersion = fiscal.versao;
+      const beforeAudits = await models.AuditoriaConfiguracao.count();
+
+      await assert.rejects(
+        service.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
+        (error) => error.code === CONFIGURATION_ERROR_CODES.VALIDATION,
+      );
+
+      await fiscal.reload();
+      assert.equal(fiscal.valor_json, beforeJson);
+      assert.equal(fiscal.versao, beforeVersion);
+      assert.equal(await models.AuditoriaConfiguracao.count(), beforeAudits);
+    }
+  });
+
   test('two service instances reserve distinct numbers concurrently', async () => {
     const secondService = createConfigurationService({
       db,
@@ -266,6 +304,45 @@ describe('configurationService', () => {
     ]);
 
     assert.deepEqual(numbers, ['FAT001/26', 'FAT002/26']);
+  });
+
+  test('two Sequelize connections contend safely for a file-backed fiscal sequence', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'configuration-service-'));
+    const storage = join(directory, 'configuration.sqlite');
+    const firstDb = new Sequelize({ dialect: 'sqlite', storage, logging: false });
+    const firstModels = defineModels(firstDb);
+    const secondDb = new Sequelize({ dialect: 'sqlite', storage, logging: false });
+    const secondModels = defineModels(secondDb);
+
+    try {
+      await firstDb.sync({ force: true });
+      const fileActor = await firstModels.Usuario.create({
+        nome_usuario: 'file-admin',
+        senha_hash: 'test-only',
+        nome_completo: 'File Admin',
+      });
+      const clock = () => new Date('2026-06-19T00:00:00.000Z');
+      const firstService = createConfigurationService({ db: firstDb, models: firstModels, now: clock });
+      const secondService = createConfigurationService({ db: secondDb, models: secondModels, now: clock });
+      await firstService.seedDefaults();
+
+      const numbers = await Promise.all([
+        firstService.reserveNextDocumentNumber({
+          actorUserId: fileActor.id,
+          documentType: 'factura',
+        }),
+        secondService.reserveNextDocumentNumber({
+          actorUserId: fileActor.id,
+          documentType: 'factura',
+        }),
+      ]);
+
+      assert.deepEqual(numbers.sort(), ['FAT001/26', 'FAT002/26']);
+      assert.equal(await firstModels.AuditoriaConfiguracao.count({ where: { acao: 'reserve' } }), 2);
+    } finally {
+      await Promise.allSettled([firstDb.close(), secondDb.close()]);
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test('the shared mutation queue recovers after failed update and reservation operations', async () => {

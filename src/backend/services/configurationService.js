@@ -65,7 +65,11 @@ const conflictError = () => new ConfigurationError(
   'Configuração alterada por outra sessão.',
 );
 
-const validateMutationShape = ({ section, values, expectedVersions }) => {
+const validateMutationShape = (request) => {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw validationError('Pedido de atualização de configuração inválido.');
+  }
+  const { section, values, expectedVersions } = request;
   if (typeof section !== 'string' || !values || typeof values !== 'object'
     || Array.isArray(values) || !expectedVersions || typeof expectedVersions !== 'object'
     || Array.isArray(expectedVersions)) {
@@ -302,9 +306,15 @@ function createConfigurationService({ db, models, now = () => new Date() }) {
             );
           }
 
+          const hasStoredSeries = Object.prototype.hasOwnProperty.call(
+            parsed.value.series,
+            documentType,
+          );
           const storedSeries = validateSeries(
             documentType,
-            parsed.value.series[documentType] || defaultSeries(documentType, currentYear),
+            hasStoredSeries
+              ? parsed.value.series[documentType]
+              : defaultSeries(documentType, currentYear),
           );
           const series = storedSeries.year === currentYear
             ? storedSeries
