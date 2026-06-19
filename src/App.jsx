@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, ChevronDown, LogOut, Search } from 'lucide-react';
 import { useAuth } from './auth/AuthContext';
+import { SettingsProvider } from './configuration/SettingsContext';
+import { OperationProvider } from './operation/OperationContext';
 import Navbar from './components/Navbar';
 import ChangePassword from './components/ChangePassword';
 import Dashboard from './components/Dashboard';
@@ -202,7 +204,9 @@ function App() {
   }
 
   return (
-    <div className={isMenuCollapsed ? 'app-shell menu-collapsed' : 'app-shell'}>
+    <SettingsProvider>
+      <OperationProvider>
+        <div className={isMenuCollapsed ? 'app-shell menu-collapsed' : 'app-shell'}>
       <Navbar
         currentView={activeView}
         hasPermission={hasPermission}
@@ -295,7 +299,9 @@ function App() {
         </header>
         <main className="screen-frame">{currentScreen}</main>
       </div>
-    </div>
+        </div>
+      </OperationProvider>
+    </SettingsProvider>
   );
 }
 

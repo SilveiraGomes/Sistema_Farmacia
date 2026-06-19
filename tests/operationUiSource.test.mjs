@@ -20,11 +20,11 @@ test('operation context exposes provider, hook, and IPC route actions', async ()
   }
 });
 
-test('app root is wrapped with the operation provider', async () => {
-  const source = await readFile(new URL('../src/index.jsx', import.meta.url), 'utf8');
+test('authenticated app is wrapped with the operation provider', async () => {
+  const source = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
 
   assert.match(source, /import\s+\{\s*OperationProvider\s*\}\s+from\s+['"]\.\/operation\/OperationContext['"]/);
-  assert.match(source, /<ConfirmationProvider>\s*<OperationProvider>\s*<App\s*\/>\s*<\/OperationProvider>\s*<\/ConfirmationProvider>/s);
+  assert.match(source, /if\s*\(!user\)[\s\S]*return <Login \/>[\s\S]*<OperationProvider>/);
 });
 
 test('operation provider refreshes from authenticated session state', async () => {

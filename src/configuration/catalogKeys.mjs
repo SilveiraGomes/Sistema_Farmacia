@@ -1,0 +1,174 @@
+export const CATALOG_KEYS = Object.freeze({
+  PAYMENT_METHODS: 'payment_methods',
+  OPERATION_SHIFTS: 'operation_shifts',
+  EXPENSE_CATEGORIES: 'expense_categories',
+  REVENUE_CATEGORIES: 'revenue_categories',
+  LOSS_REASONS: 'loss_reasons',
+  STOCK_UNITS: 'stock_units',
+  STOCK_LOCATIONS: 'stock_locations',
+  CLIENT_STATUSES: 'client_statuses',
+  DOCUMENT_TYPES: 'document_types',
+  DOCUMENT_STATUSES: 'document_statuses',
+  FINANCIAL_ENTRY_TYPES: 'financial_entry_types',
+  FINANCIAL_STATUSES: 'financial_statuses',
+  OPERATION_STATUSES: 'operation_statuses',
+});
+
+const CATALOG_SEEDS = Object.freeze({
+  [CATALOG_KEYS.PAYMENT_METHODS]: ['dinheiro', 'tpa', 'transferencia', 'credito'],
+  [CATALOG_KEYS.OPERATION_SHIFTS]: ['manha', 'tarde', 'noite'],
+  [CATALOG_KEYS.EXPENSE_CATEGORIES]: [
+    'infraestrutura', 'recursos-humanos', 'servicos', 'fornecedores', 'marketing', 'outro',
+  ],
+  [CATALOG_KEYS.REVENUE_CATEGORIES]: ['servico', 'rendimento-extra', 'ajuste-caixa', 'outro'],
+  [CATALOG_KEYS.LOSS_REASONS]: [
+    'expiracao', 'danificado', 'furto', 'consumo-interno', 'obsolescencia', 'outro',
+  ],
+  [CATALOG_KEYS.STOCK_UNITS]: ['unidade', 'caixa', 'frasco', 'blister'],
+  [CATALOG_KEYS.STOCK_LOCATIONS]: ['loja', 'armazem'],
+  [CATALOG_KEYS.CLIENT_STATUSES]: ['activo', 'pendente', 'inactivo'],
+  [CATALOG_KEYS.DOCUMENT_TYPES]: ['factura', 'recibo', 'proforma', 'nota-credito'],
+  [CATALOG_KEYS.DOCUMENT_STATUSES]: ['emitido', 'pago', 'pendente', 'anulado', 'convertido'],
+  [CATALOG_KEYS.FINANCIAL_ENTRY_TYPES]: ['expense', 'revenue', 'loss'],
+  [CATALOG_KEYS.FINANCIAL_STATUSES]: ['pendente', 'paga', 'cancelada'],
+  [CATALOG_KEYS.OPERATION_STATUSES]: ['aberto', 'fechado', 'bloqueado'],
+});
+
+const EDITABLE_CATALOGS = new Set([
+  CATALOG_KEYS.PAYMENT_METHODS,
+  CATALOG_KEYS.OPERATION_SHIFTS,
+  CATALOG_KEYS.EXPENSE_CATEGORIES,
+  CATALOG_KEYS.REVENUE_CATEGORIES,
+  CATALOG_KEYS.LOSS_REASONS,
+  CATALOG_KEYS.STOCK_UNITS,
+  CATALOG_KEYS.STOCK_LOCATIONS,
+]);
+
+const SETTING_DEFAULTS = Object.freeze({
+  company: {
+    identity: {
+      pharmacyName: 'Sistema de Farmacia', taxId: '', address: '', phone: '', email: '', logoDataUrl: '',
+    },
+  },
+  documents: {
+    headerText: 'Sistema de Farmacia',
+    currency: 'AKZ',
+    fiscal: {
+      validationNumber: '999/AGT/2026', softwareName: 'KILSYSTEM', fiscalRegime: 'Regime: Exclusao',
+      showQrCode: true, showTotalInWords: true, bankAccounts: [], series: {},
+    },
+  },
+  sales: {
+    defaultPaymentMethod: 'dinheiro', defaultTaxRate: 0, maxDiscount: 580.2,
+    rounding: 'centimos', finalConsumerLabel: 'Consumidor final',
+  },
+  stock: { lowStockThreshold: 25, expiryAlertDays: 30 },
+  alerts: { dashboardEnabled: true, defaultMessage: '' },
+  backup: { options: { frequency: 'manual', folderPath: '', retentionCount: 7 } },
+  migration: { legacyLocalStorageVersion: 0 },
+});
+
+const SETTING_SCHEMAS = Object.freeze({
+  'company.identity': { group: 'company', type: 'object' },
+  'documents.headerText': { group: 'documents', type: 'text' },
+  'documents.currency': { group: 'documents', type: 'text' },
+  'documents.fiscal': { group: 'documents', type: 'object' },
+  'sales.defaultPaymentMethod': {
+    group: 'sales', type: 'catalog-code', catalog: CATALOG_KEYS.PAYMENT_METHODS,
+  },
+  'sales.defaultTaxRate': { group: 'sales', type: 'number', min: 0, max: 100 },
+  'sales.maxDiscount': { group: 'sales', type: 'number', min: 0 },
+  'sales.rounding': { group: 'sales', type: 'enum', values: ['centimos', 'unidade'] },
+  'sales.finalConsumerLabel': { group: 'sales', type: 'text' },
+  'stock.lowStockThreshold': { group: 'stock', type: 'number', min: 0 },
+  'stock.expiryAlertDays': { group: 'stock', type: 'number', min: 0 },
+  'alerts.dashboardEnabled': { group: 'alerts', type: 'boolean' },
+  'alerts.defaultMessage': { group: 'alerts', type: 'text' },
+  'backup.options': { group: 'backup', type: 'object' },
+  'migration.legacyLocalStorageVersion': { group: 'migration', type: 'number', min: 0 },
+});
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function titleFromCode(code) {
+  return code
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(' ');
+}
+
+export function createSafeDefaultSnapshot() {
+  const settings = {};
+  const settingDefinitions = {};
+
+  for (const [group, groupSettings] of Object.entries(SETTING_DEFAULTS)) {
+    settings[group] = {};
+    for (const [name, defaultValue] of Object.entries(groupSettings)) {
+      const key = `${group}.${name}`;
+      settings[group][name] = {
+        key,
+        value: clone(defaultValue),
+        version: 0,
+        updatedAt: null,
+        readable: false,
+      };
+      settingDefinitions[key] = {
+        ...clone(SETTING_SCHEMAS[key]),
+        defaultValue: clone(defaultValue),
+      };
+    }
+  }
+
+  const catalogs = {};
+  const catalogDefinitions = {};
+  for (const [catalogKey, codes] of Object.entries(CATALOG_SEEDS)) {
+    const editable = EDITABLE_CATALOGS.has(catalogKey);
+    catalogs[catalogKey] = codes.map((code, order) => ({
+      id: null,
+      code,
+      name: titleFromCode(code),
+      order,
+      active: true,
+      system: !editable,
+      metadata: {},
+      metadataReadable: true,
+      version: 0,
+    }));
+    catalogDefinitions[catalogKey] = { editable, system: !editable };
+  }
+
+  return {
+    settings,
+    catalogs,
+    definitions: { settings: settingDefinitions, catalogs: catalogDefinitions },
+    migrations: { legacyLocalStoragePending: true },
+  };
+}
+
+const optionOrder = (left, right) => (
+  (Number(left.order) || 0) - (Number(right.order) || 0)
+  || String(left.name || '').localeCompare(String(right.name || ''), 'pt')
+  || String(left.code || '').localeCompare(String(right.code || ''), 'pt')
+);
+
+export function filterCatalogOptions(
+  snapshot,
+  catalogKey,
+  { includeInactive = false, selectedCode = '' } = {},
+) {
+  const options = snapshot?.catalogs?.[catalogKey];
+  if (!Array.isArray(options)) return [];
+
+  const includedCodes = new Set();
+  return [...options]
+    .sort(optionOrder)
+    .filter((option) => {
+      if (!option || typeof option.code !== 'string' || includedCodes.has(option.code)) return false;
+      if (!includeInactive && !option.active && option.code !== selectedCode) return false;
+      includedCodes.add(option.code);
+      return true;
+    });
+}
