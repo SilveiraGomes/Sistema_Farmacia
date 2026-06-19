@@ -326,7 +326,7 @@ function registerLegacyRoutes(ipc, { Categoria, Subcategoria, Produto }, overrid
   });
 }
 
-function init(models, options = {}) {
+async function init(models, options = {}) {
   const ipc = options.ipcMain || ipcMain;
   const configurationService = options.configurationService
     || (options.createConfigurationService || createConfigurationService)({ db: models.db, models });
@@ -335,6 +335,7 @@ function init(models, options = {}) {
     ...(options.authService ? { authService: options.authService } : {}),
     ...(options.assertPermission ? { assertPermission: options.assertPermission } : {}),
   };
+  await configurationService.seedDefaults();
   const routes = buildRouteMap(dependencies);
 
   if (typeof ipc.removeHandler === "function") {

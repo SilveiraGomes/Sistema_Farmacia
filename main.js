@@ -7,16 +7,11 @@ let db = null;
 let models = null;
 
 async function initializeDatabase(electronApp) {
-  try {
-    db = await connectDB(electronApp, process.env.NODE_ENV || "development");
-    models = getModels();
-    // Sincronizar modelos com o banco de dados
-    await syncDatabaseSchema(db); // Use { force: true } para recriar tabelas em desenvolvimento
-    console.log("Modelos sincronizados com o banco de dados.");
-  } catch (error) {
-    console.error("Erro ao inicializar o banco de dados:", error);
-    electronApp.quit();
-  }
+  db = await connectDB(electronApp, process.env.NODE_ENV || "development");
+  models = getModels();
+  // Sincronizar modelos com o banco de dados
+  await syncDatabaseSchema(db); // Use { force: true } para recriar tabelas em desenvolvimento
+  console.log("Modelos sincronizados com o banco de dados.");
 }
 
 function createWindow () {
@@ -37,15 +32,20 @@ function createWindow () {
 }
 
 app.whenReady().then(async () => {
-  await initializeDatabase(app);
-  ipcHandlers.init({ db, ...models });
-  createWindow();
+  try {
+    await initializeDatabase(app);
+    await ipcHandlers.init({ db, ...models });
+    createWindow();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  } catch (error) {
+    console.error("Erro ao inicializar a aplicacao:", error);
+    app.quit();
+  }
 });
 
 app.on("window-all-closed", () => {

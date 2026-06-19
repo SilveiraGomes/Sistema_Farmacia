@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const { buildRouteMap, handleAppRequest, init } = require('../src/backend/ipcHandlers.js');
@@ -137,20 +138,25 @@ test('unknown CONFIGURATION_* codes retain the generic safe fallback', async () 
   });
 });
 
-test('init constructs and injects one configuration service into the app request routes', async () => {
+test('init seeds defaults before registering routes and seeds exactly once', async () => {
   let appHandler;
   const calls = [];
   const db = { name: 'db' };
   const models = { db, Categoria: {}, Subcategoria: {}, Produto: {}, ConfiguracaoSistema: {} };
   const createdService = dependencies(calls).configurationService;
+  let releaseSeed;
+  createdService.seedDefaults = async () => {
+    calls.push(['seedDefaults']);
+    await new Promise((resolve) => { releaseSeed = resolve; });
+  };
   const ipcMain = {
-    removeHandler() {},
-    handle(_channel, handler) { appHandler = handler; },
-    removeAllListeners() {},
-    on() {},
+    removeHandler() { calls.push(['removeHandler']); },
+    handle(_channel, handler) { calls.push(['handle']); appHandler = handler; },
+    removeAllListeners() { calls.push(['removeAllListeners']); },
+    on() { calls.push(['on']); },
   };
 
-  init(models, {
+  const initialization = init(models, {
     ipcMain,
     authService: { getCurrentSession: async () => ({ user: { id: 42 } }) },
     assertPermission: async () => undefined,
@@ -161,7 +167,48 @@ test('init constructs and injects one configuration service into the app request
     },
   });
 
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, [['seedDefaults']]);
+  assert.equal(appHandler, undefined);
+  releaseSeed();
+  await initialization;
+
   const response = await appHandler(null, { action: 'configuration.snapshot' });
   assert.equal(response.ok, true);
-  assert.deepEqual(calls, [['service', 'getSnapshot']]);
+  assert.deepEqual(calls, [
+    ['seedDefaults'],
+    ['removeHandler'],
+    ['handle'],
+    ['removeAllListeners'],
+    ['on'],
+    ['service', 'getSnapshot'],
+  ]);
+});
+
+test('init does not expose IPC routes when seeding fails', async () => {
+  const calls = [];
+  const failure = new Error('seed failed');
+  const ipcMain = {
+    removeHandler() { calls.push('removeHandler'); },
+    handle() { calls.push('handle'); },
+    removeAllListeners() { calls.push('removeAllListeners'); },
+    on() { calls.push('on'); },
+  };
+
+  await assert.rejects(init({ db: {}, Categoria: {}, Subcategoria: {}, Produto: {} }, {
+    ipcMain,
+    configurationService: { seedDefaults: async () => { throw failure; } },
+  }), failure);
+  assert.deepEqual(calls, []);
+});
+
+test('application startup awaits configuration initialization before creating a window', () => {
+  const source = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  const initIndex = source.indexOf('await ipcHandlers.init({ db, ...models });');
+  const windowIndex = source.indexOf('createWindow();', initIndex);
+
+  assert.notEqual(initIndex, -1);
+  assert.ok(windowIndex > initIndex);
+  assert.match(source.slice(initIndex, windowIndex + 'createWindow();'.length), /await ipcHandlers\.init[\s\S]*createWindow\(\);/);
+  assert.match(source, /catch \(error\)[\s\S]*app\.quit\(\);/);
 });

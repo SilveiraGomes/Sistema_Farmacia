@@ -416,7 +416,7 @@ test('handleAppRequest redacts unsafe messages even with operation error code', 
   });
 });
 
-test('init replaces existing app request handlers and legacy listeners', () => {
+test('init replaces existing app request handlers and legacy listeners', async () => {
   const calls = [];
   const fakeIpcMain = {
     removeHandler(channel) {
@@ -438,9 +438,9 @@ test('init replaces existing app request handlers and legacy listeners', () => {
     Produto: {},
   };
 
-  const configurationService = {};
-  init(models, { ipcMain: fakeIpcMain, configurationService });
-  init(models, { ipcMain: fakeIpcMain, configurationService });
+  const configurationService = { seedDefaults: async () => undefined };
+  await init(models, { ipcMain: fakeIpcMain, configurationService });
+  await init(models, { ipcMain: fakeIpcMain, configurationService });
 
   assert.deepEqual(calls, [
     ['removeHandler', 'app:request'],
