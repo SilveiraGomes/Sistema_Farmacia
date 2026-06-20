@@ -28,7 +28,11 @@ function defineModels(db) {
 
   const Subcategoria = db.define("Subcategoria", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    categoria_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Categoria, key: "id" } },
+    categoria_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: Categoria, key: "id" },
+    },
     nome: { type: DataTypes.STRING, allowNull: false },
     codigo: { type: DataTypes.STRING },
     descricao: { type: DataTypes.TEXT },
@@ -45,8 +49,14 @@ function defineModels(db) {
     preco_custo: { type: DataTypes.DECIMAL(10, 2) },
     fabricante: { type: DataTypes.STRING },
     categoria: { type: DataTypes.STRING },
-    categoria_id: { type: DataTypes.INTEGER, references: { model: Categoria, key: "id" } },
-    subcategoria_id: { type: DataTypes.INTEGER, references: { model: Subcategoria, key: "id" } },
+    categoria_id: {
+      type: DataTypes.INTEGER,
+      references: { model: Categoria, key: "id" },
+    },
+    subcategoria_id: {
+      type: DataTypes.INTEGER,
+      references: { model: Subcategoria, key: "id" },
+    },
     unidade_medida: { type: DataTypes.STRING, defaultValue: "Unidade" },
     estoque_minimo: { type: DataTypes.INTEGER, defaultValue: 0 },
     receita_obrigatoria: { type: DataTypes.BOOLEAN, defaultValue: false },
@@ -55,7 +65,11 @@ function defineModels(db) {
 
   const Estoque = db.define("Estoque", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    produto_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Produto, key: "id" } },
+    produto_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: Produto, key: "id" },
+    },
     lote: { type: DataTypes.STRING, allowNull: false },
     quantidade: { type: DataTypes.INTEGER, allowNull: false },
     data_validade: { type: DataTypes.DATE, allowNull: false },
@@ -68,12 +82,12 @@ function defineModels(db) {
     numero_factura: { type: DataTypes.STRING },
     data_venda: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
     total: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
-    subtotal: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 },
-    imposto: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 },
-    desconto: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 },
+    subtotal: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 },
+    imposto: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 },
+    desconto: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 },
     forma_pagamento: { type: DataTypes.STRING, allowNull: false },
-    valor_pago: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 },
-    troco: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 },
+    valor_pago: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 },
+    troco: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 },
     status: { type: DataTypes.STRING, defaultValue: "Concluida" },
     cliente_id: { type: DataTypes.INTEGER },
     usuario_id: { type: DataTypes.INTEGER, allowNull: false },
@@ -81,8 +95,16 @@ function defineModels(db) {
 
   const ItemVenda = db.define("ItemVenda", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    venda_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Venda, key: "id" } },
-    produto_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Produto, key: "id" } },
+    venda_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: Venda, key: "id" },
+    },
+    produto_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: Produto, key: "id" },
+    },
     lote: { type: DataTypes.STRING, allowNull: false },
     quantidade: { type: DataTypes.INTEGER, allowNull: false },
     preco_unitario: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
@@ -110,13 +132,37 @@ function defineModels(db) {
   const DiaOperacional = db.define("DiaOperacional", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     data_operacional: { type: DataTypes.DATEONLY, allowNull: false },
-    status: { type: DataTypes.STRING, defaultValue: "Aberto", allowNull: false },
-    saldo_inicial: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    status: {
+      type: DataTypes.STRING,
+      defaultValue: "Aberto",
+      allowNull: false,
+    },
+    saldo_inicial: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
     saldo_final_informado: { type: DataTypes.DECIMAL(10, 2) },
-    total_vendas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
-    total_despesas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
-    total_perdas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
-    diferenca_caixa: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    total_vendas: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    total_despesas: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    total_perdas: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    diferenca_caixa: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
     observacao_abertura: { type: DataTypes.TEXT },
     observacao_fechamento: { type: DataTypes.TEXT },
     aberto_por_usuario_id: { type: DataTypes.INTEGER },
@@ -133,13 +179,37 @@ function defineModels(db) {
       references: { model: DiaOperacional, key: "id" },
     },
     nome: { type: DataTypes.STRING, allowNull: false },
-    status: { type: DataTypes.STRING, defaultValue: "Aberto", allowNull: false },
-    saldo_inicial: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    status: {
+      type: DataTypes.STRING,
+      defaultValue: "Aberto",
+      allowNull: false,
+    },
+    saldo_inicial: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
     saldo_final_informado: { type: DataTypes.DECIMAL(10, 2) },
-    total_vendas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
-    total_despesas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
-    total_perdas: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
-    diferenca_caixa: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0, allowNull: false },
+    total_vendas: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    total_despesas: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    total_perdas: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
+    diferenca_caixa: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+      allowNull: false,
+    },
     observacao_abertura: { type: DataTypes.TEXT },
     observacao_fechamento: { type: DataTypes.TEXT },
     aberto_por_usuario_id: { type: DataTypes.INTEGER },
@@ -169,15 +239,19 @@ function defineModels(db) {
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
 
-  const Perfil = db.define("Perfil", {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    nome: { type: DataTypes.STRING, unique: true, allowNull: false },
-    descricao: { type: DataTypes.TEXT },
-    sistema: { type: DataTypes.BOOLEAN, defaultValue: false },
-    ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
-  }, {
-    tableName: "Perfis",
-  });
+  const Perfil = db.define(
+    "Perfil",
+    {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      nome: { type: DataTypes.STRING, unique: true, allowNull: false },
+      descricao: { type: DataTypes.TEXT },
+      sistema: { type: DataTypes.BOOLEAN, defaultValue: false },
+      ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
+    },
+    {
+      tableName: "Perfis",
+    },
+  );
 
   const Permissao = db.define("Permissao", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -189,8 +263,16 @@ function defineModels(db) {
 
   const PerfilPermissao = db.define("PerfilPermissao", {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    perfil_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Perfil, key: "id" } },
-    permissao_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Permissao, key: "id" } },
+    perfil_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: Perfil, key: "id" },
+    },
+    permissao_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: Permissao, key: "id" },
+    },
   });
 
   const Usuario = db.define("Usuario", {
@@ -201,7 +283,10 @@ function defineModels(db) {
     email: { type: DataTypes.STRING, unique: true },
     cargo: { type: DataTypes.STRING },
     ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
-    perfil_id: { type: DataTypes.INTEGER, references: { model: Perfil, key: "id" } },
+    perfil_id: {
+      type: DataTypes.INTEGER,
+      references: { model: Perfil, key: "id" },
+    },
     deve_trocar_senha: { type: DataTypes.BOOLEAN, defaultValue: false },
     ultimo_login_em: { type: DataTypes.DATE },
     falhas_login: { type: DataTypes.INTEGER, defaultValue: 0 },
@@ -218,46 +303,66 @@ function defineModels(db) {
     data_evento: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
 
-  const ConfiguracaoSistema = db.define("ConfiguracaoSistema", {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    chave: { type: DataTypes.STRING, allowNull: false, unique: true },
-    grupo: { type: DataTypes.STRING, allowNull: false },
-    tipo: { type: DataTypes.STRING, allowNull: false },
-    valor_json: { type: DataTypes.TEXT, allowNull: false },
-    versao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
-    atualizado_por_usuario_id: { type: DataTypes.INTEGER },
-  }, {
-    tableName: "ConfiguracoesSistema",
-  });
+  const ConfiguracaoSistema = db.define(
+    "ConfiguracaoSistema",
+    {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      chave: { type: DataTypes.STRING, allowNull: false, unique: true },
+      grupo: { type: DataTypes.STRING, allowNull: false },
+      tipo: { type: DataTypes.STRING, allowNull: false },
+      valor_json: { type: DataTypes.TEXT, allowNull: false },
+      versao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+      atualizado_por_usuario_id: { type: DataTypes.INTEGER },
+    },
+    {
+      tableName: "ConfiguracoesSistema",
+    },
+  );
 
-  const OpcaoCatalogo = db.define("OpcaoCatalogo", {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    catalogo: { type: DataTypes.STRING, allowNull: false },
-    codigo: { type: DataTypes.STRING, allowNull: false },
-    nome: { type: DataTypes.STRING, allowNull: false },
-    ordem: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
-    ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-    sistema: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-    metadados_json: { type: DataTypes.TEXT, allowNull: false, defaultValue: "{}" },
-    versao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
-    atualizado_por_usuario_id: { type: DataTypes.INTEGER },
-  }, {
-    tableName: "OpcoesCatalogo",
-    indexes: [{ unique: true, fields: ["catalogo", "codigo"] }],
-  });
+  const OpcaoCatalogo = db.define(
+    "OpcaoCatalogo",
+    {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      catalogo: { type: DataTypes.STRING, allowNull: false },
+      codigo: { type: DataTypes.STRING, allowNull: false },
+      nome: { type: DataTypes.STRING, allowNull: false },
+      ordem: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      sistema: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      metadados_json: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+        defaultValue: "{}",
+      },
+      versao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+      atualizado_por_usuario_id: { type: DataTypes.INTEGER },
+    },
+    {
+      tableName: "OpcoesCatalogo",
+      indexes: [{ unique: true, fields: ["catalogo", "codigo"] }],
+    },
+  );
 
-  const AuditoriaConfiguracao = db.define("AuditoriaConfiguracao", {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    ator_usuario_id: { type: DataTypes.INTEGER },
-    tipo_alvo: { type: DataTypes.STRING, allowNull: false },
-    alvo_chave: { type: DataTypes.STRING, allowNull: false },
-    acao: { type: DataTypes.STRING, allowNull: false },
-    valor_anterior_json: { type: DataTypes.TEXT },
-    valor_novo_json: { type: DataTypes.TEXT },
-    data_evento: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
-  }, {
-    tableName: "AuditoriasConfiguracao",
-  });
+  const AuditoriaConfiguracao = db.define(
+    "AuditoriaConfiguracao",
+    {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      ator_usuario_id: { type: DataTypes.INTEGER },
+      tipo_alvo: { type: DataTypes.STRING, allowNull: false },
+      alvo_chave: { type: DataTypes.STRING, allowNull: false },
+      acao: { type: DataTypes.STRING, allowNull: false },
+      valor_anterior_json: { type: DataTypes.TEXT },
+      valor_novo_json: { type: DataTypes.TEXT },
+      data_evento: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    },
+    {
+      tableName: "AuditoriasConfiguracao",
+    },
+  );
 
   Categoria.hasMany(Subcategoria, { foreignKey: "categoria_id" });
   Subcategoria.belongsTo(Categoria, { foreignKey: "categoria_id" });
@@ -286,12 +391,28 @@ function defineModels(db) {
   TransacaoFinanceira.belongsTo(Fornecedor, { foreignKey: "fornecedor_id" });
   Fornecedor.hasMany(TransacaoFinanceira, { foreignKey: "fornecedor_id" });
 
-  DiaOperacional.hasMany(TurnoOperacional, { foreignKey: "dia_operacional_id" });
-  TurnoOperacional.belongsTo(DiaOperacional, { foreignKey: "dia_operacional_id" });
-  DiaOperacional.belongsTo(Usuario, { as: "abertoPor", foreignKey: "aberto_por_usuario_id" });
-  DiaOperacional.belongsTo(Usuario, { as: "fechadoPor", foreignKey: "fechado_por_usuario_id" });
-  TurnoOperacional.belongsTo(Usuario, { as: "abertoPor", foreignKey: "aberto_por_usuario_id" });
-  TurnoOperacional.belongsTo(Usuario, { as: "fechadoPor", foreignKey: "fechado_por_usuario_id" });
+  DiaOperacional.hasMany(TurnoOperacional, {
+    foreignKey: "dia_operacional_id",
+  });
+  TurnoOperacional.belongsTo(DiaOperacional, {
+    foreignKey: "dia_operacional_id",
+  });
+  DiaOperacional.belongsTo(Usuario, {
+    as: "abertoPor",
+    foreignKey: "aberto_por_usuario_id",
+  });
+  DiaOperacional.belongsTo(Usuario, {
+    as: "fechadoPor",
+    foreignKey: "fechado_por_usuario_id",
+  });
+  TurnoOperacional.belongsTo(Usuario, {
+    as: "abertoPor",
+    foreignKey: "aberto_por_usuario_id",
+  });
+  TurnoOperacional.belongsTo(Usuario, {
+    as: "fechadoPor",
+    foreignKey: "fechado_por_usuario_id",
+  });
 
   Perfil.belongsToMany(Permissao, {
     through: { model: PerfilPermissao, unique: false },
@@ -305,8 +426,14 @@ function defineModels(db) {
   });
   Perfil.hasMany(Usuario, { foreignKey: "perfil_id" });
   Usuario.belongsTo(Perfil, { foreignKey: "perfil_id" });
-  AuditoriaUsuario.belongsTo(Usuario, { as: "ator", foreignKey: "ator_usuario_id" });
-  AuditoriaUsuario.belongsTo(Usuario, { as: "usuarioAfetado", foreignKey: "usuario_afetado_id" });
+  AuditoriaUsuario.belongsTo(Usuario, {
+    as: "ator",
+    foreignKey: "ator_usuario_id",
+  });
+  AuditoriaUsuario.belongsTo(Usuario, {
+    as: "usuarioAfetado",
+    foreignKey: "usuario_afetado_id",
+  });
   ConfiguracaoSistema.belongsTo(Usuario, {
     as: "atualizadoPorConfiguracao",
     foreignKey: "atualizado_por_usuario_id",
@@ -353,6 +480,28 @@ function hasTable(tables, tableName) {
   });
 }
 
+async function dropSqliteAlterBackupTables(db) {
+  if (db.getDialect() !== "sqlite") {
+    return;
+  }
+
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+  const backupTables = tables.flatMap((table) => {
+    if (typeof table === "string") {
+      return table.endsWith("_backup") ? [table] : [];
+    }
+
+    return Object.values(table).filter(
+      (value) => typeof value === "string" && value.endsWith("_backup"),
+    );
+  });
+
+  for (const backupTable of backupTables) {
+    await db.query(`DROP TABLE IF EXISTS ${backupTable}`);
+  }
+}
+
 async function ensureSqliteVendasColumns(db) {
   if (db.getDialect() !== "sqlite") {
     return;
@@ -368,10 +517,10 @@ async function ensureSqliteVendasColumns(db) {
   const columns = await queryInterface.describeTable("Vendas");
   const vendasColumns = [
     ["numero_factura", { type: DataTypes.STRING }],
-    ["subtotal", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 }],
-    ["imposto", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 }],
-    ["valor_pago", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 }],
-    ["troco", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.00 }],
+    ["subtotal", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 }],
+    ["imposto", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 }],
+    ["valor_pago", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 }],
+    ["troco", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 }],
   ];
 
   for (const [name, definition] of vendasColumns) {
@@ -391,10 +540,16 @@ async function ensureVendasInvoiceIndex(db) {
 
   const indexes = await queryInterface.showIndex("Vendas");
   const hasInvoiceIndex = indexes.some((index) => {
-    const fieldNames = (index.fields || []).map((field) => field.attribute || field.name);
+    const fieldNames = (index.fields || []).map(
+      (field) => field.attribute || field.name,
+    );
 
-    return index.name === VENDAS_INVOICE_INDEX ||
-      (index.unique && fieldNames.length === 1 && fieldNames[0] === "numero_factura");
+    return (
+      index.name === VENDAS_INVOICE_INDEX ||
+      (index.unique &&
+        fieldNames.length === 1 &&
+        fieldNames[0] === "numero_factura")
+    );
   });
 
   if (!hasInvoiceIndex) {
@@ -454,22 +609,32 @@ async function closeOpenOperationalRows(db, tableName, whereClause) {
   `);
 }
 
-async function repairDuplicateOpenOperationalRows(db, { hasOperationalDays, hasOperationalShifts }) {
+async function repairDuplicateOpenOperationalRows(
+  db,
+  { hasOperationalDays, hasOperationalShifts },
+) {
   let keptOpenDayId = null;
 
   if (hasOperationalDays) {
-    const rows = await db.query(`
+    const rows = await db.query(
+      `
       SELECT id
       FROM DiaOperacionals
       WHERE status = 'Aberto'
       ORDER BY id DESC
       LIMIT 1
-    `, { type: db.QueryTypes.SELECT });
+    `,
+      { type: db.QueryTypes.SELECT },
+    );
 
     keptOpenDayId = rows.length > 0 ? rows[0].id : null;
 
     if (keptOpenDayId !== null) {
-      await closeOpenOperationalRows(db, "DiaOperacionals", `id <> ${Number(keptOpenDayId)}`);
+      await closeOpenOperationalRows(
+        db,
+        "DiaOperacionals",
+        `id <> ${Number(keptOpenDayId)}`,
+      );
     }
   }
 
@@ -482,25 +647,32 @@ async function repairDuplicateOpenOperationalRows(db, { hasOperationalDays, hasO
     return;
   }
 
-  const rows = await db.query(`
+  const rows = await db.query(
+    `
     SELECT id
     FROM TurnoOperacionals
     WHERE status = 'Aberto'
       AND dia_operacional_id = ${Number(keptOpenDayId)}
     ORDER BY id DESC
     LIMIT 1
-  `, { type: db.QueryTypes.SELECT });
+  `,
+    { type: db.QueryTypes.SELECT },
+  );
   const keptOpenShiftId = rows.length > 0 ? rows[0].id : null;
 
   if (keptOpenShiftId === null) {
-    await closeOpenOperationalRows(db, "TurnoOperacionals", `dia_operacional_id <> ${Number(keptOpenDayId)}`);
+    await closeOpenOperationalRows(
+      db,
+      "TurnoOperacionals",
+      `dia_operacional_id <> ${Number(keptOpenDayId)}`,
+    );
     return;
   }
 
   await closeOpenOperationalRows(
     db,
     "TurnoOperacionals",
-    `dia_operacional_id <> ${Number(keptOpenDayId)} OR id <> ${Number(keptOpenShiftId)}`
+    `dia_operacional_id <> ${Number(keptOpenDayId)} OR id <> ${Number(keptOpenShiftId)}`,
   );
 }
 
@@ -571,13 +743,17 @@ async function ensurePerfilPermissaoUniqueIndex(db) {
 
   const indexes = await queryInterface.showIndex("PerfilPermissaos");
   const hasUniquePairIndex = indexes.some((index) => {
-    const fieldNames = (index.fields || []).map((field) => field.attribute || field.name);
+    const fieldNames = (index.fields || []).map(
+      (field) => field.attribute || field.name,
+    );
 
-    return index.name === PERFIL_PERMISSAO_UNIQUE_INDEX ||
+    return (
+      index.name === PERFIL_PERMISSAO_UNIQUE_INDEX ||
       (index.unique &&
         fieldNames.length === 2 &&
         fieldNames.includes("perfil_id") &&
-        fieldNames.includes("permissao_id"));
+        fieldNames.includes("permissao_id"))
+    );
   });
 
   if (hasUniquePairIndex) {
@@ -595,10 +771,14 @@ async function ensurePerfilPermissaoUniqueIndex(db) {
     `);
   }
 
-  await queryInterface.addIndex("PerfilPermissaos", ["perfil_id", "permissao_id"], {
-    name: PERFIL_PERMISSAO_UNIQUE_INDEX,
-    unique: true,
-  });
+  await queryInterface.addIndex(
+    "PerfilPermissaos",
+    ["perfil_id", "permissao_id"],
+    {
+      name: PERFIL_PERMISSAO_UNIQUE_INDEX,
+      unique: true,
+    },
+  );
 }
 
 async function normalizePerfilPermissaoTableForSqliteAlter(db) {
@@ -614,11 +794,18 @@ async function normalizePerfilPermissaoTableForSqliteAlter(db) {
   }
 
   const indexes = await queryInterface.showIndex("PerfilPermissaos");
-  const hasIndex = indexes.some((index) => index.name === PERFIL_PERMISSAO_UNIQUE_INDEX);
-  const hasLegacyUniqueIndex = indexes.some((index) => index.unique && index.name !== PERFIL_PERMISSAO_UNIQUE_INDEX);
+  const hasIndex = indexes.some(
+    (index) => index.name === PERFIL_PERMISSAO_UNIQUE_INDEX,
+  );
+  const hasLegacyUniqueIndex = indexes.some(
+    (index) => index.unique && index.name !== PERFIL_PERMISSAO_UNIQUE_INDEX,
+  );
 
   if (hasIndex) {
-    await queryInterface.removeIndex("PerfilPermissaos", PERFIL_PERMISSAO_UNIQUE_INDEX);
+    await queryInterface.removeIndex(
+      "PerfilPermissaos",
+      PERFIL_PERMISSAO_UNIQUE_INDEX,
+    );
   }
 
   if (!hasLegacyUniqueIndex) {
@@ -650,7 +837,109 @@ async function normalizePerfilPermissaoTableForSqliteAlter(db) {
     GROUP BY perfil_id, permissao_id
   `);
   await db.query("DROP TABLE PerfilPermissaos");
-  await db.query("ALTER TABLE PerfilPermissaos_normalized RENAME TO PerfilPermissaos");
+  await db.query(
+    "ALTER TABLE PerfilPermissaos_normalized RENAME TO PerfilPermissaos",
+  );
+}
+
+async function normalizeOpcaoCatalogoTableForSqliteAlter(db) {
+  if (db.getDialect() !== "sqlite") {
+    return;
+  }
+
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+
+  if (!hasTable(tables, "OpcoesCatalogo")) {
+    return;
+  }
+
+  const indexes = await queryInterface.showIndex("OpcoesCatalogo");
+  const hasLegacyUniqueCatalogIndex = indexes.some((index) => {
+    if (!index.unique) {
+      return false;
+    }
+
+    const fieldNames = (index.fields || []).map(
+      (field) => field.attribute || field.name,
+    );
+
+    return fieldNames.length === 1 && fieldNames[0] === "catalogo";
+  });
+
+  const tableInfo = await db.query(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'OpcoesCatalogo'",
+    { type: db.QueryTypes.SELECT },
+  );
+  const tableSql = tableInfo.length > 0 ? tableInfo[0].sql || "" : "";
+  const columns = await queryInterface.describeTable("OpcoesCatalogo");
+  const hasProblematicColumnUnique =
+    /`?catalogo`?\s+[^,]*UNIQUE/i.test(tableSql) ||
+    /`?codigo`?\s+[^,]*UNIQUE/i.test(tableSql) ||
+    Boolean(columns.catalogo?.unique) ||
+    Boolean(columns.codigo?.unique);
+
+  if (!hasLegacyUniqueCatalogIndex && !hasProblematicColumnUnique) {
+    return;
+  }
+
+  await db.query(`
+    CREATE TABLE OpcoesCatalogo_normalized (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      catalogo VARCHAR(255) NOT NULL,
+      codigo VARCHAR(255) NOT NULL,
+      nome VARCHAR(255) NOT NULL,
+      ordem INTEGER NOT NULL DEFAULT 0,
+      ativo TINYINT(1) NOT NULL DEFAULT 1,
+      sistema TINYINT(1) NOT NULL DEFAULT 0,
+      metadados_json TEXT NOT NULL DEFAULT '{}',
+      versao INTEGER NOT NULL DEFAULT 1,
+      atualizado_por_usuario_id INTEGER REFERENCES Usuarios(id),
+      createdAt DATETIME NOT NULL,
+      updatedAt DATETIME NOT NULL
+    )
+  `);
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS opcoes_catalogo_catalogo_codigo
+    ON OpcoesCatalogo_normalized (catalogo, codigo)
+  `);
+
+  await db.query(`
+    INSERT INTO OpcoesCatalogo_normalized (
+      id,
+      catalogo,
+      codigo,
+      nome,
+      ordem,
+      ativo,
+      sistema,
+      metadados_json,
+      versao,
+      atualizado_por_usuario_id,
+      createdAt,
+      updatedAt
+    )
+    SELECT
+      id,
+      catalogo,
+      codigo,
+      nome,
+      ordem,
+      ativo,
+      sistema,
+      metadados_json,
+      versao,
+      atualizado_por_usuario_id,
+      createdAt,
+      updatedAt
+    FROM OpcoesCatalogo
+  `);
+
+  await db.query("DROP TABLE OpcoesCatalogo");
+  await db.query(
+    "ALTER TABLE OpcoesCatalogo_normalized RENAME TO OpcoesCatalogo",
+  );
 }
 
 async function assignProfilesToExistingUsers() {
@@ -713,19 +1002,27 @@ async function seedPermissionsAndProfiles() {
       ? 0
       : await PerfilPermissao.count({ where: { perfil_id: perfil.id } });
 
-    if (existingPermissionLinks === 0 || profile.nome === ADMINISTRATOR_PROFILE) {
+    if (
+      existingPermissionLinks === 0 ||
+      profile.nome === ADMINISTRATOR_PROFILE
+    ) {
       const permissions = await Permissao.findAll({
         where: { chave: profile.permissoes },
       });
-      await PerfilPermissao.bulkCreate(permissions.map((permission) => ({
-        perfil_id: perfil.id,
-        permissao_id: permission.id,
-      })), { ignoreDuplicates: true });
+      await PerfilPermissao.bulkCreate(
+        permissions.map((permission) => ({
+          perfil_id: perfil.id,
+          permissao_id: permission.id,
+        })),
+        { ignoreDuplicates: true },
+      );
     }
 
     if (profile.nome !== ADMINISTRATOR_PROFILE) {
       for (const permissionKey of AUTHENTICATED_BASELINE_PERMISSIONS) {
-        const baselinePermission = await Permissao.findOne({ where: { chave: permissionKey } });
+        const baselinePermission = await Permissao.findOne({
+          where: { chave: permissionKey },
+        });
         await PerfilPermissao.findOrCreate({
           where: { perfil_id: perfil.id, permissao_id: baselinePermission.id },
         });
@@ -737,7 +1034,9 @@ async function seedPermissionsAndProfiles() {
 
   const userCount = await Usuario.count();
   if (userCount === 0) {
-    const adminProfile = await Perfil.findOne({ where: { nome: ADMINISTRATOR_PROFILE } });
+    const adminProfile = await Perfil.findOne({
+      where: { nome: ADMINISTRATOR_PROFILE },
+    });
     await Usuario.create({
       nome_usuario: "admin",
       senha_hash: hashPassword("Admin123!"),
@@ -759,6 +1058,8 @@ async function syncModels(db) {
 
   await db.query("PRAGMA foreign_keys = OFF");
   try {
+    await dropSqliteAlterBackupTables(db);
+    await normalizeOpcaoCatalogoTableForSqliteAlter(db);
     await normalizePerfilPermissaoTableForSqliteAlter(db);
     await db.sync({ alter: true });
   } finally {
@@ -802,7 +1103,9 @@ async function connectDB(app, env = "development") {
 
 function getModels() {
   if (!models) {
-    throw new Error("Os models ainda nao foram inicializados. Chame connectDB primeiro.");
+    throw new Error(
+      "Os models ainda nao foram inicializados. Chame connectDB primeiro.",
+    );
   }
 
   return models;
