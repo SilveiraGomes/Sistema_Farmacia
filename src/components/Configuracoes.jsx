@@ -1,333 +1,467 @@
-import React, { useState } from 'react';
-import { BellRing, Building2, CreditCard, FileText, ImagePlus, Percent, Save, Settings } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  getStoredBranding,
-  saveStoredBranding,
-} from '../data/branding.mjs';
-import {
-  getStoredInvoiceA4Settings,
-  saveStoredInvoiceA4Settings,
-} from '../data/invoiceSettings.mjs';
+  BellRing,
+  Boxes,
+  Building2,
+  CreditCard,
+  Database,
+  FileText,
+  Save,
+  Users,
+} from "lucide-react";
+import { useSettings } from "../configuration/SettingsContext";
+import { CATALOG_KEYS } from "../configuration/catalogKeys.mjs";
+import { request } from "../services/ipcClient";
+import CatalogEditor from "./settings/CatalogEditor";
+import SettingField from "./settings/SettingField";
+import SettingsSectionNav from "./settings/SettingsSectionNav";
 
-const settings = [
-  {
-    id: 'pharmacy',
-    title: 'Dados da Farmácia',
-    description: 'Nome, NIF, endereço e contactos',
-    status: 'Configurado',
-    icon: Building2,
-  },
-  {
-    id: 'payments',
-    title: 'Formas de Pagamento',
-    description: 'Dinheiro, TPA, transferência e crédito',
-    status: '4 activas',
-    icon: CreditCard,
-  },
-  {
-    id: 'alerts',
-    title: 'Alertas de Estoque',
-    description: 'Limites mínimos e validade próxima',
-    status: 'Activo',
-    icon: BellRing,
-  },
-  {
-    id: 'taxes',
-    title: 'Impostos e Descontos',
-    description: 'Taxas, descontos autorizados e arredondamento',
-    status: 'Revisar',
-    icon: Percent,
-  },
-  {
-    id: 'invoiceA4',
-    title: 'Modelo de Factura A4',
-    description: 'Rodape fiscal, QR code, series e contas bancarias',
-    status: 'A4 activo',
-    icon: FileText,
-  },
+const SECTIONS = [
+  { id: "company", label: "Empresa e documentos", icon: Building2 },
+  { id: "sales", label: "Vendas", icon: CreditCard },
+  { id: "operation", label: "Operação", icon: Boxes },
+  { id: "stock", label: "Stock", icon: Database },
+  { id: "finance", label: "Financeiro", icon: FileText },
+  { id: "references", label: "Clientes e documentos", icon: Users },
+  { id: "alerts", label: "Alertas e backup", icon: BellRing },
 ];
 
-function Configuracoes() {
-  const [activeSetting, setActiveSetting] = useState(null);
-  const [branding, setBranding] = useState(() => getStoredBranding());
-  const [invoiceA4Settings, setInvoiceA4Settings] = useState(() => getStoredInvoiceA4Settings());
+const CATALOGS_BY_SECTION = {
+  sales: [CATALOG_KEYS.PAYMENT_METHODS],
+  operation: [CATALOG_KEYS.OPERATION_SHIFTS, CATALOG_KEYS.OPERATION_STATUSES],
+  stock: [CATALOG_KEYS.STOCK_UNITS, CATALOG_KEYS.STOCK_LOCATIONS],
+  finance: [
+    CATALOG_KEYS.EXPENSE_CATEGORIES,
+    CATALOG_KEYS.REVENUE_CATEGORIES,
+    CATALOG_KEYS.LOSS_REASONS,
+    CATALOG_KEYS.FINANCIAL_ENTRY_TYPES,
+    CATALOG_KEYS.FINANCIAL_STATUSES,
+  ],
+  references: [
+    CATALOG_KEYS.CLIENT_STATUSES,
+    CATALOG_KEYS.DOCUMENT_TYPES,
+    CATALOG_KEYS.DOCUMENT_STATUSES,
+  ],
+};
 
-  function handleSaveBranding(nextBranding) {
-    setBranding(saveStoredBranding(nextBranding));
-    setActiveSetting(null);
+function snapshotValues(snapshot, section) {
+  if (section === "company")
+    return {
+      "company.identity": snapshot.settings.company.identity.value,
+      "documents.headerText": snapshot.settings.documents.headerText.value,
+      "documents.currency": snapshot.settings.documents.currency.value,
+      "documents.fiscal": snapshot.settings.documents.fiscal.value,
+    };
+  if (section === "sales")
+    return Object.fromEntries(
+      Object.values(snapshot.settings.sales).map((item) => [
+        item.key,
+        item.value,
+      ]),
+    );
+  if (section === "stock")
+    return Object.fromEntries(
+      Object.values(snapshot.settings.stock).map((item) => [
+        item.key,
+        item.value,
+      ]),
+    );
+  if (section === "alerts")
+    return {
+      ...Object.fromEntries(
+        Object.values(snapshot.settings.alerts).map((item) => [
+          item.key,
+          item.value,
+        ]),
+      ),
+      "backup.options": snapshot.settings.backup.options.value,
+    };
+  return {};
+}
+
+function settingVersions(snapshot, values) {
+  const versions = {};
+  for (const key of Object.keys(values)) {
+    const [group, name] = key.split(".");
+    versions[key] = snapshot.settings[group][name].version;
+  }
+  return versions;
+}
+
+export default function Configuracoes() {
+  const { snapshot, isLoading, error, readOnly, refresh, applySnapshot } =
+    useSettings();
+  const [activeSection, setActiveSection] = useState("company");
+  const [draft, setDraft] = useState({});
+  const [status, setStatus] = useState({ tone: "", message: "" });
+
+  useEffect(() => {
+    if (snapshot) setDraft(snapshotValues(snapshot, activeSection));
+  }, [activeSection, snapshot]);
+
+  const catalogs = useMemo(
+    () => CATALOGS_BY_SECTION[activeSection] || [],
+    [activeSection],
+  );
+  if (isLoading || !snapshot)
+    return (
+      <section className="standard-screen">
+        <p>A carregar configurações...</p>
+      </section>
+    );
+
+  function update(key, value) {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setStatus({ tone: "pending", message: "Alteracoes pendentes." });
   }
 
-  function handleSaveDocumentHeader(nextSettings, logoDataUrl) {
-    setInvoiceA4Settings(saveStoredInvoiceA4Settings(nextSettings));
-    setBranding(saveStoredBranding({ ...branding, logoDataUrl }));
-    setActiveSetting(null);
+  async function saveSection() {
+    if (!Object.keys(draft).length) return;
+    setStatus({ tone: "pending", message: "A guardar..." });
+    try {
+      const groupedValues = Object.entries(draft).reduce(
+        (groups, [key, value]) => {
+          const group = key.split(".")[0];
+          groups[group] ||= {};
+          groups[group][key] = value;
+          return groups;
+        },
+        {},
+      );
+      let next = snapshot;
+      for (const [section, values] of Object.entries(groupedValues)) {
+        next = await request("configuration.updateSection", {
+          section,
+          values,
+          expectedVersions: settingVersions(next, values),
+        });
+      }
+      applySnapshot(next);
+      setStatus({ tone: "success", message: "Configurações guardadas." });
+    } catch (cause) {
+      setStatus({
+        tone: "error",
+        message: cause?.message || "Não foi possível guardar.",
+      });
+    }
   }
 
   return (
     <section className="standard-screen settings-screen">
-      <div className="settings-grid">
-        {settings.map((setting) => (
-          <button
-            className="settings-card panel"
-            type="button"
-            key={setting.id}
-            onClick={() => setActiveSetting(setting)}
-          >
-            <span><setting.icon size={32} /></span>
-            <div>
-              <h2>{setting.title}</h2>
-              <p>{setting.description}</p>
-              <strong>{setting.status}</strong>
-            </div>
-          </button>
-        ))}
-      </div>
-
-      <div className="panel table-panel">
-        <div className="panel-title-row">
-          <h2>Preferências do Sistema</h2>
-          <button type="button" className="primary-button">
-            <Save size={18} />
-            Guardar Alterações
-          </button>
+      <header className="settings-sync-header panel">
+        <div>
+          <h1>Configurações</h1>
+          <p>Fonte central das preferências e catálogos do sistema.</p>
         </div>
-        <div className="settings-form">
-          <label><span>Moeda padrão</span><input defaultValue="Kwanza (KZ)" /></label>
-          <label><span>Factura inicial</span><input defaultValue="FAT027/26" /></label>
-          <label><span>Limite baixo estoque</span><input defaultValue="25" type="number" /></label>
-          <label>
-            <span>Backup automático</span>
-            <select defaultValue="diario">
-              <option value="diario">Diário</option>
-              <option value="semanal">Semanal</option>
-            </select>
-          </label>
-        </div>
-      </div>
-
-      {activeSetting && (
-        <SettingsModal
-          branding={branding}
-          invoiceA4Settings={invoiceA4Settings}
-          onClose={() => setActiveSetting(null)}
-          onSaveBranding={handleSaveBranding}
-          onSaveDocumentHeader={handleSaveDocumentHeader}
-          setting={activeSetting}
+        <span className={`settings-status ${status.tone}`}>
+          {status.message ||
+            error ||
+            (readOnly ? "Somente leitura" : "Sincronizado")}
+        </span>
+      </header>
+      <div className="settings-layout">
+        <SettingsSectionNav
+          sections={SECTIONS}
+          activeSection={activeSection}
+          onChange={setActiveSection}
         />
-      )}
+        <main className="settings-workspace panel">
+          <SectionFields
+            section={activeSection}
+            draft={draft}
+            update={update}
+            snapshot={snapshot}
+            disabled={readOnly}
+          />
+          {Object.keys(draft).length ? (
+            <button
+              type="button"
+              className="primary-button settings-save"
+              disabled={readOnly}
+              onClick={saveSection}
+            >
+              <Save size={17} />
+              Guardar secção
+            </button>
+          ) : null}
+          {catalogs.map((catalogKey) => (
+            <div className="settings-catalog-block" key={catalogKey}>
+              <h2>
+                {snapshot.definitions.catalogs[catalogKey]?.system
+                  ? "Catálogo técnico"
+                  : "Catálogo operacional"}
+                : {catalogKey}
+              </h2>
+              <CatalogEditor
+                catalogKey={catalogKey}
+                options={snapshot.catalogs[catalogKey]}
+                readOnly={
+                  readOnly ||
+                  !snapshot.definitions.catalogs[catalogKey]?.editable
+                }
+                onChanged={refresh}
+              />
+            </div>
+          ))}
+          {activeSection === "references" ? (
+            <p className="settings-origin-note">
+              Perfis continuam a vir do servico oficial de perfis; categorias e
+              subcategorias continuam nas tabelas de stock.
+            </p>
+          ) : null}
+        </main>
+      </div>
     </section>
   );
 }
 
-function SettingsModal({
-  branding,
-  invoiceA4Settings,
-  setting,
-  onClose,
-  onSaveBranding,
-  onSaveDocumentHeader,
-}) {
-  const [logoPreview, setLogoPreview] = useState(branding.logoDataUrl);
-  const [pharmacyName, setPharmacyName] = useState(branding.pharmacyName);
-  const [invoiceSettingsForm, setInvoiceSettingsForm] = useState(invoiceA4Settings);
-
-  function previewLogo(event) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      setLogoPreview('');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => setLogoPreview(String(reader.result));
-    reader.readAsDataURL(file);
-  }
-
-  function handleSave() {
-    if (setting.id === 'pharmacy') {
-      onSaveBranding({
-        pharmacyName,
-        logoDataUrl: logoPreview,
-      });
-      return;
-    }
-
-    if (setting.id === 'invoiceA4') {
-      onSaveDocumentHeader(invoiceSettingsForm, logoPreview);
-      return;
-    }
-
-    onClose();
-  }
-
-  function updateInvoiceSettings(field, value) {
-    setInvoiceSettingsForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function updateBankAccount(index, field, value) {
-    setInvoiceSettingsForm((current) => ({
-      ...current,
-      bankAccounts: current.bankAccounts.map((account, accountIndex) => (
-        accountIndex === index ? { ...account, [field]: value } : account
-      )),
-    }));
-  }
-
-  function addBankAccount() {
-    setInvoiceSettingsForm((current) => ({
-      ...current,
-      bankAccounts: [...current.bankAccounts, { bank: '', account: '', iban: '' }],
-    }));
-  }
-
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal-card wide">
-        <div className="modal-title-row">
-          <h2>{setting.title}</h2>
-          <button type="button" onClick={onClose}>×</button>
-        </div>
-        <div className="form-grid">
-          {setting.id === 'pharmacy' && (
-            <>
-              <label className="image-picker">
-                <span className={logoPreview ? 'image-preview' : 'image-preview empty'}>
-                  {logoPreview ? <img src={logoPreview} alt="Pré-visualização do logo" /> : <ImagePlus size={34} />}
-                </span>
-                <input type="file" accept="image/*" onChange={previewLogo} />
-                <strong>Inserir logo da empresa</strong>
-              </label>
-              <input
-                value={pharmacyName}
-                onChange={(event) => setPharmacyName(event.target.value)}
-                placeholder="Nome da farmacia"
-              />
-              <input placeholder="NIF" />
-              <input placeholder="Telefone" />
-              <input placeholder="Email" />
-              <textarea placeholder="Endereço completo" />
-            </>
-          )}
-
-          {setting.id === 'payments' && (
-            <>
-              <label className="check-row"><input type="checkbox" defaultChecked /> Dinheiro</label>
-              <label className="check-row"><input type="checkbox" defaultChecked /> TPA</label>
-              <label className="check-row"><input type="checkbox" defaultChecked /> Transferência</label>
-              <label className="check-row"><input type="checkbox" defaultChecked /> Crédito do cliente</label>
-              <input placeholder="Conta bancária padrão" />
-              <input placeholder="Terminal TPA" />
-            </>
-          )}
-
-          {setting.id === 'alerts' && (
-            <>
-              <input type="number" defaultValue="25" placeholder="Limite baixo estoque" />
-              <input type="number" defaultValue="30" placeholder="Dias para alerta de validade" />
-              <select defaultValue="sim">
-                <option value="sim">Mostrar alertas no Dashboard</option>
-                <option value="nao">Não mostrar no Dashboard</option>
-              </select>
-              <textarea placeholder="Mensagem do alerta" />
-            </>
-          )}
-
-          {setting.id === 'taxes' && (
-            <>
-              <input type="number" defaultValue="0" placeholder="Imposto padrão (%)" />
-              <input type="number" defaultValue="580.20" placeholder="Desconto máximo sem autorização" />
-              <select defaultValue="centimos">
-                <option value="centimos">Arredondar por cêntimos</option>
-                <option value="unidade">Arredondar por unidade</option>
-              </select>
-              <textarea placeholder="Observações fiscais" />
-            </>
-          )}
-
-          {setting.id === 'invoiceA4' && (
-            <>
-              <label className="settings-document-header-field">
-                <span>Dados da empresa</span>
-                <textarea
-                  value={invoiceSettingsForm.documentHeaderText}
-                  onChange={(event) => updateInvoiceSettings('documentHeaderText', event.target.value)}
-                  placeholder={'Nome da empresa\nActividade\nNIF\nEndereco\nContactos'}
-                />
-              </label>
-              <label className="image-picker settings-document-logo">
-                <span className={logoPreview ? 'image-preview' : 'image-preview empty'}>
-                  {logoPreview ? <img src={logoPreview} alt="Pre-visualizacao do logotipo" /> : <ImagePlus size={34} />}
-                </span>
-                <input type="file" accept="image/*" onChange={previewLogo} />
-                <strong>Inserir logotipo</strong>
-              </label>
-              <input
-                value={invoiceSettingsForm.validationNumber}
-                onChange={(event) => updateInvoiceSettings('validationNumber', event.target.value)}
-                placeholder="Numero de validacao AGT"
-              />
-              <input
-                value={invoiceSettingsForm.softwareName}
-                onChange={(event) => updateInvoiceSettings('softwareName', event.target.value)}
-                placeholder="Nome do software"
-              />
-              <input
-                value={invoiceSettingsForm.fiscalRegime}
-                onChange={(event) => updateInvoiceSettings('fiscalRegime', event.target.value)}
-                placeholder="Regime fiscal"
-              />
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={invoiceSettingsForm.showQrCode}
-                  onChange={(event) => updateInvoiceSettings('showQrCode', event.target.checked)}
-                />
-                Mostrar QR code
-              </label>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={invoiceSettingsForm.showTotalInWords}
-                  onChange={(event) => updateInvoiceSettings('showTotalInWords', event.target.checked)}
-                />
-                Mostrar total por extenso
-              </label>
-              <div className="settings-bank-accounts">
-                {invoiceSettingsForm.bankAccounts.map((account, index) => (
-                  <div className="settings-bank-row" key={`bank-${index}`}>
-                    <input
-                      value={account.bank}
-                      onChange={(event) => updateBankAccount(index, 'bank', event.target.value)}
-                      placeholder="Banco"
-                    />
-                    <input
-                      value={account.account}
-                      onChange={(event) => updateBankAccount(index, 'account', event.target.value)}
-                      placeholder="Conta"
-                    />
-                    <input
-                      value={account.iban}
-                      onChange={(event) => updateBankAccount(index, 'iban', event.target.value)}
-                      placeholder="IBAN"
-                    />
-                  </div>
-                ))}
-                <button type="button" className="soft-button" onClick={addBankAccount}>Adicionar conta</button>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="modal-actions">
-          <button type="button" className="soft-button" onClick={onClose}>Cancelar</button>
-          <button type="button" className="primary-button" onClick={handleSave}>
-            <Settings size={18} />
-            Guardar
-          </button>
-        </div>
+function SectionFields({ section, draft, update, snapshot, disabled }) {
+  if (section === "company") {
+    const identity = draft["company.identity"] || {};
+    const fiscal = draft["documents.fiscal"] || {};
+    return (
+      <div className="settings-form-grid">
+        <SettingField
+          label="Nome da farmácia"
+          help="Nome apresentado em documentos e na interface"
+        >
+          <input
+            disabled={disabled}
+            value={identity.pharmacyName || ""}
+            onChange={(e) =>
+              update("company.identity", {
+                ...identity,
+                pharmacyName: e.target.value,
+              })
+            }
+          />
+        </SettingField>
+        <SettingField label="NIF">
+          <input
+            disabled={disabled}
+            value={identity.taxId || ""}
+            onChange={(e) =>
+              update("company.identity", { ...identity, taxId: e.target.value })
+            }
+          />
+        </SettingField>
+        <SettingField label="Endereço">
+          <textarea
+            disabled={disabled}
+            value={identity.address || ""}
+            onChange={(e) =>
+              update("company.identity", {
+                ...identity,
+                address: e.target.value,
+              })
+            }
+          />
+        </SettingField>
+        <SettingField label="Cabeçalho documental">
+          <textarea
+            disabled={disabled}
+            value={draft["documents.headerText"] || ""}
+            onChange={(e) => update("documents.headerText", e.target.value)}
+          />
+        </SettingField>
+        <SettingField label="Moeda">
+          <input
+            disabled={disabled}
+            value={draft["documents.currency"] || ""}
+            onChange={(e) => update("documents.currency", e.target.value)}
+          />
+        </SettingField>
+        <SettingField label="Número de validação AGT">
+          <input
+            disabled={disabled}
+            value={fiscal.validationNumber || ""}
+            onChange={(e) =>
+              update("documents.fiscal", {
+                ...fiscal,
+                validationNumber: e.target.value,
+              })
+            }
+          />
+        </SettingField>
+        <SettingField label="Nome do software">
+          <input
+            disabled={disabled}
+            value={fiscal.softwareName || ""}
+            onChange={(e) =>
+              update("documents.fiscal", {
+                ...fiscal,
+                softwareName: e.target.value,
+              })
+            }
+          />
+        </SettingField>
+        <SettingField label="Regime fiscal">
+          <input
+            disabled={disabled}
+            value={fiscal.fiscalRegime || ""}
+            onChange={(e) =>
+              update("documents.fiscal", {
+                ...fiscal,
+                fiscalRegime: e.target.value,
+              })
+            }
+          />
+        </SettingField>
+        <SettingField label="Mostrar QR code">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={fiscal.showQrCode !== false}
+            onChange={(e) =>
+              update("documents.fiscal", {
+                ...fiscal,
+                showQrCode: e.target.checked,
+              })
+            }
+          />
+        </SettingField>
+        <SettingField label="Mostrar total por extenso">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={fiscal.showTotalInWords !== false}
+            onChange={(e) =>
+              update("documents.fiscal", {
+                ...fiscal,
+                showTotalInWords: e.target.checked,
+              })
+            }
+          />
+        </SettingField>
       </div>
-    </div>
-  );
+    );
+  }
+  if (section === "sales")
+    return (
+      <div className="settings-form-grid">
+        <SettingField label="Forma de pagamento padrão">
+          <select
+            disabled={disabled}
+            value={draft["sales.defaultPaymentMethod"] || ""}
+            onChange={(e) =>
+              update("sales.defaultPaymentMethod", e.target.value)
+            }
+          >
+            {snapshot.catalogs.payment_methods
+              .filter((o) => o.active)
+              .map((o) => (
+                <option key={o.code} value={o.code}>
+                  {o.name}
+                </option>
+              ))}
+          </select>
+        </SettingField>
+        <NumberField
+          label="Imposto padrão (%)"
+          settingKey="sales.defaultTaxRate"
+          {...{ draft, update, disabled }}
+        />
+        <NumberField
+          label="Limite de desconto"
+          settingKey="sales.maxDiscount"
+          {...{ draft, update, disabled }}
+        />
+        <SettingField label="Consumidor final">
+          <input
+            disabled={disabled}
+            value={draft["sales.finalConsumerLabel"] || ""}
+            onChange={(e) => update("sales.finalConsumerLabel", e.target.value)}
+          />
+        </SettingField>
+      </div>
+    );
+  if (section === "stock")
+    return (
+      <div className="settings-form-grid">
+        <NumberField
+          label="Limite de stock baixo"
+          settingKey="stock.lowStockThreshold"
+          {...{ draft, update, disabled }}
+        />
+        <NumberField
+          label="Dias para alerta de validade"
+          settingKey="stock.expiryAlertDays"
+          {...{ draft, update, disabled }}
+        />
+      </div>
+    );
+  if (section === "alerts") {
+    const backup = draft["backup.options"] || {};
+    return (
+      <div className="settings-form-grid">
+        <SettingField label="Alertas no Dashboard">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={Boolean(draft["alerts.dashboardEnabled"])}
+            onChange={(e) =>
+              update("alerts.dashboardEnabled", e.target.checked)
+            }
+          />
+        </SettingField>
+        <SettingField label="Mensagem padrao">
+          <textarea
+            disabled={disabled}
+            value={draft["alerts.defaultMessage"] || ""}
+            onChange={(e) => update("alerts.defaultMessage", e.target.value)}
+          />
+        </SettingField>
+        <SettingField label="Frequência do backup">
+          <select
+            disabled={disabled}
+            value={backup.frequency || "manual"}
+            onChange={(e) =>
+              update("backup.options", { ...backup, frequency: e.target.value })
+            }
+          >
+            <option value="manual">Manual</option>
+            <option value="daily">Diário</option>
+            <option value="weekly">Semanal</option>
+          </select>
+        </SettingField>
+        <NumberField
+          label="Backups a reter"
+          settingKey="backup.options"
+          value={backup.retentionCount}
+          onValue={(value) =>
+            update("backup.options", { ...backup, retentionCount: value })
+          }
+          {...{ draft, update, disabled }}
+        />
+      </div>
+    );
+  }
+  return null;
 }
 
-export default Configuracoes;
+function NumberField({
+  label,
+  settingKey,
+  draft,
+  update,
+  disabled,
+  value,
+  onValue,
+}) {
+  const current = value ?? draft[settingKey] ?? 0;
+  return (
+    <SettingField label={label}>
+      <input
+        type="number"
+        min="0"
+        disabled={disabled}
+        value={current}
+        onChange={(e) =>
+          (onValue || ((next) => update(settingKey, next)))(
+            Number(e.target.value),
+          )
+        }
+      />
+    </SettingField>
+  );
+}

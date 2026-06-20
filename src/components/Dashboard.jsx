@@ -1,5 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import { AlertTriangle, BarChart3, Boxes, CalendarClock, MoreHorizontal, WalletCards } from 'lucide-react';
+import React, { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  BarChart3,
+  Boxes,
+  CalendarClock,
+  MoreHorizontal,
+  WalletCards,
+} from "lucide-react";
 import {
   buildDashboardMetrics,
   buildDashboardNotifications,
@@ -13,40 +20,72 @@ import {
   financeProductSales,
   invoices,
   stockItems,
-} from '../data/pharmacyData.mjs';
-import { useOperation } from '../operation/OperationContext';
+} from "../data/pharmacyData.mjs";
+import { useOperation } from "../operation/OperationContext";
+import { useSetting } from "../configuration/SettingsContext";
 
 const periodOptions = [
-  { id: 'week', label: 'Semanal' },
-  { id: 'month', label: 'Mensal' },
-  { id: 'semester', label: 'Semestral' },
-  { id: 'year', label: 'Anual' },
+  { id: "week", label: "Semanal" },
+  { id: "month", label: "Mensal" },
+  { id: "semester", label: "Semestral" },
+  { id: "year", label: "Anual" },
 ];
 
 function Dashboard() {
   const operation = useOperation();
-  const [selectedPeriod, setSelectedPeriod] = useState('month');
+  const lowStockThreshold = useSetting("stock.lowStockThreshold", 25);
+  const dashboardAlertsEnabled = useSetting("alerts.dashboardEnabled", true);
+  const [selectedPeriod, setSelectedPeriod] = useState("month");
   const [hoveredPoint, setHoveredPoint] = useState(null);
-  const metrics = buildDashboardMetrics(invoices, stockItems);
-  const chart = useMemo(() => buildDashboardPeriodChart({
-    sales: financeProductSales,
-    expenses: financeExpenses,
-  }, { period: selectedPeriod, referenceDate: '2026-06-15' }), [selectedPeriod]);
-  const topSellers = useMemo(() => buildDashboardTopSellers(financeProductSales, 6), []);
-  const notifications = useMemo(() => buildDashboardNotifications({
-    invoiceRows: invoices,
-    stockRows: stockItems,
-    expenseRows: financeExpenses,
-  }), []);
-  const financial = useMemo(() => buildFinancialOverview({
-    sales: financeProductSales,
-    losses: financeLosses,
-    expenses: financeExpenses,
-    otherRevenues: financeOtherRevenues,
-  }, { period: 'month', referenceDate: '2026-06-15' }), []);
+  const metrics = {
+    ...buildDashboardMetrics(invoices, stockItems),
+    lowStockCount: stockItems.filter(
+      (item) =>
+        Number(item.quantity) > 0 && Number(item.quantity) <= lowStockThreshold,
+    ).length,
+  };
+  const chart = useMemo(
+    () =>
+      buildDashboardPeriodChart(
+        {
+          sales: financeProductSales,
+          expenses: financeExpenses,
+        },
+        { period: selectedPeriod, referenceDate: "2026-06-15" },
+      ),
+    [selectedPeriod],
+  );
+  const topSellers = useMemo(
+    () => buildDashboardTopSellers(financeProductSales, 6),
+    [],
+  );
+  const notifications = useMemo(
+    () =>
+      buildDashboardNotifications({
+        invoiceRows: invoices,
+        stockRows: stockItems,
+        expenseRows: financeExpenses,
+      }),
+    [],
+  );
+  const financial = useMemo(
+    () =>
+      buildFinancialOverview(
+        {
+          sales: financeProductSales,
+          losses: financeLosses,
+          expenses: financeExpenses,
+          otherRevenues: financeOtherRevenues,
+        },
+        { period: "month", referenceDate: "2026-06-15" },
+      ),
+    [],
+  );
   const expensePath = buildSmoothExpensePath(chart.points);
   const activePoint = hoveredPoint;
-  const activePointIndex = activePoint ? Math.max(0, chart.points.indexOf(activePoint)) : 0;
+  const activePointIndex = activePoint
+    ? Math.max(0, chart.points.indexOf(activePoint))
+    : 0;
 
   return (
     <section className="dashboard-analytics">
@@ -63,7 +102,7 @@ function Dashboard() {
             icon={<BarChart3 size={34} />}
             title="Vendas do turno"
             value={formatKwanza(metrics.shiftSales)}
-            detail={`${metrics.shiftTransactions.toString().padStart(2, '0')} transacoes`}
+            detail={`${metrics.shiftTransactions.toString().padStart(2, "0")} transacoes`}
           />
           <MetricCard
             icon={<AlertTriangle size={34} />}
@@ -98,14 +137,17 @@ function Dashboard() {
           <MetricCard
             icon={<CalendarClock size={34} />}
             title="Estado operacional"
-            value={operation.canOperate ? 'Aberto' : 'Bloqueado'}
-            detail={operation.shift?.nome || operation.message || 'Sem turno aberto'}
+            value={operation.canOperate ? "Aberto" : "Bloqueado"}
+            detail={
+              operation.shift?.nome || operation.message || "Sem turno aberto"
+            }
           />
         </div>
 
         {!operation.canOperate ? (
           <div className="operation-blocked-banner dashboard-operation-alert">
-            {operation.message || 'Abra o dia e o turno antes de executar operacoes.'}
+            {operation.message ||
+              "Abra o dia e o turno antes de executar operacoes."}
           </div>
         ) : null}
 
@@ -115,12 +157,15 @@ function Dashboard() {
               <span className="dashboard-eyebrow">Analise de vendas</span>
               <h2>Receita com linha de despesas</h2>
             </div>
-            <div className="dashboard-period-tabs" aria-label="Periodo do grafico">
+            <div
+              className="dashboard-period-tabs"
+              aria-label="Periodo do grafico"
+            >
               {periodOptions.map((period) => (
                 <button
                   key={period.id}
                   type="button"
-                  className={selectedPeriod === period.id ? 'active' : ''}
+                  className={selectedPeriod === period.id ? "active" : ""}
                   onClick={() => setSelectedPeriod(period.id)}
                 >
                   {period.label}
@@ -129,7 +174,10 @@ function Dashboard() {
             </div>
           </div>
 
-          <div className="dashboard-chart-summary" aria-label="Resumo do periodo">
+          <div
+            className="dashboard-chart-summary"
+            aria-label="Resumo do periodo"
+          >
             <span>
               <small>Vendas</small>
               <em>{formatKwanza(chart.totals.sales)}</em>
@@ -144,21 +192,36 @@ function Dashboard() {
             </span>
           </div>
 
-          <div className="dashboard-combo-chart" aria-label="Grafico comparativo de vendas e despesas">
-            <svg className="expense-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <div
+            className="dashboard-combo-chart"
+            aria-label="Grafico comparativo de vendas e despesas"
+          >
+            <svg
+              className="expense-overlay"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
               <path d={expensePath} />
             </svg>
             {activePoint ? (
               <div
                 className="chart-tooltip"
-                style={{ left: `${resolvePointX(activePointIndex, chart.points.length)}%` }}
+                style={{
+                  left: `${resolvePointX(activePointIndex, chart.points.length)}%`,
+                }}
               >
                 <span>{activePoint.label}</span>
                 <small>Vendas: {formatKwanza(activePoint.sales)}</small>
                 <small>Despesas: {formatKwanza(activePoint.expenses)}</small>
               </div>
             ) : null}
-            <div className="combo-bars" style={{ gridTemplateColumns: `repeat(${chart.points.length}, minmax(34px, 1fr))` }}>
+            <div
+              className="combo-bars"
+              style={{
+                gridTemplateColumns: `repeat(${chart.points.length}, minmax(34px, 1fr))`,
+              }}
+            >
               {chart.points.map((point, index) => (
                 <div
                   className="combo-column"
@@ -172,7 +235,11 @@ function Dashboard() {
                   <span
                     className="combo-bar"
                     title={`${point.label}: vendas ${formatKwanza(point.sales)}, despesas ${formatKwanza(point.expenses)}`}
-                    style={{ height: point.sales ? `${Math.max(point.salesPercent, 4)}%` : '0%' }}
+                    style={{
+                      height: point.sales
+                        ? `${Math.max(point.salesPercent, 4)}%`
+                        : "0%",
+                    }}
                   />
                   <small>{point.label}</small>
                 </div>
@@ -181,8 +248,14 @@ function Dashboard() {
           </div>
 
           <div className="dashboard-chart-legend">
-            <span><i className="legend-sales" />Vendas</span>
-            <span><i className="legend-expenses" />Despesas</span>
+            <span>
+              <i className="legend-sales" />
+              Vendas
+            </span>
+            <span>
+              <i className="legend-expenses" />
+              Despesas
+            </span>
           </div>
         </div>
 
@@ -221,13 +294,20 @@ function Dashboard() {
             </div>
           </div>
           <div className="dashboard-alert-list">
-            {notifications.map((notification) => (
-              <article className={`dashboard-alert ${notification.severity}`} key={notification.id}>
-                <span>{notification.title}</span>
-                <p>{notification.message}</p>
-                {notification.detail ? <small>{notification.detail}</small> : null}
-              </article>
-            ))}
+            {(dashboardAlertsEnabled ? notifications : []).map(
+              (notification) => (
+                <article
+                  className={`dashboard-alert ${notification.severity}`}
+                  key={notification.id}
+                >
+                  <span>{notification.title}</span>
+                  <p>{notification.message}</p>
+                  {notification.detail ? (
+                    <small>{notification.detail}</small>
+                  ) : null}
+                </article>
+              ),
+            )}
           </div>
         </section>
       </aside>
@@ -235,7 +315,7 @@ function Dashboard() {
   );
 }
 
-function MetricCard({ icon, title, value, detail, tone = '' }) {
+function MetricCard({ icon, title, value, detail, tone = "" }) {
   const metricValue = formatMetricValue(value);
 
   return (
@@ -243,9 +323,17 @@ function MetricCard({ icon, title, value, detail, tone = '' }) {
       <span className="dashboard-metric-icon">{icon}</span>
       <div>
         <h2>{title}</h2>
-        <span className={metricValue.prefix ? 'dashboard-metric-value stacked' : 'dashboard-metric-value'}>
-          {metricValue.prefix ? <small>{metricValue.prefix}</small> : null}
-          <span>{metricValue.amount}</span>
+        <span
+          className={
+            metricValue.prefix
+              ? "dashboard-metric-value stacked"
+              : "dashboard-metric-value"
+          }
+        >
+          {metricValue.prefix ? (
+            <small className="metric-prefix">{metricValue.prefix}</small>
+          ) : null}
+          <span className="metric-amount">{metricValue.amount}</span>
         </span>
         <small>{detail}</small>
       </div>
@@ -259,7 +347,7 @@ function formatMetricValue(value) {
 
   if (!match) {
     return {
-      prefix: '',
+      prefix: "",
       amount: text,
     };
   }
@@ -289,7 +377,7 @@ function buildSmoothExpensePath(points) {
     const controlX = (previous.x + point.x) / 2;
 
     return `${path} C ${controlX} ${previous.y}, ${controlX} ${point.y}, ${point.x} ${point.y}`;
-  }, '');
+  }, "");
 }
 
 function resolveExpensePointY(point) {
@@ -301,20 +389,25 @@ function resolvePointX(index, total) {
   return Math.round((index / (total - 1)) * 100);
 }
 
-export function InvoiceTable({ rows, className = '', showClient = false, onRowClick }) {
+export function InvoiceTable({
+  rows,
+  className = "",
+  showClient = false,
+  onRowClick,
+}) {
   const [tableRows, setTableRows] = useState(rows);
-  const [openMenuFor, setOpenMenuFor] = useState('');
+  const [openMenuFor, setOpenMenuFor] = useState("");
   const [detailInvoice, setDetailInvoice] = useState(null);
 
   function handleMarkPaid(invoiceNumber) {
     setTableRows((currentRows) =>
       currentRows.map((invoice) =>
         invoice.number === invoiceNumber
-          ? { ...invoice, status: 'PAGO' }
+          ? { ...invoice, status: "PAGO" }
           : invoice,
       ),
     );
-    setOpenMenuFor('');
+    setOpenMenuFor("");
   }
 
   async function handleCopyNumber(invoiceNumber) {
@@ -322,7 +415,7 @@ export function InvoiceTable({ rows, className = '', showClient = false, onRowCl
       await navigator.clipboard.writeText(invoiceNumber);
     }
 
-    setOpenMenuFor('');
+    setOpenMenuFor("");
   }
 
   return (
@@ -342,14 +435,18 @@ export function InvoiceTable({ rows, className = '', showClient = false, onRowCl
           {tableRows.map((invoice) => (
             <tr
               key={invoice.number}
-              className={onRowClick ? 'clickable-row' : undefined}
+              className={onRowClick ? "clickable-row" : undefined}
               onClick={onRowClick ? () => onRowClick(invoice) : undefined}
             >
               <td>{invoice.number}</td>
               <td>{invoice.items}</td>
-              <td>{formatKwanza(invoice.value).replace('KZ ', '')}</td>
+              <td>{formatKwanza(invoice.value).replace("KZ ", "")}</td>
               <td>
-                <span className={invoice.status === 'PAGO' ? 'status paid' : 'status waiting'}>
+                <span
+                  className={
+                    invoice.status === "PAGO" ? "status paid" : "status waiting"
+                  }
+                >
                   {invoice.status}
                 </span>
               </td>
@@ -364,7 +461,9 @@ export function InvoiceTable({ rows, className = '', showClient = false, onRowCl
                     aria-label={`Opcoes da factura ${invoice.number}`}
                     onClick={(event) => {
                       event.stopPropagation();
-                      setOpenMenuFor((current) => (current === invoice.number ? '' : invoice.number));
+                      setOpenMenuFor((current) =>
+                        current === invoice.number ? "" : invoice.number,
+                      );
                     }}
                   >
                     <MoreHorizontal size={20} />
@@ -377,7 +476,7 @@ export function InvoiceTable({ rows, className = '', showClient = false, onRowCl
                         onClick={(event) => {
                           event.stopPropagation();
                           setDetailInvoice(invoice);
-                          setOpenMenuFor('');
+                          setOpenMenuFor("");
                         }}
                       >
                         Ver detalhes
@@ -385,7 +484,7 @@ export function InvoiceTable({ rows, className = '', showClient = false, onRowCl
                       <button
                         type="button"
                         role="menuitem"
-                        disabled={invoice.status === 'PAGO'}
+                        disabled={invoice.status === "PAGO"}
                         onClick={(event) => {
                           event.stopPropagation();
                           handleMarkPaid(invoice.number);
@@ -418,11 +517,18 @@ export function InvoiceTable({ rows, className = '', showClient = false, onRowCl
         </div>
       )}
       {detailInvoice ? (
-        <div className="dashboard-invoice-popover" role="dialog" aria-modal="true" aria-label="Detalhes da factura">
+        <div
+          className="dashboard-invoice-popover"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Detalhes da factura"
+        >
           <section>
             <div className="dashboard-invoice-popover-header">
               <span>{detailInvoice.number}</span>
-              <button type="button" onClick={() => setDetailInvoice(null)}>Fechar</button>
+              <button type="button" onClick={() => setDetailInvoice(null)}>
+                Fechar
+              </button>
             </div>
             <dl>
               <div>

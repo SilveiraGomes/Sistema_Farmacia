@@ -1,36 +1,41 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from "react";
 import {
   getBrandingInitials,
   getStoredBranding,
   subscribeBrandingChange,
-} from '../data/branding.mjs';
+} from "../data/branding.mjs";
 
 function splitBrandName(name) {
-  const parts = String(name || '')
+  const parts = String(name || "")
     .trim()
     .split(/\s+/)
     .filter(Boolean);
 
   if (parts.length <= 1) {
-    return [parts[0] || 'Sistema', 'Farmacia'];
+    return [parts[0] || "Sistema", "Farmacia"];
   }
 
-  return [parts.slice(0, -1).join(' '), parts.at(-1)];
+  return [parts.slice(0, -1).join(" "), parts.at(-1)];
 }
 
-function BrandMark({ className = 'brand-card' }) {
+function BrandMark({ className = "brand-card", pharmacyName }) {
   const [branding, setBranding] = useState(() => getStoredBranding());
+  const effectiveName = pharmacyName || branding.pharmacyName;
   const [firstLine, secondLine] = useMemo(
-    () => splitBrandName(branding.pharmacyName),
-    [branding.pharmacyName],
+    () => splitBrandName(effectiveName),
+    [effectiveName],
   );
-  const initials = getBrandingInitials(branding.pharmacyName);
+  const initials = getBrandingInitials(effectiveName);
 
   useEffect(() => subscribeBrandingChange(setBranding), []);
 
   return (
-    <div className={className} aria-label={branding.pharmacyName}>
-      <span className={branding.logoDataUrl ? 'brand-capsule has-image' : 'brand-capsule'}>
+    <div className={className} aria-label={effectiveName}>
+      <span
+        className={
+          branding.logoDataUrl ? "brand-capsule has-image" : "brand-capsule"
+        }
+      >
         {branding.logoDataUrl ? (
           <img src={branding.logoDataUrl} alt="" aria-hidden="true" />
         ) : (

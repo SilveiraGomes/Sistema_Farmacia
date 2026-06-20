@@ -1,17 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, LockKeyhole, LogIn, UserRound } from 'lucide-react';
-import { useAuth } from '../auth/AuthContext';
-import { request } from '../services/ipcClient.js';
-import BrandMark from './BrandMark';
+import React, { useEffect, useRef, useState } from "react";
+import { Eye, EyeOff, LockKeyhole, LogIn, UserRound } from "lucide-react";
+import { useAuth } from "../auth/AuthContext";
+import { request } from "../services/ipcClient.js";
+import BrandMark from "./BrandMark";
 
 const PASSWORD_FOCUS_DELAYS = [0, 80, 250, 600];
 
 function Login() {
   const { login } = useAuth();
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState("admin");
   const [loginUsers, setLoginUsers] = useState([]);
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,18 +33,24 @@ function Login() {
       setIsLoadingUsers(true);
 
       try {
-        const users = await request('auth.loginUsers');
+        const users = await request("auth.loginUsers");
         if (!isMounted) {
           return;
         }
 
         const nextUsers = Array.isArray(users) ? users : [];
         setLoginUsers(nextUsers);
-        setUsername((current) => current || nextUsers[0]?.nome_usuario || '');
+        setUsername((current) => current || nextUsers[0]?.nome_usuario || "");
       } catch {
         if (isMounted) {
-          setLoginUsers([{ id: 'admin', nome_usuario: 'admin', nome_completo: 'Administrador' }]);
-          setUsername((current) => current || 'admin');
+          setLoginUsers([
+            {
+              id: "admin",
+              nome_usuario: "admin",
+              nome_completo: "Administrador",
+            },
+          ]);
+          setUsername((current) => current || "admin");
         }
       } finally {
         if (isMounted) {
@@ -76,27 +82,39 @@ function Login() {
     }
 
     focusPasswordField();
-    window.addEventListener('focus', refocusPasswordField);
-    document.addEventListener('visibilitychange', refocusWhenVisible);
+    window.addEventListener("focus", refocusPasswordField);
+    document.addEventListener("visibilitychange", refocusWhenVisible);
 
     return () => {
-      window.removeEventListener('focus', refocusPasswordField);
-      document.removeEventListener('visibilitychange', refocusWhenVisible);
+      window.removeEventListener("focus", refocusPasswordField);
+      document.removeEventListener("visibilitychange", refocusWhenVisible);
     };
   }, [isLoadingUsers]);
 
   function handleUsernameChange(event) {
     setUsername(event.target.value);
-    setPassword('');
-    setError('');
+    setPassword("");
+    setError("");
     setIsPasswordVisible(false);
     focusPasswordField();
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
-    setError('');
+    setError("");
     setIsSubmitting(true);
+
+    if (!username?.trim()) {
+      setError("Selecione um utilizador.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!password.trim()) {
+      setError("A palavra-passe é obrigatória.");
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       await login({ username: username.trim(), password });
@@ -113,12 +131,16 @@ function Login() {
         <BrandMark className="auth-brand" />
 
         <form className="auth-form" onSubmit={handleSubmit}>
-          <div>
-            <h1 id="login-title">Entrar</h1>
+          <div style={{ textAlign: "center" }}>
+            <h1 id="login-title">LOGIN</h1>
             <p>Acesse o sistema com as suas credenciais.</p>
           </div>
 
-          {error ? <p className="form-error" role="alert">{error}</p> : null}
+          {error ? (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
 
           <label className="auth-field">
             <span>Usuario</span>
@@ -148,7 +170,7 @@ function Login() {
                 autoComplete="current-password"
                 autoFocus
                 ref={passwordInputRef}
-                type={isPasswordVisible ? 'text' : 'password'}
+                type={isPasswordVisible ? "text" : "password"}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -156,7 +178,9 @@ function Login() {
               <button
                 type="button"
                 className="auth-password-toggle"
-                aria-label={isPasswordVisible ? 'Ocultar senha' : 'Mostrar senha'}
+                aria-label={
+                  isPasswordVisible ? "Ocultar senha" : "Mostrar senha"
+                }
                 onClick={() => setIsPasswordVisible((current) => !current)}
               >
                 {isPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -164,9 +188,13 @@ function Login() {
             </div>
           </label>
 
-          <button className="primary-button auth-submit" type="submit" disabled={isSubmitting || isLoadingUsers}>
+          <button
+            className="primary-button auth-submit"
+            type="submit"
+            disabled={isSubmitting || isLoadingUsers}
+          >
             <LogIn size={18} />
-            {isSubmitting ? 'A entrar...' : 'Entrar'}
+            {isSubmitting ? "A ENTRAR..." : "LOGIN"}
           </button>
         </form>
       </section>
