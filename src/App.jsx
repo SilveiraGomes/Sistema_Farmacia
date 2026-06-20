@@ -54,50 +54,69 @@ const viewPermissions = {
 const canonicalViewOrder = Object.keys(viewPermissions);
 
 function getAllowedViews(hasPermission) {
-  if (typeof hasPermission !== 'function') {
+  if (typeof hasPermission !== "function") {
     return canonicalViewOrder;
   }
 
-  return canonicalViewOrder.filter((view) => hasPermission(viewPermissions[view]));
+  return canonicalViewOrder.filter((view) =>
+    hasPermission(viewPermissions[view]),
+  );
 }
 
 function getInitials(user) {
-  const displayName = user?.nome_completo || user?.nome_usuario || 'Usuario';
+  const displayName = user?.nome_completo || user?.nome_usuario || "Utilizador";
   const initials = displayName
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0])
-    .join('');
+    .join("");
 
-  return initials.toUpperCase() || 'US';
+  return initials.toUpperCase() || "US";
 }
 
 function App() {
-  const { user, mustChangePassword, isLoading, logout, hasPermission } = useAuth();
-  const [currentView, setCurrentView] = useState('dashboard');
+  const { user, mustChangePassword, isLoading, logout, hasPermission } =
+    useAuth();
+  const [currentView, setCurrentView] = useState("dashboard");
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [readNotificationIds, setReadNotificationIds] = useState(() => new Set());
+  const [readNotificationIds, setReadNotificationIds] = useState(
+    () => new Set(),
+  );
   const previousUserId = useRef(user?.id);
   const profileMenuRef = useRef(null);
   const notificationsRef = useRef(null);
-  const allowedViews = useMemo(() => getAllowedViews(hasPermission), [hasPermission]);
+  const allowedViews = useMemo(
+    () => getAllowedViews(hasPermission),
+    [hasPermission],
+  );
   const firstAllowedView = allowedViews[0] ?? null;
-  const activeView = allowedViews.includes(currentView) ? currentView : firstAllowedView;
-  const title = activeView ? viewTitles[activeView] ?? 'Dashboard' : 'Sem acesso';
-  const displayName = user?.nome_completo || user?.nome_usuario || 'Usuario';
+  const activeView = allowedViews.includes(currentView)
+    ? currentView
+    : firstAllowedView;
+  const rawTitle = activeView
+    ? (viewTitles[activeView] ?? "Dashboard")
+    : "Sem acesso";
+  const title = rawTitle === "Operacao" ? "Operação" : rawTitle;
+  const displayName = user?.nome_completo || user?.nome_usuario || "Usuario";
   const initials = getInitials(user);
-  const notifications = useMemo(() => buildDashboardNotifications({
-    invoiceRows: invoices,
-    stockRows: stockItems,
-    expenseRows: financeExpenses,
-  }), []);
-  const unreadNotifications = notifications.filter((notification) => !readNotificationIds.has(notification.id));
+  const notifications = useMemo(
+    () =>
+      buildDashboardNotifications({
+        invoiceRows: invoices,
+        stockRows: stockItems,
+        expenseRows: financeExpenses,
+      }),
+    [],
+  );
+  const unreadNotifications = notifications.filter(
+    (notification) => !readNotificationIds.has(notification.id),
+  );
 
   useEffect(() => {
-    const fallbackView = firstAllowedView ?? 'dashboard';
+    const fallbackView = firstAllowedView ?? "dashboard";
 
     if (previousUserId.current !== user?.id) {
       previousUserId.current = user?.id;
@@ -105,7 +124,9 @@ function App() {
       return;
     }
 
-    setCurrentView((view) => (allowedViews.includes(view) ? view : fallbackView));
+    setCurrentView((view) =>
+      allowedViews.includes(view) ? view : fallbackView,
+    );
   }, [allowedViews, firstAllowedView, user?.id]);
 
   useEffect(() => {
@@ -119,8 +140,8 @@ function App() {
       }
     }
 
-    document.addEventListener('mousedown', closeTopbarMenus);
-    return () => document.removeEventListener('mousedown', closeTopbarMenus);
+    document.addEventListener("mousedown", closeTopbarMenus);
+    return () => document.removeEventListener("mousedown", closeTopbarMenus);
   }, []);
 
   function markNotificationsRead(ids) {
@@ -177,8 +198,10 @@ function App() {
       default:
         return (
           <section className="empty-state">
-            <h2>Sem permissoes disponiveis</h2>
-            <p>Contacte um administrador para rever o acesso deste utilizador.</p>
+            <h2>Sem permissões disponíveis</h2>
+            <p>
+              Contacte um administrador para rever o acesso deste utilizador.
+            </p>
           </section>
         );
     }
@@ -189,7 +212,7 @@ function App() {
       <main className="auth-screen">
         <section className="auth-card compact">
           <BrandMark className="auth-brand" />
-          <p className="auth-loading">A carregar sessao...</p>
+          <p className="auth-loading">A carregar sessão...</p>
         </section>
       </main>
     );
@@ -206,99 +229,127 @@ function App() {
   return (
     <SettingsProvider>
       <OperationProvider>
-        <div className={isMenuCollapsed ? 'app-shell menu-collapsed' : 'app-shell'}>
-      <Navbar
-        currentView={activeView}
-        hasPermission={hasPermission}
-        isCollapsed={isMenuCollapsed}
-        setCurrentView={setCurrentView}
-        toggleCollapsed={() => setIsMenuCollapsed((current) => !current)}
-      />
-      <div className="workspace">
-        <header className="topbar">
-          <h1>{title}</h1>
-          <div className="global-search" aria-label="Pesquisar">
-            <Search className="search-icon" size={24} />
-            <input aria-label="Pesquisa global" />
-          </div>
-          <div className="topbar-actions">
-            <div className="notifications-wrapper" ref={notificationsRef}>
-              <button
-                className="notification-button"
-                aria-expanded={isNotificationsOpen}
-                aria-haspopup="menu"
-                aria-label="Notificacoes"
-                type="button"
-                onClick={() => {
-                  setIsNotificationsOpen((current) => !current);
-                  setIsProfileMenuOpen(false);
-                }}
-              >
-                <Bell size={24} />
-                {unreadNotifications.length ? <span aria-label={`${unreadNotifications.length} notificacoes novas`} /> : null}
-              </button>
-              {isNotificationsOpen ? (
-                <div className="notifications-menu" role="menu">
-                  <div className="notifications-menu-header">
-                    <span>Notificacoes</span>
-                    <button
-                      type="button"
-                      onClick={() => markNotificationsRead(notifications.map((notification) => notification.id))}
-                    >
-                      Marcar lidas
-                    </button>
-                  </div>
-                  <div className="notifications-list">
-                    {notifications.map((notification) => (
-                      <article
-                        className={readNotificationIds.has(notification.id) ? 'notification-item read' : `notification-item ${notification.severity}`}
-                        key={notification.id}
-                        role="menuitem"
-                      >
-                        <div>
-                          <span>{notification.title}</span>
-                          <p>{notification.message}</p>
-                          {notification.detail ? <small>{notification.detail}</small> : null}
-                        </div>
+        <div
+          className={isMenuCollapsed ? "app-shell menu-collapsed" : "app-shell"}
+        >
+          <Navbar
+            currentView={activeView}
+            hasPermission={hasPermission}
+            isCollapsed={isMenuCollapsed}
+            setCurrentView={setCurrentView}
+            toggleCollapsed={() => setIsMenuCollapsed((current) => !current)}
+          />
+          <div className="workspace">
+            <header className="topbar">
+              <h1>{title}</h1>
+              <div className="global-search" aria-label="Pesquisar">
+                <Search className="search-icon" size={24} />
+                <input aria-label="Pesquisa global" />
+              </div>
+              <div className="topbar-actions">
+                <div className="notifications-wrapper" ref={notificationsRef}>
+                  <button
+                    className="notification-button"
+                    aria-expanded={isNotificationsOpen}
+                    aria-haspopup="menu"
+                    aria-label="Notificações"
+                    type="button"
+                    onClick={() => {
+                      setIsNotificationsOpen((current) => !current);
+                      setIsProfileMenuOpen(false);
+                    }}
+                  >
+                    <Bell size={24} />
+                    {unreadNotifications.length ? (
+                      <span
+                        aria-label={`${unreadNotifications.length} notificações novas`}
+                      />
+                    ) : null}
+                  </button>
+                  {isNotificationsOpen ? (
+                    <div className="notifications-menu" role="menu">
+                      <div className="notifications-menu-header">
+                        <span>Notificações</span>
                         <button
                           type="button"
-                          disabled={!allowedViews.includes(notification.actionView)}
-                          onClick={() => handleNotificationAction(notification)}
+                          onClick={() =>
+                            markNotificationsRead(
+                              notifications.map(
+                                (notification) => notification.id,
+                              ),
+                            )
+                          }
                         >
-                          {notification.actionLabel}
+                          Marcar lidas
                         </button>
-                      </article>
-                    ))}
-                  </div>
+                      </div>
+                      <div className="notifications-list">
+                        {notifications.map((notification) => (
+                          <article
+                            className={
+                              readNotificationIds.has(notification.id)
+                                ? "notification-item read"
+                                : `notification-item ${notification.severity}`
+                            }
+                            key={notification.id}
+                            role="menuitem"
+                          >
+                            <div>
+                              <span>{notification.title}</span>
+                              <p>{notification.message}</p>
+                              {notification.detail ? (
+                                <small>{notification.detail}</small>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={
+                                !allowedViews.includes(notification.actionView)
+                              }
+                              onClick={() =>
+                                handleNotificationAction(notification)
+                              }
+                            >
+                              {notification.actionLabel}
+                            </button>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-            <div className="profile-menu-wrapper" ref={profileMenuRef}>
-              <button
-                className="profile-button"
-                aria-expanded={isProfileMenuOpen}
-                aria-haspopup="menu"
-                aria-label="Perfil do usuario"
-                type="button"
-                onClick={() => setIsProfileMenuOpen((current) => !current)}
-              >
-                <span className="avatar">{initials}</span>
-                <strong>{displayName}</strong>
-                <span className="chevron"><ChevronDown size={18} /></span>
-              </button>
-              {isProfileMenuOpen ? (
-                <div className="profile-menu" role="menu">
-                  <button type="button" role="menuitem" onClick={handleLogout}>
-                    <LogOut size={18} />
-                    Sair do sistema
+                <div className="profile-menu-wrapper" ref={profileMenuRef}>
+                  <button
+                    className="profile-button"
+                    aria-expanded={isProfileMenuOpen}
+                    aria-haspopup="menu"
+                    aria-label="Perfil do utilizador"
+                    type="button"
+                    onClick={() => setIsProfileMenuOpen((current) => !current)}
+                  >
+                    <span className="avatar">{initials}</span>
+                    <strong>{displayName}</strong>
+                    <span className="chevron">
+                      <ChevronDown size={18} />
+                    </span>
                   </button>
+                  {isProfileMenuOpen ? (
+                    <div className="profile-menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={handleLogout}
+                      >
+                        <LogOut size={18} />
+                        Sair do sistema
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              </div>
+            </header>
+            <main className="screen-frame">{currentScreen}</main>
           </div>
-        </header>
-        <main className="screen-frame">{currentScreen}</main>
-      </div>
         </div>
       </OperationProvider>
     </SettingsProvider>
