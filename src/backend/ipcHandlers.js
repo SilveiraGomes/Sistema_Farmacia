@@ -1,8 +1,12 @@
-const { ipcMain } = require("electron");
+const { ipcMain, dialog } = require("electron");
+const fs = require("fs");
+const path = require("path");
 const authService = require("./services/authService");
 const userService = require("./services/userService");
 const profileService = require("./services/profileService");
 const operationService = require("./services/operationService");
+const reportQueueService = require("./services/reportQueueService");
+const reportSyncService = require("./services/reportSyncService");
 const { assertPermission } = require("./services/authorizationService");
 const {
   CONFIGURATION_ERROR_CODES,
@@ -11,12 +15,15 @@ const {
 
 const CONFIGURATION_SAFE_ERROR_MESSAGES = Object.freeze({
   [CONFIGURATION_ERROR_CODES.VALIDATION]: "Dados de configuracao invalidos.",
-  [CONFIGURATION_ERROR_CODES.CONFLICT]: "A configuracao foi alterada por outra sessao.",
+  [CONFIGURATION_ERROR_CODES.CONFLICT]:
+    "A configuracao foi alterada por outra sessao.",
   [CONFIGURATION_ERROR_CODES.NOT_FOUND]: "Configuracao nao encontrada.",
-  [CONFIGURATION_ERROR_CODES.CORRUPT_DATA]: "Os dados de configuracao estao invalidos.",
+  [CONFIGURATION_ERROR_CODES.CORRUPT_DATA]:
+    "Os dados de configuracao estao invalidos.",
   [CONFIGURATION_ERROR_CODES.PROTECTED]: "Esta configuracao e protegida.",
   [CONFIGURATION_ERROR_CODES.IN_USE]: "Esta configuracao esta em uso.",
-  [CONFIGURATION_ERROR_CODES.INVARIANT]: "A alteracao viola uma regra de configuracao.",
+  [CONFIGURATION_ERROR_CODES.INVARIANT]:
+    "A alteracao viola uma regra de configuracao.",
 });
 
 const SAFE_ERROR_MESSAGES = new Set([
@@ -56,18 +63,24 @@ function serializeError(error) {
   const code = error && error.code ? error.code : "IPC_REQUEST_FAILED";
   const message = error && error.message ? error.message : "";
   const configurationMessage = CONFIGURATION_SAFE_ERROR_MESSAGES[code];
-  const isSafeMessage = SAFE_ERROR_CODES.has(code) || SAFE_ERROR_MESSAGES.has(message)
-    || message.startsWith("Permissoes desconhecidas:");
+  const isSafeMessage =
+    SAFE_ERROR_CODES.has(code) ||
+    SAFE_ERROR_MESSAGES.has(message) ||
+    message.startsWith("Permissoes desconhecidas:");
 
   return {
-    message: configurationMessage || (isSafeMessage ? message : "Erro ao processar requisicao."),
+    message:
+      configurationMessage ||
+      (isSafeMessage ? message : "Erro ao processar requisicao."),
     code,
   };
 }
 
 function isPasswordChangeRequired(session) {
-  return session.mustChangePassword === true ||
-    (session.user && session.user.deve_trocar_senha === true);
+  return (
+    session.mustChangePassword === true ||
+    (session.user && session.user.deve_trocar_senha === true)
+  );
 }
 
 function throwPasswordChangeRequired() {
@@ -126,8 +139,11 @@ function buildRouteMap(overrides = {}) {
     userService,
     profileService,
     operationService,
+    reportQueueService,
+    reportSyncService,
     configurationService: null,
     assertPermission,
+    electronApp: null,
     ...overrides,
   };
 
@@ -136,92 +152,217 @@ function buildRouteMap(overrides = {}) {
     "auth.loginUsers": () => dependencies.userService.listLoginUsers(),
     "auth.logout": () => dependencies.authService.logout(),
     "auth.currentSession": () => dependencies.authService.getCurrentSession(),
-    "auth.changeOwnPassword": (data) => dependencies.authService.changeOwnPassword(data),
+    "auth.changeOwnPassword": (data) =>
+      dependencies.authService.changeOwnPassword(data),
 
-    "users.list": () => withPermission(dependencies, "usuarios.ver", () => (
-      dependencies.userService.listUsers()
-    )),
-    "users.create": (data) => withPermission(dependencies, "usuarios.criar", (actorUserId) => (
-      dependencies.userService.createUser({ actorUserId, data })
-    )),
-    "users.update": (data = {}) => withPermission(dependencies, "usuarios.editar", (actorUserId) => {
-      return dependencies.userService.updateUser({
-        actorUserId,
-        userId: getTargetUserId(data),
-        data: getUpdateUserData(data),
-      });
-    }),
-    "users.activate": (data = {}) => withPermission(dependencies, "usuarios.editar", (actorUserId) => (
-      dependencies.userService.activateUser({ actorUserId, userId: getTargetUserId(data) })
-    )),
-    "users.deactivate": (data = {}) => withPermission(dependencies, "usuarios.inativar", (actorUserId) => (
-      dependencies.userService.deactivateUser({ actorUserId, userId: getTargetUserId(data) })
-    )),
-    "users.resetPassword": (data = {}) => withPermission(dependencies, "usuarios.resetar_senha", (actorUserId) => (
-      dependencies.userService.resetUserPassword({ actorUserId, userId: getTargetUserId(data) })
-    )),
+    "users.list": () =>
+      withPermission(dependencies, "usuarios.ver", () =>
+        dependencies.userService.listUsers(),
+      ),
+    "users.create": (data) =>
+      withPermission(dependencies, "usuarios.criar", (actorUserId) =>
+        dependencies.userService.createUser({ actorUserId, data }),
+      ),
+    "users.update": (data = {}) =>
+      withPermission(dependencies, "usuarios.editar", (actorUserId) => {
+        return dependencies.userService.updateUser({
+          actorUserId,
+          userId: getTargetUserId(data),
+          data: getUpdateUserData(data),
+        });
+      }),
+    "users.activate": (data = {}) =>
+      withPermission(dependencies, "usuarios.editar", (actorUserId) =>
+        dependencies.userService.activateUser({
+          actorUserId,
+          userId: getTargetUserId(data),
+        }),
+      ),
+    "users.deactivate": (data = {}) =>
+      withPermission(dependencies, "usuarios.inativar", (actorUserId) =>
+        dependencies.userService.deactivateUser({
+          actorUserId,
+          userId: getTargetUserId(data),
+        }),
+      ),
+    "users.resetPassword": (data = {}) =>
+      withPermission(dependencies, "usuarios.resetar_senha", (actorUserId) =>
+        dependencies.userService.resetUserPassword({
+          actorUserId,
+          userId: getTargetUserId(data),
+        }),
+      ),
 
-    "profiles.summaries": () => withPermission(dependencies, "usuarios.ver", async () => {
-      const profiles = await dependencies.profileService.listProfiles();
-      return profiles.map(toProfileSummary);
-    }),
-    "profiles.list": () => withPermission(dependencies, "usuarios.gerir_permissoes", () => (
-      dependencies.profileService.listProfiles()
-    )),
-    "profiles.permissions": () => withPermission(dependencies, "usuarios.gerir_permissoes", () => (
-      dependencies.profileService.listPermissions()
-    )),
-    "profiles.updatePermissions": (data = {}) => withPermission(dependencies, "usuarios.gerir_permissoes", (actorUserId) => (
-      dependencies.profileService.updateProfilePermissions({
-        actorUserId,
-        profileId: data.profileId,
-        permissionKeys: data.permissionKeys,
-      })
-    )),
+    "profiles.summaries": () =>
+      withPermission(dependencies, "usuarios.ver", async () => {
+        const profiles = await dependencies.profileService.listProfiles();
+        return profiles.map(toProfileSummary);
+      }),
+    "profiles.list": () =>
+      withPermission(dependencies, "usuarios.gerir_permissoes", () =>
+        dependencies.profileService.listProfiles(),
+      ),
+    "profiles.permissions": () =>
+      withPermission(dependencies, "usuarios.gerir_permissoes", () =>
+        dependencies.profileService.listPermissions(),
+      ),
+    "profiles.updatePermissions": (data = {}) =>
+      withPermission(dependencies, "usuarios.gerir_permissoes", (actorUserId) =>
+        dependencies.profileService.updateProfilePermissions({
+          actorUserId,
+          profileId: data.profileId,
+          permissionKeys: data.permissionKeys,
+        }),
+      ),
 
-    "operation.state": () => withPermission(dependencies, "operacao.ver", () => (
-      dependencies.operationService.getOperationalState()
-    )),
-    "operation.openDay": (data = {}) => withPermission(dependencies, "operacao.abrir_dia", (actorUserId) => (
-      dependencies.operationService.openDay({ actorUserId, data })
-    )),
-    "operation.closeDay": (data = {}) => withPermission(dependencies, "operacao.fechar_dia", (actorUserId) => (
-      dependencies.operationService.closeDay({ actorUserId, data })
-    )),
-    "operation.openShift": (data = {}) => withPermission(dependencies, "operacao.abrir_turno", (actorUserId) => (
-      dependencies.operationService.openShift({ actorUserId, data })
-    )),
-    "operation.closeShift": (data = {}) => withPermission(dependencies, "operacao.fechar_turno", (actorUserId) => (
-      dependencies.operationService.closeShift({ actorUserId, data })
-    )),
+    "operation.state": () =>
+      withPermission(dependencies, "operacao.ver", () =>
+        dependencies.operationService.getOperationalState(),
+      ),
+    "operation.openDay": (data = {}) =>
+      withPermission(dependencies, "operacao.abrir_dia", (actorUserId) =>
+        dependencies.operationService.openDay({ actorUserId, data }),
+      ),
+    "operation.closeDay": (data = {}) =>
+      withPermission(dependencies, "operacao.fechar_dia", (actorUserId) =>
+        dependencies.operationService.closeDay({ actorUserId, data }),
+      ),
+    "operation.openShift": (data = {}) =>
+      withPermission(dependencies, "operacao.abrir_turno", (actorUserId) =>
+        dependencies.operationService.openShift({ actorUserId, data }),
+      ),
+    "operation.closeShift": (data = {}) =>
+      withPermission(dependencies, "operacao.fechar_turno", (actorUserId) =>
+        dependencies.operationService.closeShift({ actorUserId, data }),
+      ),
 
-    "configuration.snapshot": () => withPermission(dependencies, "configuracoes.ver", () => (
-      dependencies.configurationService.getSnapshot()
-    )),
-    "configuration.updateSection": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
-      dependencies.configurationService.updateSection({ ...data, actorUserId })
-    )),
-    "configuration.importLegacy": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
-      dependencies.configurationService.importLegacySettings({ ...data, actorUserId })
-    )),
-    "configuration.document.reserveNumber": (data = {}) => withPermission(dependencies, "vendas.criar", (actorUserId) => (
-      dependencies.configurationService.reserveNextDocumentNumber({ ...data, actorUserId })
-    )),
-    "configuration.catalog.create": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
-      dependencies.configurationService.createCatalogOption({ ...data, actorUserId })
-    )),
-    "configuration.catalog.update": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
-      dependencies.configurationService.updateCatalogOption({ ...data, actorUserId })
-    )),
-    "configuration.catalog.reorder": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
-      dependencies.configurationService.reorderCatalogOptions({ ...data, actorUserId })
-    )),
-    "configuration.catalog.activate": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
-      dependencies.configurationService.activateCatalogOption({ ...data, actorUserId })
-    )),
-    "configuration.catalog.deactivate": (data = {}) => withPermission(dependencies, "configuracoes.editar", (actorUserId) => (
-      dependencies.configurationService.deactivateCatalogOption({ ...data, actorUserId })
-    )),
+    "configuration.snapshot": () =>
+      withPermission(dependencies, "configuracoes.ver", () =>
+        dependencies.configurationService.getSnapshot(),
+      ),
+    "configuration.updateSection": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
+        dependencies.configurationService.updateSection({
+          ...data,
+          actorUserId,
+        }),
+      ),
+    "configuration.importLegacy": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
+        dependencies.configurationService.importLegacySettings({
+          ...data,
+          actorUserId,
+        }),
+      ),
+    "configuration.document.reserveNumber": (data = {}) =>
+      withPermission(dependencies, "vendas.criar", (actorUserId) =>
+        dependencies.configurationService.reserveNextDocumentNumber({
+          ...data,
+          actorUserId,
+        }),
+      ),
+    "configuration.catalog.create": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
+        dependencies.configurationService.createCatalogOption({
+          ...data,
+          actorUserId,
+        }),
+      ),
+    "configuration.catalog.update": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
+        dependencies.configurationService.updateCatalogOption({
+          ...data,
+          actorUserId,
+        }),
+      ),
+    "configuration.catalog.reorder": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
+        dependencies.configurationService.reorderCatalogOptions({
+          ...data,
+          actorUserId,
+        }),
+      ),
+    "configuration.catalog.activate": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
+        dependencies.configurationService.activateCatalogOption({
+          ...data,
+          actorUserId,
+        }),
+      ),
+    "configuration.catalog.deactivate": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
+        dependencies.configurationService.deactivateCatalogOption({
+          ...data,
+          actorUserId,
+        }),
+      ),
+
+    "reports.sync.status": () =>
+      withPermission(dependencies, "relatorios.ver", () =>
+        dependencies.reportSyncService.getSyncStatus(),
+      ),
+
+    "reports.sync.now": () =>
+      withPermission(dependencies, "relatorios.exportar", async () => {
+        const snapshot = await dependencies.configurationService.getSnapshot();
+        const syncConfig = snapshot?.settings?.reports?.googleSheets?.value || null;
+        return dependencies.reportSyncService.syncNow(syncConfig);
+      }),
+
+    "reports.sync.history": (data = {}) =>
+      withPermission(dependencies, "relatorios.ver", () =>
+        dependencies.reportQueueService.getSyncHistory(
+          data.limit || 50,
+          data.offset || 0,
+        ),
+      ),
+
+    "reports.enqueue": (data = {}) =>
+      withPermission(dependencies, "relatorios.ver", (actorUserId) =>
+        dependencies.reportQueueService.enqueueReport(
+          data.reportId,
+          data.reportData,
+          data.reportType,
+        ),
+      ),
+
+    "backup.create": () =>
+      withPermission(dependencies, "configuracoes.editar", async () => {
+        const electronApp = dependencies.electronApp;
+        if (!electronApp) throw new Error("Backup nao disponivel neste ambiente.");
+        const dbPath = path.join(electronApp.getPath("userData"), "database.sqlite");
+        const defaultName = `backup-esayos-${new Date().toISOString().slice(0, 10)}.sqlite`;
+        const result = await dialog.showSaveDialog({
+          title: "Guardar backup",
+          defaultPath: defaultName,
+          filters: [{ name: "Backup SQLite", extensions: ["sqlite", "db"] }],
+        });
+        if (result.canceled || !result.filePath) return { canceled: true };
+        fs.copyFileSync(dbPath, result.filePath);
+        return { success: true, filePath: result.filePath, message: "Backup criado com sucesso." };
+      }),
+    "backup.selectFile": () =>
+      withPermission(dependencies, "configuracoes.editar", async () => {
+        const result = await dialog.showOpenDialog({
+          title: "Seleccionar ficheiro de backup",
+          filters: [{ name: "Backup SQLite", extensions: ["sqlite", "db"] }],
+          properties: ["openFile"],
+        });
+        if (result.canceled || !result.filePaths[0]) return { canceled: true };
+        return { filePath: result.filePaths[0] };
+      }),
+    "backup.restore": (data) =>
+      withPermission(dependencies, "configuracoes.editar", async () => {
+        const electronApp = dependencies.electronApp;
+        if (!electronApp) throw new Error("Restauracao de backup nao disponivel neste ambiente.");
+        const dbPath = path.join(electronApp.getPath("userData"), "database.sqlite");
+        const srcPath = data?.filePath;
+        if (!srcPath) throw new Error("Nenhum ficheiro de backup especificado.");
+        if (!fs.existsSync(srcPath)) throw new Error("Ficheiro de backup nao encontrado.");
+        fs.copyFileSync(dbPath, dbPath + ".pre_restore");
+        fs.copyFileSync(srcPath, dbPath);
+        return { success: true, message: "Backup restaurado com sucesso. Reinicie o sistema para aplicar as alteracoes." };
+      }),
   };
 }
 
@@ -244,10 +385,20 @@ async function handleAppRequest(routes, request = {}) {
 
 function replyLegacyError(event, responseAction, error, logMessage) {
   console.error(logMessage, error);
-  event.reply("fromMain", { action: responseAction, error: serializeError(error).message });
+  event.reply("fromMain", {
+    action: responseAction,
+    error: serializeError(error).message,
+  });
 }
 
-async function runLegacyRoute(event, dependencies, permissionKey, responseAction, handler, logMessage) {
+async function runLegacyRoute(
+  event,
+  dependencies,
+  permissionKey,
+  responseAction,
+  handler,
+  logMessage,
+) {
   try {
     const data = await withPermission(dependencies, permissionKey, handler);
     event.reply("fromMain", { action: responseAction, data });
@@ -256,7 +407,11 @@ async function runLegacyRoute(event, dependencies, permissionKey, responseAction
   }
 }
 
-function registerLegacyRoutes(ipc, { Categoria, Subcategoria, Produto }, overrides = {}) {
+function registerLegacyRoutes(
+  ipc,
+  { Categoria, Subcategoria, Produto },
+  overrides = {},
+) {
   const dependencies = {
     authService,
     assertPermission,
@@ -321,19 +476,29 @@ function registerLegacyRoutes(ipc, { Categoria, Subcategoria, Produto }, overrid
         break;
       default:
         console.log("Acao IPC desconhecida:", args.action);
-        event.reply("fromMain", { action: "unknownAction", error: "Acao IPC desconhecida." });
+        event.reply("fromMain", {
+          action: "unknownAction",
+          error: "Acao IPC desconhecida.",
+        });
     }
   });
 }
 
 async function init(models, options = {}) {
   const ipc = options.ipcMain || ipcMain;
-  const configurationService = options.configurationService
-    || (options.createConfigurationService || createConfigurationService)({ db: models.db, models });
+  const configurationService =
+    options.configurationService ||
+    (options.createConfigurationService || createConfigurationService)({
+      db: models.db,
+      models,
+    });
   const dependencies = {
     configurationService,
     ...(options.authService ? { authService: options.authService } : {}),
-    ...(options.assertPermission ? { assertPermission: options.assertPermission } : {}),
+    ...(options.assertPermission
+      ? { assertPermission: options.assertPermission }
+      : {}),
+    ...(options.electronApp ? { electronApp: options.electronApp } : {}),
   };
   await configurationService.seedDefaults();
   const routes = buildRouteMap(dependencies);
@@ -341,7 +506,9 @@ async function init(models, options = {}) {
   if (typeof ipc.removeHandler === "function") {
     ipc.removeHandler("app:request");
   }
-  ipc.handle("app:request", (_event, request) => handleAppRequest(routes, request));
+  ipc.handle("app:request", (_event, request) =>
+    handleAppRequest(routes, request),
+  );
   registerLegacyRoutes(ipc, models, dependencies);
 }
 

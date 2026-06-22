@@ -7,7 +7,17 @@ import {
   createSafeDefaultSnapshot,
   filterCatalogOptions,
 } from '../src/configuration/catalogKeys.mjs';
-import { loadSettingsSnapshot } from '../src/configuration/settingsLifecycle.mjs';
+import {
+  loadSettingsSnapshot,
+  readLegacySettings,
+  validateSnapshot,
+} from '../src/configuration/settingsLifecycle.mjs';
+
+function validSnapshot({ pending = false } = {}) {
+  const snapshot = createSafeDefaultSnapshot();
+  snapshot.migrations.legacyLocalStoragePending = pending;
+  return snapshot;
+}
 
 test('catalog keys are complete, canonical and frozen', () => {
   assert.equal(Object.isFrozen(CATALOG_KEYS), true);
@@ -19,6 +29,7 @@ test('catalog keys are complete, canonical and frozen', () => {
     'loss_reasons',
     'stock_units',
     'stock_locations',
+    'product_locations',
     'client_statuses',
     'document_types',
     'document_statuses',
@@ -107,7 +118,7 @@ test('settings lifecycle never reads legacy storage for completed or read-only s
     { pending: true, canEdit: false },
   ]) {
     const calls = [];
-    const snapshot = { settings: {}, catalogs: {}, migrations: { legacyLocalStoragePending: pending } };
+    const snapshot = validSnapshot({ pending });
     const result = await loadSettingsSnapshot({
       loadSnapshot: async () => { calls.push('snapshot'); return snapshot; },
       importLegacy: async () => { calls.push('import'); },
@@ -122,8 +133,8 @@ test('settings lifecycle never reads legacy storage for completed or read-only s
 
 test('settings lifecycle imports pending legacy data then recalls SQLite snapshot', async () => {
   const calls = [];
-  const initial = { settings: {}, catalogs: {}, migrations: { legacyLocalStoragePending: true } };
-  const migrated = { settings: { company: {} }, catalogs: {}, migrations: { legacyLocalStoragePending: false } };
+  const initial = validSnapshot({ pending: true });
+  const migrated = validSnapshot({ pending: false });
   let snapshotCall = 0;
   const result = await loadSettingsSnapshot({
     loadSnapshot: async () => {
@@ -149,7 +160,7 @@ test('settings lifecycle imports pending legacy data then recalls SQLite snapsho
 });
 
 test('settings lifecycle preserves loaded snapshot when legacy import fails', async () => {
-  const snapshot = { settings: {}, catalogs: {}, migrations: { legacyLocalStoragePending: true } };
+  const snapshot = validSnapshot({ pending: true });
   const result = await loadSettingsSnapshot({
     loadSnapshot: async () => snapshot,
     importLegacy: async () => { throw new Error('permission denied internals'); },
@@ -163,6 +174,88 @@ test('settings lifecycle preserves loaded snapshot when legacy import fails', as
   assert.doesNotMatch(result.error, /permission denied/);
 });
 
+test('snapshot validation accepts complete snapshots and rejects malformed structures', () => {
+  const complete = validSnapshot();
+  assert.equal(validateSnapshot(complete), complete);
+
+  const invalidSnapshots = [
+    null,
+    {},
+    { ...validSnapshot(), migrations: { legacyLocalStoragePending: 'yes' } },
+    { ...validSnapshot(), catalogs: { ...validSnapshot().catalogs, payment_methods: {} } },
+    (() => {
+      const snapshot = validSnapshot();
+      snapshot.catalogs.payment_methods[0].active = 'yes';
+      return snapshot;
+    })(),
+    (() => {
+      const snapshot = validSnapshot();
+      delete snapshot.settings.sales.defaultTaxRate;
+      return snapshot;
+    })(),
+    (() => {
+      const snapshot = validSnapshot();
+      snapshot.settings.company.identity.version = -1;
+      return snapshot;
+    })(),
+  ];
+
+  for (const snapshot of invalidSnapshots) {
+    assert.throws(() => validateSnapshot(snapshot), /snapshot/i);
+  }
+});
+
+test('invalid initial, imported, and reloaded snapshots use a safe read-only fallback', async () => {
+  const invalidInitial = await loadSettingsSnapshot({
+    loadSnapshot: async () => null,
+    importLegacy: async () => ({}),
+    readLegacy: () => ({}),
+    canEdit: true,
+  });
+  assert.equal(invalidInitial.readOnly, true);
+  assert.equal(invalidInitial.snapshot.settings.documents.currency.value, 'AKZ');
+  assert.match(invalidInitial.error, /configura/i);
+
+  const malformedImport = validSnapshot({ pending: true });
+  malformedImport.catalogs.payment_methods[0].code = null;
+  const invalidImported = await loadSettingsSnapshot({
+    loadSnapshot: async () => validSnapshot({ pending: true }),
+    importLegacy: async () => malformedImport,
+    readLegacy: () => ({}),
+    canEdit: true,
+  });
+  assert.equal(invalidImported.readOnly, true);
+  assert.equal(invalidImported.snapshot.settings.documents.currency.value, 'AKZ');
+
+  let loadCount = 0;
+  const invalidReload = await loadSettingsSnapshot({
+    loadSnapshot: async () => {
+      loadCount += 1;
+      return loadCount === 1 ? validSnapshot({ pending: true }) : { settings: {}, catalogs: {} };
+    },
+    importLegacy: async () => ({ applied: true }),
+    readLegacy: () => ({}),
+    canEdit: true,
+  });
+  assert.equal(invalidReload.readOnly, true);
+  assert.equal(invalidReload.snapshot.settings.documents.currency.value, 'AKZ');
+});
+
+test('inaccessible browser storage is treated as absent legacy data', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get() { throw new Error('storage blocked'); },
+  });
+
+  try {
+    assert.deepEqual(readLegacySettings(), {});
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete globalThis.localStorage;
+  }
+});
+
 test('SettingsContext gates migration, protects async state and exposes hooks', async () => {
   const source = await readFile('src/configuration/SettingsContext.jsx', 'utf8');
 
@@ -172,6 +265,9 @@ test('SettingsContext gates migration, protects async state and exposes hooks', 
   assert.match(source, /migrationVersion:\s*LEGACY_MIGRATION_VERSION/);
   assert.match(source, /requestGenerationRef/);
   assert.match(source, /inFlightLoadRef/);
+  assert.match(source, /loadKey\s*=\s*`\$\{userId\}:\$\{canEdit\}`/);
+  assert.match(source, /requestGenerationRef\.current !== generation/);
+  assert.match(source, /applySnapshot[\s\S]*requestGenerationRef\.current \+= 1/);
   assert.match(source, /setState\(\{[\s\S]*snapshot:\s*null/);
   assert.match(source, /export function useCatalog/);
   assert.match(source, /includeInactive/);

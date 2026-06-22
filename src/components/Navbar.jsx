@@ -25,10 +25,10 @@ const menuItems = [
     permission: "dashboard.ver",
   },
   {
-    id: "operacao",
-    label: "Operação",
+    id: 'operacao',
+    label: 'Operacao',
     icon: CalendarClock,
-    permission: "operacao.ver",
+    permission: 'operacao.ver',
   },
   {
     id: "vendas",
@@ -117,6 +117,7 @@ function Navbar({
             className={
               currentView === item.id ? "side-link active" : "side-link"
             }
+            title={isCollapsed ? item.label : undefined}
             onClick={() => setCurrentView(item.id)}
           >
             <span className="side-icon">
@@ -135,6 +136,7 @@ function Navbar({
             className={
               currentView === item.id ? "side-link active" : "side-link"
             }
+            title={isCollapsed ? item.label : undefined}
             onClick={() => setCurrentView(item.id)}
           >
             <span className="side-icon">

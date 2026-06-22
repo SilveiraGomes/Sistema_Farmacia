@@ -2,11 +2,9 @@ import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { getStoredBranding } from '../data/branding.mjs';
-import { getStoredInvoiceA4Settings } from '../data/invoiceSettings.mjs';
 import { request } from '../services/ipcClient';
 import { createSafeDefaultSnapshot, filterCatalogOptions } from './catalogKeys.mjs';
-import { loadSettingsSnapshot } from './settingsLifecycle.mjs';
+import { loadSettingsSnapshot, readLegacySettings } from './settingsLifecycle.mjs';
 
 const SettingsContext = createContext(null);
 const EMPTY_CATALOG_OPTIONS = Object.freeze([]);
@@ -14,23 +12,6 @@ const LEGACY_MIGRATION_VERSION = 1;
 
 function errorMessage(error) {
   return error?.message || 'Nao foi possivel carregar as configuracoes.';
-}
-
-export function readLegacySettings() {
-  const branding = getStoredBranding();
-  const invoiceA4 = getStoredInvoiceA4Settings();
-
-  return {
-    branding: {
-      pharmacyName: branding.pharmacyName,
-      taxId: invoiceA4.pharmacyTaxId,
-      address: [invoiceA4.pharmacyAddress, invoiceA4.pharmacyCity].filter(Boolean).join('\n'),
-      phone: invoiceA4.pharmacyPhone,
-      email: invoiceA4.pharmacyEmail,
-      logoDataUrl: branding.logoDataUrl,
-    },
-    invoiceA4,
-  };
 }
 
 export function SettingsProvider({ children }) {

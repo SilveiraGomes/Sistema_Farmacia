@@ -8,7 +8,11 @@ export const DEFAULT_BRANDING = Object.freeze({
 export const BRANDING_CHANGE_EVENT = 'pharmacy-branding-change';
 
 function getDefaultStorage() {
-  return globalThis.localStorage;
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function getDefaultEventTarget() {

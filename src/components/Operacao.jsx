@@ -13,8 +13,8 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { useOperation } from '../operation/OperationContext';
 import { formatKwanza } from '../data/pharmacyData.mjs';
-
-const shiftNames = ['Manha', 'Tarde', 'Noite'];
+import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
+import { useCatalog } from '../configuration/SettingsContext';
 
 function todayKey() {
   const now = new Date();
@@ -24,7 +24,7 @@ function todayKey() {
   return `${year}-${month}-${day}`;
 }
 
-function createDefaultForm(modal) {
+function createDefaultForm(modal, defaultShift = '') {
   if (modal === 'open-day') {
     return {
       data_operacional: todayKey(),
@@ -35,7 +35,7 @@ function createDefaultForm(modal) {
 
   if (modal === 'open-shift') {
     return {
-      nome: 'Manha',
+      nome: defaultShift,
       saldo_inicial: '',
       observacao_abertura: '',
     };
@@ -55,6 +55,7 @@ function Operacao() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const day = operation.day;
   const shift = operation.shift;
+  const shiftOptions = useCatalog(CATALOG_KEYS.OPERATION_SHIFTS, { selectedCode: shift?.nome || '' });
 
   const cashSummary = useMemo(() => {
     const source = shift || day;
@@ -68,7 +69,7 @@ function Operacao() {
   }, [day, shift]);
 
   function openModal(nextModal) {
-    setForm(createDefaultForm(nextModal));
+    setForm(createDefaultForm(nextModal, shiftOptions[0]?.code || ''));
     setModal(nextModal);
   }
 
@@ -248,6 +249,7 @@ function Operacao() {
           onChange={updateForm}
           onClose={() => setModal('')}
           onSubmit={submitModal}
+          shiftOptions={shiftOptions}
         />
       ) : null}
     </section>
@@ -288,7 +290,7 @@ function LedgerItem({ label, value }) {
   );
 }
 
-function OperationModal({ modal, form, isSubmitting, onChange, onClose, onSubmit }) {
+function OperationModal({ modal, form, isSubmitting, onChange, onClose, onSubmit, shiftOptions }) {
   const isOpening = modal === 'open-day' || modal === 'open-shift';
   const title = {
     'open-day': 'Abrir dia operacional',
@@ -320,7 +322,7 @@ function OperationModal({ modal, form, isSubmitting, onChange, onClose, onSubmit
             <label>
               <span>Turno</span>
               <select value={form.nome} onChange={(event) => onChange('nome', event.target.value)}>
-                {shiftNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                {shiftOptions.map((option) => <option key={option.code} value={option.code}>{option.name}</option>)}
               </select>
             </label>
           ) : null}

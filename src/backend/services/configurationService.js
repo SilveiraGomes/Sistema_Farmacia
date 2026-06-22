@@ -205,16 +205,18 @@ const validateSeries = (documentType, series) => {
 
 const defaultSeries = (documentType, year) => {
   const prefixes = {
-    factura: 'FAT',
-    recibo: 'REC',
-    proforma: 'PRO',
+    factura: 'FT',
+    factura_recibo: 'FR',
+    recibo: 'RC',
+    proforma: 'PF',
+    credito: 'CR',
     'nota-credito': 'NC',
   };
   return {
-    prefix: prefixes[documentType],
+    prefix: prefixes[documentType] || documentType.slice(0, 2).toUpperCase(),
     year,
     nextNumber: 1,
-    padding: 3,
+    padding: 5,
   };
 };
 

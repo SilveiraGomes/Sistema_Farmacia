@@ -1,7 +1,9 @@
 export const DOCUMENT_TYPES = Object.freeze({
   INVOICE: 'FACTURA',
+  INVOICE_RECEIPT: 'FACTURA_RECIBO',
   RECEIPT: 'RECIBO',
   PROFORMA: 'PROFORMA',
+  CREDIT: 'CREDITO',
   CREDIT_NOTE: 'NOTA_CREDITO',
   DEBIT_NOTE: 'NOTA_DEBITO',
   GUIDE: 'GUIA',
@@ -18,10 +20,12 @@ export const DOCUMENT_STATUSES = Object.freeze({
 
 export const documentTypeLabels = Object.freeze({
   [DOCUMENT_TYPES.INVOICE]: 'Factura',
+  [DOCUMENT_TYPES.INVOICE_RECEIPT]: 'Factura/Recibo',
   [DOCUMENT_TYPES.RECEIPT]: 'Recibo',
   [DOCUMENT_TYPES.PROFORMA]: 'Proforma',
-  [DOCUMENT_TYPES.CREDIT_NOTE]: 'Nota de credito',
-  [DOCUMENT_TYPES.DEBIT_NOTE]: 'Nota de debito',
+  [DOCUMENT_TYPES.CREDIT]: 'Crédito',
+  [DOCUMENT_TYPES.CREDIT_NOTE]: 'Nota de Crédito',
+  [DOCUMENT_TYPES.DEBIT_NOTE]: 'Nota de Débito',
   [DOCUMENT_TYPES.GUIDE]: 'Guia',
 });
 

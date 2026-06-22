@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useAuth } from '../auth/AuthContext';
 import {
   ArrowLeft,
   Banknote,
@@ -43,24 +44,22 @@ import {
   removeCartItem,
   resumeHeldSale,
 } from '../data/salesWorkflow.mjs';
-import { getStoredBranding } from '../data/branding.mjs';
 import {
+  DOCUMENT_STATUSES,
+  DOCUMENT_TYPES,
   documentStatusLabels,
   documentTypeLabels,
   documents as storedDocuments,
 } from '../data/documents.mjs';
-import { buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
-import { getStoredInvoiceA4Settings } from '../data/invoiceSettings.mjs';
+import { buildDocumentSettingsFromSnapshot, buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
 import { confirmDelete } from '../utils/confirmations.mjs';
 import { useOperation } from '../operation/OperationContext';
+import { request } from '../services/ipcClient';
+import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
+import { useCatalog, useSetting, useSettings } from '../configuration/SettingsContext';
 import InvoiceA4 from './InvoiceA4';
 
-const paymentMethods = [
-  { id: 'Dinheiro', label: 'Dinheiro', icon: Banknote },
-  { id: 'TPA', label: 'TPA', icon: CreditCard },
-  { id: 'Transferencia', label: 'Transferencia', icon: Building2 },
-  { id: 'Credito', label: 'Credito', icon: Smartphone },
-];
+const paymentMethodIcons = { dinheiro: Banknote, tpa: CreditCard, transferencia: Building2, credito: Smartphone };
 
 const cashKeypad = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'backspace'];
 
@@ -85,6 +84,17 @@ const initialHeldSales = invoices
 
 function Vendas() {
   const operation = useOperation();
+  const { snapshot } = useSettings();
+  const { user } = useAuth();
+  const catalogPaymentMethods = useCatalog(CATALOG_KEYS.PAYMENT_METHODS);
+  const paymentMethods = catalogPaymentMethods.map((option) => ({
+    id: option.code,
+    label: option.name,
+    icon: paymentMethodIcons[option.metadata?.icon] || paymentMethodIcons[option.code] || CreditCard,
+  }));
+  const defaultPaymentMethod = useSetting('sales.defaultPaymentMethod', 'dinheiro');
+  const defaultTaxRate = useSetting('sales.defaultTaxRate', 0);
+  const maximumDiscount = useSetting('sales.maxDiscount', 580.2);
   const [activeCategory, setActiveCategory] = useState(null);
   const [categoryOffset, setCategoryOffset] = useState(0);
   const [cart, setCart] = useState(initialCart);
@@ -94,10 +104,13 @@ function Vendas() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [productQuery, setProductQuery] = useState('');
   const [clientQuery, setClientQuery] = useState('');
-  const [discount, setDiscount] = useState(580.2);
+  const [discount, setDiscount] = useState(maximumDiscount);
   const [received, setReceived] = useState('');
   const [finalizedDocument, setFinalizedDocument] = useState(null);
+  const [saleError, setSaleError] = useState('');
   const [recentSaleDocuments, setRecentSaleDocuments] = useState(() => buildRecentSaleDocuments(storedDocuments));
+  const [pendingPayment, setPendingPayment] = useState(null);
+  const [docType, setDocType] = useState(DOCUMENT_TYPES.INVOICE);
 
   const visibleProducts = useMemo(
     () => filterProductsForSale(products, activeCategory, productQuery),
@@ -112,12 +125,12 @@ function Vendas() {
     () => filterClientsForPicker(clients, clientQuery),
     [clientQuery],
   );
-  const summary = calculateCartSummary(cart, discount, 0);
+  const summary = calculateCartSummary(cart, discount, defaultTaxRate);
   const checkout = calculateCheckout({
     cart,
     discount,
     received,
-    taxRate: 0,
+    taxRate: defaultTaxRate,
   });
 
   function holdSale() {
@@ -184,40 +197,64 @@ function Vendas() {
     if (!operation.canOperate) return;
     if (!cart.length) return;
 
-    if (mode === 'Dinheiro') {
+    if (mode === 'dinheiro') {
       setShowCheckout(true);
       setReceived('');
       return;
     }
 
-    finalizeSale(mode, {
-      ...summary,
-      received: summary.total,
-      change: 0,
-      canFinalize: true,
+    setPendingPayment({
+      mode,
+      checkoutData: { ...summary, received: summary.total, change: 0, canFinalize: true },
     });
   }
 
-  function finalizeSale(paymentMethod = 'Dinheiro', checkoutData = checkout) {
+  async function finalizeSale(paymentMethod = defaultPaymentMethod, checkoutData = checkout) {
     if (!operation.canOperate) return;
     if (!cart.length || !checkoutData.canFinalize) return;
+    setSaleError('');
 
-    const document = buildFinalizedSaleDocument({
-      cart,
-      client: selectedClient,
-      checkout: checkoutData,
-      invoiceNumber: getNextInvoiceNumber(),
-      paymentMethod,
-      issueDate: new Date().toISOString().slice(0, 10),
-      userName: 'Vendedor',
-    });
+    const ipcDocTypeMap = {
+      [DOCUMENT_TYPES.INVOICE]: 'factura',
+      [DOCUMENT_TYPES.INVOICE_RECEIPT]: 'factura_recibo',
+      [DOCUMENT_TYPES.RECEIPT]: 'recibo',
+      [DOCUMENT_TYPES.PROFORMA]: 'proforma',
+      [DOCUMENT_TYPES.CREDIT]: 'credito',
+    };
+    const docStatusMap = {
+      [DOCUMENT_TYPES.INVOICE]: DOCUMENT_STATUSES.ISSUED,
+      [DOCUMENT_TYPES.INVOICE_RECEIPT]: DOCUMENT_STATUSES.PAID,
+      [DOCUMENT_TYPES.RECEIPT]: DOCUMENT_STATUSES.PAID,
+      [DOCUMENT_TYPES.PROFORMA]: DOCUMENT_STATUSES.PENDING,
+      [DOCUMENT_TYPES.CREDIT]: DOCUMENT_STATUSES.ISSUED,
+    };
 
-    setFinalizedDocument(document);
-    setRecentSaleDocuments((current) => buildRecentSaleDocuments([document, ...current]));
-    setCart([]);
-    setReceived('');
-    setDiscount(0);
-    setShowCheckout(false);
+    const isProforma = docType === DOCUMENT_TYPES.PROFORMA;
+    const ipcDocType = ipcDocTypeMap[docType] ?? 'factura';
+
+    try {
+      const reservation = await request('configuration.document.reserveNumber', { documentType: ipcDocType });
+      const document = {
+        ...buildFinalizedSaleDocument({
+          cart, client: selectedClient, checkout: checkoutData,
+          invoiceNumber: reservation, paymentMethod,
+          issueDate: new Date().toISOString().slice(0, 10),
+          userName: user?.nome_completo || 'Vendedor',
+        }),
+        type: docType,
+        status: docStatusMap[docType] ?? DOCUMENT_STATUSES.ISSUED,
+      };
+      setFinalizedDocument(document);
+      if (!isProforma) {
+        setRecentSaleDocuments((current) => buildRecentSaleDocuments([document, ...current]));
+        setCart([]);
+        setReceived('');
+        setDiscount(0);
+        setShowCheckout(false);
+      }
+    } catch (cause) {
+      setSaleError(cause?.message || 'Nao foi possivel reservar o numero da factura.');
+    }
   }
 
   function rotateCategories(direction) {
@@ -226,6 +263,7 @@ function Vendas() {
 
   return (
     <section className="sales-screen">
+      {saleError ? <p className="form-error sales-operation-block" role="alert">{saleError}</p> : null}
       <div className="sales-main">
         {!operation.canOperate ? (
           <div className="operation-blocked-banner sales-operation-block">
@@ -320,7 +358,7 @@ function Vendas() {
             received={received}
             setReceived={setReceived}
             onBack={() => setShowCheckout(false)}
-            onFinalize={() => finalizeSale('Dinheiro', checkout)}
+            onFinalize={() => finalizeSale('dinheiro', checkout)}
             canOperate={operation.canOperate}
           />
         ) : (
@@ -328,6 +366,8 @@ function Vendas() {
             cart={cart}
             selectedClient={selectedClient}
             summary={summary}
+            docType={docType}
+            onDocTypeChange={setDocType}
             onRemoveItem={async (item) => {
               if (await confirmDelete(`o produto ${item.name} da factura`)) {
                 setCart((current) => removeCartItem(current, item.id));
@@ -338,6 +378,7 @@ function Vendas() {
             }}
             onClient={openClientPicker}
             onPaymentMethod={choosePaymentMethod}
+            paymentMethods={paymentMethods}
             canOperate={operation.canOperate}
             operationMessage={operation.message}
           />
@@ -349,8 +390,36 @@ function Vendas() {
       <RecentSaleDocumentsTable rows={recentSaleDocuments} onOpenDocument={(document) => setFinalizedDocument(document)} />
 
       {finalizedDocument ? (
-        <FinalizedSalePreview document={finalizedDocument} onClose={() => setFinalizedDocument(null)} />
+        <FinalizedSalePreview document={finalizedDocument} snapshot={snapshot} onClose={() => setFinalizedDocument(null)} />
       ) : null}
+
+      {pendingPayment && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <div className="modal-title-row">
+              <h2>Confirmar venda</h2>
+              <button type="button" onClick={() => setPendingPayment(null)}>×</button>
+            </div>
+            <p style={{ margin: '12px 0' }}>
+              Finalizar a venda de <strong>{formatKwanza(summary.total)}</strong> via <strong>{pendingPayment.mode.toUpperCase()}</strong>?
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="soft-button" onClick={() => setPendingPayment(null)}>Cancelar</button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  const { mode, checkoutData } = pendingPayment;
+                  setPendingPayment(null);
+                  finalizeSale(mode, checkoutData);
+                }}
+              >
+                Finalizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showClientPopup && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -401,11 +470,11 @@ function Vendas() {
   );
 }
 
-function FinalizedSalePreview({ document, onClose }) {
+function FinalizedSalePreview({ document, snapshot, onClose }) {
+  const documentSettings = buildDocumentSettingsFromSnapshot(snapshot);
   const viewModel = buildInvoiceA4ViewModel({
     document,
-    branding: getStoredBranding(),
-    settings: getStoredInvoiceA4Settings(),
+    ...documentSettings,
     printedBy: document.userName || 'Vendedor',
   });
 
@@ -438,20 +507,49 @@ function FinalizedSalePreview({ document, onClose }) {
   );
 }
 
+const DOC_TYPE_OPTIONS = [
+  { id: DOCUMENT_TYPES.INVOICE, label: 'Factura' },
+  { id: DOCUMENT_TYPES.INVOICE_RECEIPT, label: 'Factura/Recibo' },
+  { id: DOCUMENT_TYPES.RECEIPT, label: 'Recibo' },
+  { id: DOCUMENT_TYPES.PROFORMA, label: 'Proforma' },
+  { id: DOCUMENT_TYPES.CREDIT, label: 'Crédito' },
+];
+
 function InvoiceDetails({
   cart,
   selectedClient,
   summary,
+  docType,
+  onDocTypeChange,
   onRemoveItem,
   onChangeQuantity,
   onClient,
   onPaymentMethod,
   canOperate,
   operationMessage,
+  paymentMethods,
 }) {
+  const currentDocLabel = DOC_TYPE_OPTIONS.find(d => d.id === docType)?.label ?? 'Factura';
   return (
     <>
-      <h2>Detalhes da Factura</h2>
+      <div className="invoice-doc-type-row">
+        <span className="invoice-doc-type-label">Tipo de Documento</span>
+        <select
+          className="invoice-doc-type-select"
+          value={docType}
+          onChange={e => onDocTypeChange(e.target.value)}
+        >
+          {DOC_TYPE_OPTIONS.map(dt => (
+            <option key={dt.id} value={dt.id}>{dt.label}</option>
+          ))}
+        </select>
+      </div>
+      {docType === DOCUMENT_TYPES.PROFORMA && (
+        <div className="invoice-doc-type-notice">
+          Proforma — sem abate de stock. Converta para Factura ao confirmar encomenda.
+        </div>
+      )}
+      <h2>Detalhes da {currentDocLabel}</h2>
       <button className="client-search" type="button" onClick={onClient}>
         <span>
           <strong>{selectedClient?.name ?? DEFAULT_SALE_CLIENT.name}</strong>
@@ -459,7 +557,7 @@ function InvoiceDetails({
         </span>
         <Search size={22} />
       </button>
-      <h3>Factura n.º FAT027/26</h3>
+      <h3>{currentDocLabel} n.º FAT027/26</h3>
 
       <div className="cart-list">
         {cart.map((item) => (

@@ -75,6 +75,20 @@ test('falls back to generic identity for invalid saved content', () => {
   assert.deepEqual(getStoredBranding(storage), DEFAULT_BRANDING);
 });
 
+test('falls back safely when browser storage access is blocked', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get() { throw new Error('storage blocked'); },
+  });
+  try {
+    assert.deepEqual(getStoredBranding(), DEFAULT_BRANDING);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete globalThis.localStorage;
+  }
+});
+
 test('saves branding and notifies subscribers', () => {
   const storage = createStorage();
   const eventTarget = createEventTarget();

@@ -13,6 +13,8 @@ const MESSAGES = Object.freeze({
   OPEN_DAY_TO_OPERATE: 'Abra o dia operacional antes de iniciar operacoes.',
   OPEN_SHIFT_TO_OPERATE: 'Abra um turno antes de vender ou lancar despesas.',
   INVALID_MONEY: 'Informe um valor de caixa valido.',
+  CLOSE_SHIFT_DB_ERROR: 'Nao foi possivel fechar o turno. Recarregue a pagina e tente novamente.',
+  CLOSE_DAY_DB_ERROR: 'Nao foi possivel fechar o dia. Recarregue a pagina e tente novamente.',
 });
 
 const SAFE_OPERATION_ERRORS = Object.freeze(Object.values(MESSAGES));
@@ -260,14 +262,18 @@ async function closeDayMutation({ actorUserId, data = {} }) {
   }
 
   const finalBalance = normalizeMoney(data.saldo_final_informado);
-  await openDayRecord.update({
-    status: STATUS_CLOSED,
-    saldo_final_informado: finalBalance,
-    diferenca_caixa: calculateCashDifference(openDayRecord, finalBalance),
-    observacao_fechamento: normalizeOptionalText(data.observacao_fechamento),
-    fechado_por_usuario_id: actorUserId || null,
-    fechado_em: new Date(),
-  });
+  try {
+    await openDayRecord.update({
+      status: STATUS_CLOSED,
+      saldo_final_informado: finalBalance,
+      diferenca_caixa: calculateCashDifference(openDayRecord, finalBalance),
+      observacao_fechamento: normalizeOptionalText(data.observacao_fechamento),
+      fechado_por_usuario_id: actorUserId || null,
+      fechado_em: new Date(),
+    });
+  } catch {
+    throw createOperationError(MESSAGES.CLOSE_DAY_DB_ERROR);
+  }
 
   return serializeDay(openDayRecord);
 }
@@ -326,14 +332,18 @@ async function closeShiftMutation({ actorUserId, data = {} }) {
   }
 
   const finalBalance = normalizeMoney(data.saldo_final_informado);
-  await openShiftRecord.update({
-    status: STATUS_CLOSED,
-    saldo_final_informado: finalBalance,
-    diferenca_caixa: calculateCashDifference(openShiftRecord, finalBalance),
-    observacao_fechamento: normalizeOptionalText(data.observacao_fechamento),
-    fechado_por_usuario_id: actorUserId || null,
-    fechado_em: new Date(),
-  });
+  try {
+    await openShiftRecord.update({
+      status: STATUS_CLOSED,
+      saldo_final_informado: finalBalance,
+      diferenca_caixa: calculateCashDifference(openShiftRecord, finalBalance),
+      observacao_fechamento: normalizeOptionalText(data.observacao_fechamento),
+      fechado_por_usuario_id: actorUserId || null,
+      fechado_em: new Date(),
+    });
+  } catch {
+    throw createOperationError(MESSAGES.CLOSE_SHIFT_DB_ERROR);
+  }
 
   return serializeShift(openShiftRecord);
 }

@@ -70,6 +70,23 @@ const expectedSettings = {
   'migration.legacyLocalStorageVersion': {
     group: 'migration', type: 'number', min: 0, defaultValue: 0,
   },
+  'reports.googleSheets': {
+    group: 'reports',
+    type: 'object',
+    defaultValue: {
+      syncEnabled: true,
+      syncTime: '21:00',
+      reportTypes: ['venda_turno', 'venda_dia', 'financeiro', 'estoque'],
+      retentionDays: 90,
+      spreadsheetId: '',
+      credentials: '',
+    },
+  },
+  'documents.printOptions': {
+    group: 'documents',
+    type: 'object',
+    defaultValue: { previewBeforePrint: true, copies: 1 },
+  },
 };
 
 const editableCatalogs = {
@@ -94,11 +111,12 @@ const editableCatalogs = {
   ],
   stock_units: ['unidade', 'caixa', 'frasco', 'blister'],
   stock_locations: ['loja', 'armazem'],
+  product_locations: ['prateleira-a1', 'prateleira-a2', 'gaveta-g1', 'gaveta-g2', 'zona-principal'],
 };
 
 const technicalCatalogs = {
   client_statuses: ['activo', 'pendente', 'inactivo'],
-  document_types: ['factura', 'recibo', 'proforma', 'nota-credito'],
+  document_types: ['factura', 'factura_recibo', 'recibo', 'proforma', 'credito', 'nota-credito'],
   document_statuses: ['emitido', 'pago', 'pendente', 'anulado', 'convertido'],
   financial_entry_types: ['expense', 'revenue', 'loss'],
   financial_statuses: ['pendente', 'paga', 'cancelada'],

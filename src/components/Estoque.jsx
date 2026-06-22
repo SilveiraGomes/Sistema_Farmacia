@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
+import InventarioA4 from './InventarioA4';
 import {
   AlertTriangle,
   ChevronLeft,
@@ -36,6 +38,8 @@ import {
   validateStockSubcategoryImportRows,
 } from '../data/pharmacyData.mjs';
 import { confirmDelete } from '../utils/confirmations.mjs';
+import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
+import { useCatalog } from '../configuration/SettingsContext';
 
 const modalTitles = {
   product: 'Novo Produto',
@@ -53,10 +57,14 @@ const modalTitles = {
 const visibleCategoryCount = 8;
 
 function Estoque() {
+  const stockUnits = useCatalog(CATALOG_KEYS.STOCK_UNITS);
+  const productLocations = useCatalog(CATALOG_KEYS.PRODUCT_LOCATIONS);
   const [activeModal, setActiveModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [rows, setRows] = useState(stockItems);
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [activeFilters, setActiveFilters] = useState({ category: '', location: '', expiry: '' });
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [categoryOffset, setCategoryOffset] = useState(0);
@@ -90,13 +98,17 @@ function Estoque() {
   const formOptions = useMemo(() => buildStockFormOptions(referenceRows), [referenceRows]);
   const importReference = useMemo(() => buildStockImportReference(referenceRows), [referenceRows]);
   const filteredItems = useMemo(
-    () => rows.filter((item) =>
-      [item.id, item.name, item.category, item.subcategory, item.location, item.status]
+    () => rows.filter((item) => {
+      const matchesQuery = [item.id, item.name, item.category, item.subcategory, item.location]
         .join(' ')
         .toLowerCase()
-        .includes(query.toLowerCase()),
-    ),
-    [query, rows],
+        .includes(query.toLowerCase());
+      const matchesStatus = !statusFilter || item.status === statusFilter;
+      const matchesCategory = !activeFilters.category || item.category === activeFilters.category;
+      const matchesLocation = !activeFilters.location || item.location === activeFilters.location;
+      return matchesQuery && matchesStatus && matchesCategory && matchesLocation;
+    }),
+    [query, statusFilter, activeFilters, rows],
   );
   const listPage = useMemo(
     () => buildStockListPage(filteredItems, currentPage, itemsPerPage),
@@ -141,6 +153,37 @@ function Estoque() {
     });
   }
 
+  function handleSaveProduct(data, existingId) {
+    if (existingId) {
+      setRows(current => current.map(r =>
+        r.id === existingId
+          ? { ...r, name: data.name, category: data.category, subcategory: data.subcategory, price: Number(data.price) || r.price, expiry: data.expiry, location: data.localizacao, requiresPrescription: data.requiresPrescription }
+          : r
+      ));
+    } else {
+      const newId = `P${Date.now()}`;
+      setRows(current => [...current, {
+        id: newId, name: data.name, category: data.category, subcategory: data.subcategory,
+        price: Number(data.price) || 0, quantity: 0, expiry: data.expiry || '-',
+        location: data.localizacao, status: 'Activo', requiresPrescription: data.requiresPrescription,
+        lastStockMovement: null,
+      }]);
+      if (data.category) mergeCategoryNames([data.category]);
+      if (data.subcategory && data.category) mergeSubcategoryRows([{ category: data.category, name: data.subcategory }]);
+    }
+  }
+
+  function handleApplyFilter(filterData) {
+    setStatusFilter(filterData.status ?? '');
+    setActiveFilters({ category: filterData.category ?? '', location: filterData.location ?? '', expiry: filterData.expiry ?? '' });
+    setCurrentPage(1);
+  }
+
+  function handleStatusChange(val) {
+    setStatusFilter(val);
+    setCurrentPage(1);
+  }
+
   function handleStockMovement(type, movement) {
     setRows((current) => {
       if (type === 'stockIn') {
@@ -173,6 +216,18 @@ function Estoque() {
         first.category.localeCompare(second.category, 'pt-AO') || first.name.localeCompare(second.name, 'pt-AO'),
       );
     });
+  }
+
+  function exportProductsExcel() {
+    const headers = ['Código', 'Produto', 'Categoria', 'Subcategoria', 'Preço', 'Quantidade', 'Status', 'Validade', 'Localização'];
+    const dataRows = filteredItems.map((r) => [
+      r.id, r.name, r.category || '', r.subcategory || '',
+      r.price, r.quantity, r.status || '', r.expiry || '', r.location || '',
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Estoque');
+    XLSX.writeFile(wb, `estoque-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
   function handleImport(mode, acceptedRows) {
@@ -239,7 +294,7 @@ function Estoque() {
             <button type="button" onClick={() => openModal('category')}><Tags size={17} /> Categoria</button>
             <button type="button" onClick={() => openModal('subcategory')}><Tags size={17} /> Subcategoria</button>
             <button type="button" onClick={() => openModal('filter')}><Filter size={17} /> Filtrar</button>
-            <button type="button"><Download size={17} /> Exportar</button>
+            <button type="button" onClick={exportProductsExcel}><Download size={17} /> Exportar</button>
           </div>
         </div>
 
@@ -327,13 +382,17 @@ function Estoque() {
         <StockModal
           type={activeModal}
           item={selectedItem}
-          options={formOptions}
+          options={{ ...formOptions, units: stockUnits.map((option) => option.name), locations: productLocations.map((o) => o.name) }}
           stockRows={referenceRows}
           inventoryRows={rows}
           importReference={importReference}
           onClose={closeModal}
           onImport={handleImport}
           onStockMovement={handleStockMovement}
+          onSaveProduct={handleSaveProduct}
+          onApplyFilter={handleApplyFilter}
+          statusFilter={statusFilter}
+          onStatusChange={handleStatusChange}
         />
       )}
     </section>
@@ -352,7 +411,7 @@ function SummaryCard({ title, value, icon: Icon, tone = '' }) {
   );
 }
 
-function StockModal({ type, item, options, stockRows, inventoryRows, importReference, onClose, onImport, onStockMovement }) {
+function StockModal({ type, item, options, stockRows, inventoryRows, importReference, onClose, onImport, onStockMovement, onSaveProduct, onApplyFilter, statusFilter, onStatusChange }) {
   const [imagePreview, setImagePreview] = useState('');
   const [categoryImagePreview, setCategoryImagePreview] = useState('');
   const [movementQuantity, setMovementQuantity] = useState('');
@@ -360,27 +419,63 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
   const [movementNote, setMovementNote] = useState('');
   const [inventoryCounts, setInventoryCounts] = useState({});
   const [inventoryResult, setInventoryResult] = useState(null);
+  const [showInventoryPrint, setShowInventoryPrint] = useState(false);
+  const [inventorySearch, setInventorySearch] = useState('');
+  const printRef = useRef(null);
   const [importFileName, setImportFileName] = useState('');
   const [importMode, setImportMode] = useState('products');
   const [importSummary, setImportSummary] = useState(null);
   const [importRows, setImportRows] = useState([]);
   const [importNotice, setImportNotice] = useState('');
+
+  const isProductForm = type === 'product' || type === 'editProduct';
   const isFilter = type === 'filter';
+
+  const [productForm, setProductForm] = useState(() => ({
+    name: item?.name ?? '',
+    barcode: String(item?.id ?? ''),
+    category: item?.category ?? '',
+    subcategory: item?.subcategory ?? '',
+    price: item?.price ?? '',
+    costPrice: '',
+    batch: '',
+    unit: '',
+    expiry: item?.expiry ?? '',
+    localizacao: item?.location ?? '',
+    requiresPrescription: item?.requiresPrescription ?? false,
+    notes: item?.observacao_localizacao ?? '',
+  }));
+
+  const [filterForm, setFilterForm] = useState({ category: '', location: '', expiry: '' });
+
+  function setPF(key, val) { setProductForm(p => ({ ...p, [key]: val })); }
+  function setFF(key, val) { setFilterForm(p => ({ ...p, [key]: val })); }
+
+  function saveProduct() {
+    onSaveProduct?.(productForm, item?.id ?? null);
+    onClose();
+  }
+
+  function applyFilter() {
+    onApplyFilter?.({ ...filterForm, status: statusFilter ?? '' });
+    onClose();
+  }
   const isSubcategory = type === 'subcategory';
   const isCategory = type === 'category';
   const isImportProducts = type === 'importProducts';
   const isInventory = type === 'inventory';
-  const isProductForm = type === 'product' || type === 'editProduct';
   const isView = type === 'viewProduct';
   const isStockIn = type === 'stockIn';
   const isStockOut = type === 'stockOut';
   const isStockMovement = isStockIn || isStockOut;
-  const sortedInventoryRows = useMemo(
-    () => [...(inventoryRows ?? [])].sort((first, second) =>
-      first.location.localeCompare(second.location, 'pt-AO') || first.name.localeCompare(second.name, 'pt-AO'),
-    ),
-    [inventoryRows],
-  );
+  const sortedInventoryRows = useMemo(() => {
+    const q = inventorySearch.toLowerCase();
+    return [...(inventoryRows ?? [])]
+      .filter(r => !q || [r.id, r.name, r.category, r.location, r.status].join(' ').toLowerCase().includes(q))
+      .sort((a, b) =>
+        (a.location || '').localeCompare(b.location || '', 'pt-AO') || a.name.localeCompare(b.name, 'pt-AO'),
+      );
+  }, [inventoryRows, inventorySearch]);
 
   function previewImage(event) {
     const file = event.target.files?.[0];
@@ -454,9 +549,28 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
     setInventoryResult(buildStockInventoryCount(sortedInventoryRows, inventoryCounts));
   }
 
+  function exportInventoryExcel() {
+    const headers = ['Código', 'Produto', 'Categoria', 'Qtd. Sistema', 'Qtd. Contada', 'Diferença', 'Prateleira', 'Gaveta', 'Zona'];
+    const dataRows = sortedInventoryRows.map((row) => {
+      const counted = inventoryCounts[row.id] !== undefined ? Number(inventoryCounts[row.id]) : '';
+      const diff = counted !== '' ? counted - row.quantity : '';
+      return [row.id, row.name, row.category || '', row.quantity, counted, diff, row.prateleira || '', row.gaveta || '', row.zona || ''];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventário');
+    XLSX.writeFile(wb, `inventario-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
+  function printInventoryPdf() {
+    setShowInventoryPrint(true);
+    setTimeout(() => { window.print(); setShowInventoryPrint(false); }, 200);
+  }
+
   return (
+    <>
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className={isInventory ? 'modal-card inventory' : 'modal-card wide'}>
+      <div className={isInventory ? 'modal-card inventory' : 'modal-card wide stock-modal'}>
         <div className="modal-title-row">
           <h2>{modalTitles[type]}</h2>
           <button type="button" onClick={onClose}>×</button>
@@ -488,21 +602,25 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                   )}
                 </div>
               </div>
-              <input
-                min="1"
-                placeholder="Quantidade"
-                type="number"
-                value={movementQuantity}
-                onChange={(event) => setMovementQuantity(event.target.value)}
-              />
+              <label>
+                Quantidade
+                <input
+                  min="1"
+                  type="number"
+                  value={movementQuantity}
+                  onChange={(event) => setMovementQuantity(event.target.value)}
+                />
+              </label>
               {isStockOut ? (
                 <OptionSelect label="Motivo da baixa" value={movementReason} options={STOCK_OUT_REASONS} onChange={setMovementReason} />
               ) : (
-                <input
-                  placeholder="Origem ou observação"
-                  value={movementNote}
-                  onChange={(event) => setMovementNote(event.target.value)}
-                />
+                <label>
+                  Origem ou observação
+                  <input
+                    value={movementNote}
+                    onChange={(event) => setMovementNote(event.target.value)}
+                  />
+                </label>
               )}
             </>
           )}
@@ -516,16 +634,18 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                 <input type="file" accept="image/*" onChange={previewImage} />
                 <strong>Inserir imagem do produto</strong>
               </label>
-              <input placeholder="Designação" defaultValue={item?.name ?? ''} />
-              <input placeholder="Código de barras" defaultValue={item?.id ?? ''} />
-              <OptionSelect label="Categoria" value={item?.category} options={options.categories} />
-              <OptionSelect label="Subcategoria" value={item?.subcategory} options={options.subcategories} />
-              <input placeholder="Preço de venda" type="number" defaultValue={item?.price ?? ''} />
-              <input placeholder="Preço de custo" type="number" />
-              <input placeholder="Lote" />
-              <input placeholder="Data de expiração" type="date" />
-              <OptionSelect label="Localização" value={item?.location} options={options.locations} />
-              <label className="check-row"><input type="checkbox" /> Receita obrigatória</label>
+              <label><span>Designação</span><input value={productForm.name} onChange={e => setPF('name', e.target.value)} /></label>
+              <label><span>Código de barras</span><input value={productForm.barcode} onChange={e => setPF('barcode', e.target.value)} /></label>
+              <OptionSelect label="Categoria" value={productForm.category} options={options.categories} onChange={v => setPF('category', v)} />
+              <OptionSelect label="Subcategoria" value={productForm.subcategory} options={options.subcategories} onChange={v => setPF('subcategory', v)} />
+              <label><span>Preço de venda</span><input type="number" value={productForm.price} onChange={e => setPF('price', e.target.value)} /></label>
+              <label><span>Preço de custo</span><input type="number" value={productForm.costPrice} onChange={e => setPF('costPrice', e.target.value)} /></label>
+              <label><span>Lote</span><input value={productForm.batch} onChange={e => setPF('batch', e.target.value)} /></label>
+              <OptionSelect label="Unidade" value={productForm.unit} options={options.units} onChange={v => setPF('unit', v)} />
+              <label><span>Data de validade</span><input type="date" value={productForm.expiry} onChange={e => setPF('expiry', e.target.value)} /></label>
+              <OptionSelect label="Localização" value={productForm.localizacao} options={options.locations} onChange={v => setPF('localizacao', v)} />
+              <label className="form-span-2"><span>Observação de localização</span><textarea value={productForm.notes} onChange={e => setPF('notes', e.target.value)} /></label>
+              <label className="check-row"><input type="checkbox" checked={productForm.requiresPrescription} onChange={e => setPF('requiresPrescription', e.target.checked)} /> Receita obrigatória</label>
             </>
           )}
 
@@ -553,12 +673,26 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
           )}
 
           {isInventory && (
-            <InventoryCountSheet
-              counts={inventoryCounts}
-              rows={sortedInventoryRows}
-              result={inventoryResult}
-              onCountChange={updateInventoryCount}
-            />
+            <>
+              <div className="inventory-search-bar">
+                <Search size={16} />
+                <input
+                  type="text"
+                  placeholder="Pesquisar por código, nome, categoria, localização..."
+                  value={inventorySearch}
+                  onChange={e => setInventorySearch(e.target.value)}
+                />
+                {inventorySearch && (
+                  <button type="button" onClick={() => setInventorySearch('')}>×</button>
+                )}
+              </div>
+              <InventoryCountSheet
+                counts={inventoryCounts}
+                rows={sortedInventoryRows}
+                result={inventoryResult}
+                onCountChange={updateInventoryCount}
+              />
+            </>
           )}
 
           {isCategory && (
@@ -570,9 +704,9 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                 <input type="file" accept="image/*" onChange={previewCategoryImage} />
                 <strong>Inserir imagem da categoria</strong>
               </label>
-              <input placeholder="Nome da categoria" />
-              <input placeholder="Código" />
-              <textarea placeholder="Descrição" />
+              <label>Nome da categoria<input /></label>
+              <label>Código<input /></label>
+              <label>Descrição<textarea /></label>
             </>
           )}
 
@@ -586,17 +720,29 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                 <strong>Inserir imagem da subcategoria</strong>
               </label>
               <OptionSelect label="Categoria principal" options={options.categories} />
-              <input placeholder="Nome da subcategoria" />
-              <textarea placeholder="Descrição" />
+              <label>Nome da subcategoria<input /></label>
+              <label>Descrição<textarea /></label>
             </>
           )}
 
           {isFilter && (
             <>
-              <OptionSelect label="Categoria" options={options.categories} />
-              <input placeholder="Status" />
-              <OptionSelect label="Localização" options={options.locations} />
-              <input placeholder="Validade até" type="date" />
+              <OptionSelect label="Categoria" value={filterForm.category} options={options.categories} onChange={v => setFF('category', v)} />
+              <label>
+                <span>Status</span>
+                <select value={statusFilter ?? ''} onChange={(e) => onStatusChange?.(e.target.value)}>
+                  <option value="">Todos</option>
+                  <option value="Activo">Activo</option>
+                  <option value="Inactivo">Inactivo</option>
+                  <option value="Baixo estoque">Baixo estoque</option>
+                  <option value="Sem estoque">Esgotado</option>
+                </select>
+              </label>
+              <OptionSelect label="Localização" value={filterForm.location} options={options.locations} onChange={v => setFF('location', v)} />
+              <label>
+                <span>Validade até</span>
+                <input type="date" value={filterForm.expiry} onChange={e => setFF('expiry', e.target.value)} />
+              </label>
             </>
           )}
         </div>
@@ -613,13 +759,11 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
               {isStockIn ? 'Adicionar' : 'Confirmar Baixa'}
             </button>
           ) : isInventory ? (
-            <button
-              type="button"
-              className="primary-button"
-              onClick={submitInventoryCount}
-            >
-              Enviar contagem
-            </button>
+            <>
+              <button type="button" className="soft-button" onClick={exportInventoryExcel}>Exportar Excel</button>
+              <button type="button" className="soft-button" onClick={printInventoryPdf}>Imprimir PDF</button>
+              <button type="button" className="primary-button" onClick={submitInventoryCount}>Enviar contagem</button>
+            </>
           ) : isImportProducts ? (
             <button
               type="button"
@@ -630,13 +774,20 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
               Importar
             </button>
           ) : !isView && (
-            <button type="button" className="primary-button" onClick={onClose}>
+            <button type="button" className="primary-button" onClick={isFilter ? applyFilter : saveProduct}>
               {isFilter ? 'Aplicar Filtro' : 'Guardar'}
             </button>
           )}
         </div>
       </div>
     </div>
+
+    {showInventoryPrint && (
+      <div className="print-only" ref={printRef}>
+        <InventarioA4 rows={sortedInventoryRows} counts={inventoryCounts} result={inventoryResult} />
+      </div>
+    )}
+    </>
   );
 }
 
@@ -821,12 +972,15 @@ function OptionSelect({ label, value = '', options, onChange }) {
     : { defaultValue: value };
 
   return (
-    <select aria-label={label} {...selectProps}>
-      <option value="" disabled>{label}</option>
-      {options.map((option) => (
-        <option key={option} value={option}>{option}</option>
-      ))}
-    </select>
+    <label>
+      <span>{label}</span>
+      <select {...selectProps}>
+        <option value="" disabled>{label}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+    </label>
   );
 }
 

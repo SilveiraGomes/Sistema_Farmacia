@@ -30,7 +30,11 @@ export const DEFAULT_INVOICE_A4_SETTINGS = Object.freeze({
 });
 
 function getDefaultStorage() {
-  return globalThis.localStorage;
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function cleanText(value, fallback = '') {

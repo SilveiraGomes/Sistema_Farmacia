@@ -2,6 +2,27 @@ import { DOCUMENT_STATUSES, DOCUMENT_TYPES, documentTypeLabels } from './documen
 
 const REFERENCE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
+export function buildDocumentSettingsFromSnapshot(snapshot) {
+  const identity = snapshot?.settings?.company?.identity?.value || {};
+  const fiscal = snapshot?.settings?.documents?.fiscal?.value || {};
+  return {
+    branding: {
+      pharmacyName: identity.pharmacyName || 'Sistema de Farmacia',
+      logoDataUrl: identity.logoDataUrl || '',
+    },
+    settings: {
+      documentHeaderText: snapshot?.settings?.documents?.headerText?.value || identity.pharmacyName || 'Sistema de Farmacia',
+      validationNumber: fiscal.validationNumber || '',
+      softwareName: fiscal.softwareName || '',
+      fiscalRegime: fiscal.fiscalRegime || '',
+      showQrCode: fiscal.showQrCode !== false,
+      showLotAndExpiry: false,
+      showTotalInWords: fiscal.showTotalInWords !== false,
+      bankAccounts: Array.isArray(fiscal.bankAccounts) ? fiscal.bankAccounts : [],
+    },
+  };
+}
+
 function roundMoney(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }

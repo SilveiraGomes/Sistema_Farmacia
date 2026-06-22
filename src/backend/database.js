@@ -60,6 +60,10 @@ function defineModels(db) {
     unidade_medida: { type: DataTypes.STRING, defaultValue: "Unidade" },
     estoque_minimo: { type: DataTypes.INTEGER, defaultValue: 0 },
     receita_obrigatoria: { type: DataTypes.BOOLEAN, defaultValue: false },
+    prateleira: { type: DataTypes.STRING },
+    gaveta: { type: DataTypes.STRING },
+    zona: { type: DataTypes.STRING },
+    observacao_localizacao: { type: DataTypes.TEXT },
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
 
@@ -364,6 +368,38 @@ function defineModels(db) {
     },
   );
 
+  const ReportSyncQueue = db.define(
+    "ReportSyncQueue",
+    {
+      id: {
+        type: DataTypes.UUID,
+        primaryKey: true,
+        defaultValue: DataTypes.UUIDV4,
+      },
+      reportId: { type: DataTypes.STRING, allowNull: false },
+      reportType: { type: DataTypes.STRING, allowNull: false },
+      reportData: { type: DataTypes.JSON, allowNull: false },
+      googleSheetRowId: { type: DataTypes.STRING },
+      status: {
+        type: DataTypes.ENUM("pending", "synced", "failed"),
+        defaultValue: "pending",
+        allowNull: false,
+      },
+      attempts: { type: DataTypes.INTEGER, defaultValue: 0 },
+      errorMessage: { type: DataTypes.TEXT },
+      generatedAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+      syncedAt: { type: DataTypes.DATE },
+      deletedAt: { type: DataTypes.DATE },
+    },
+    {
+      tableName: "ReportSyncQueues",
+      indexes: [
+        { fields: ["status", "createdAt"] },
+        { fields: ["reportType", "createdAt"] },
+      ],
+    },
+  );
+
   Categoria.hasMany(Subcategoria, { foreignKey: "categoria_id" });
   Subcategoria.belongsTo(Categoria, { foreignKey: "categoria_id" });
 
@@ -467,6 +503,7 @@ function defineModels(db) {
     ConfiguracaoSistema,
     OpcaoCatalogo,
     AuditoriaConfiguracao,
+    ReportSyncQueue,
   };
 }
 
@@ -576,17 +613,30 @@ async function ensureSqliteOperationalOpenIndexes(db) {
   });
 
   if (hasOperationalDays) {
-    await db.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS ${DIA_OPERACIONAL_ONE_OPEN_INDEX}
-      ON DiaOperacionals (status)
-      WHERE status = 'Aberto'
-    `);
+    await recreatePartialStatusIndex(db, 'DiaOperacionals', DIA_OPERACIONAL_ONE_OPEN_INDEX);
   }
 
   if (hasOperationalShifts) {
+    await recreatePartialStatusIndex(db, 'TurnoOperacionals', TURNO_OPERACIONAL_ONE_OPEN_INDEX);
+  }
+}
+
+async function recreatePartialStatusIndex(db, tableName, indexName) {
+  const rows = await db.query(
+    `SELECT sql FROM sqlite_master WHERE type='index' AND name=?`,
+    { replacements: [indexName], type: db.QueryTypes.SELECT },
+  );
+  const existingDef = rows[0]?.sql || '';
+  const isCorrectPartial = existingDef.includes("WHERE") && existingDef.toLowerCase().includes("aberto");
+
+  if (existingDef && !isCorrectPartial) {
+    await db.query(`DROP INDEX IF EXISTS "${indexName}"`);
+  }
+
+  if (!existingDef || !isCorrectPartial) {
     await db.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS ${TURNO_OPERACIONAL_ONE_OPEN_INDEX}
-      ON TurnoOperacionals (status)
+      CREATE UNIQUE INDEX IF NOT EXISTS ${indexName}
+      ON ${tableName} (status)
       WHERE status = 'Aberto'
     `);
   }
@@ -1093,7 +1143,7 @@ async function connectDB(app, env = "development") {
 
   try {
     await sequelize.authenticate();
-    console.log("Conexao com o banco de dados estabelecida com sucesso.");
+    console.log("Conexão com o banco de dados estabelecida com sucesso.");
     return sequelize;
   } catch (error) {
     console.error("Nao foi possivel conectar ao banco de dados:", error);

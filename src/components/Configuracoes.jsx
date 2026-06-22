@@ -3,12 +3,15 @@ import {
   BellRing,
   Boxes,
   Building2,
+  CloudUpload,
   CreditCard,
   Database,
   FileText,
+  ImagePlus,
   Save,
   Users,
 } from "lucide-react";
+import { getStoredBranding, saveStoredBranding, subscribeBrandingChange } from '../data/branding.mjs';
 import { useSettings } from "../configuration/SettingsContext";
 import { CATALOG_KEYS } from "../configuration/catalogKeys.mjs";
 import { request } from "../services/ipcClient";
@@ -24,12 +27,13 @@ const SECTIONS = [
   { id: "finance", label: "Financeiro", icon: FileText },
   { id: "references", label: "Clientes e documentos", icon: Users },
   { id: "alerts", label: "Alertas e backup", icon: BellRing },
+  { id: "integracoes", label: "Integrações", icon: CloudUpload },
 ];
 
 const CATALOGS_BY_SECTION = {
   sales: [CATALOG_KEYS.PAYMENT_METHODS],
   operation: [CATALOG_KEYS.OPERATION_SHIFTS, CATALOG_KEYS.OPERATION_STATUSES],
-  stock: [CATALOG_KEYS.STOCK_UNITS, CATALOG_KEYS.STOCK_LOCATIONS],
+  stock: [CATALOG_KEYS.STOCK_UNITS, CATALOG_KEYS.PRODUCT_LOCATIONS],
   finance: [
     CATALOG_KEYS.EXPENSE_CATEGORIES,
     CATALOG_KEYS.REVENUE_CATEGORIES,
@@ -44,13 +48,31 @@ const CATALOGS_BY_SECTION = {
   ],
 };
 
+const CATALOG_LABELS = {
+  payment_methods: "Formas de Pagamento",
+  operation_shifts: "Turnos Operacionais",
+  operation_statuses: "Estados de Operação",
+  stock_units: "Unidades de Medida",
+  stock_locations: "Localizações (legado)",
+  product_locations: "Localizações de Produtos",
+  expense_categories: "Categorias de Despesas",
+  revenue_categories: "Categorias de Receitas",
+  loss_reasons: "Motivos de Baixa / Perda",
+  financial_entry_types: "Tipos de Movimento",
+  financial_statuses: "Situações Financeiras",
+  client_statuses: "Estados de Cliente",
+  document_types: "Tipos de Documento",
+  document_statuses: "Estados de Documento",
+};
+
 function snapshotValues(snapshot, section) {
   if (section === "company")
     return {
       "company.identity": snapshot.settings.company.identity.value,
-      "documents.headerText": snapshot.settings.documents.headerText.value,
+      'documents.headerText': snapshot.settings.documents.headerText.value,
       "documents.currency": snapshot.settings.documents.currency.value,
-      "documents.fiscal": snapshot.settings.documents.fiscal.value,
+      'documents.fiscal': snapshot.settings.documents.fiscal.value,
+      'documents.printOptions': snapshot.settings.documents.printOptions?.value ?? { previewBeforePrint: true, copies: 1 },
     };
   if (section === "sales")
     return Object.fromEntries(
@@ -75,6 +97,10 @@ function snapshotValues(snapshot, section) {
         ]),
       ),
       "backup.options": snapshot.settings.backup.options.value,
+    };
+  if (section === "integracoes")
+    return {
+      'reports.googleSheets': snapshot.settings.reports.googleSheets.value,
     };
   return {};
 }
@@ -137,6 +163,11 @@ export default function Configuracoes() {
         });
       }
       applySnapshot(next);
+      if (activeSection === 'company') {
+        const identity = draft['company.identity'] || {};
+        const { logoDataUrl } = getStoredBranding();
+        saveStoredBranding({ pharmacyName: identity.pharmacyName || '', logoDataUrl });
+      }
       setStatus({ tone: "success", message: "Configurações guardadas." });
     } catch (cause) {
       setStatus({
@@ -186,12 +217,7 @@ export default function Configuracoes() {
           ) : null}
           {catalogs.map((catalogKey) => (
             <div className="settings-catalog-block" key={catalogKey}>
-              <h2>
-                {snapshot.definitions.catalogs[catalogKey]?.system
-                  ? "Catálogo técnico"
-                  : "Catálogo operacional"}
-                : {catalogKey}
-              </h2>
+              <h2>{CATALOG_LABELS[catalogKey] ?? catalogKey}</h2>
               <CatalogEditor
                 catalogKey={catalogKey}
                 options={snapshot.catalogs[catalogKey]}
@@ -216,9 +242,26 @@ export default function Configuracoes() {
 }
 
 function SectionFields({ section, draft, update, snapshot, disabled }) {
+  const [syncStatus, setSyncStatus] = React.useState(null);
+  const [syncMessage, setSyncMessage] = React.useState('');
+
+  async function sendNow() {
+    setSyncStatus('loading');
+    setSyncMessage('');
+    try {
+      const result = await request('reports.sync.now');
+      setSyncStatus('success');
+      setSyncMessage(result?.message || 'Dados enviados com sucesso.');
+    } catch (err) {
+      setSyncStatus('error');
+      setSyncMessage(err?.message || 'Erro ao enviar dados.');
+    }
+  }
+
   if (section === "company") {
     const identity = draft["company.identity"] || {};
     const fiscal = draft["documents.fiscal"] || {};
+    const printOptions = draft["documents.printOptions"] || { previewBeforePrint: true, copies: 1 };
     return (
       <div className="settings-form-grid">
         <SettingField
@@ -245,6 +288,7 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
             }
           />
         </SettingField>
+        <LogoPicker identity={identity} disabled={disabled} />
         <SettingField label="Endereço">
           <textarea
             disabled={disabled}
@@ -330,6 +374,31 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
                 ...fiscal,
                 showTotalInWords: e.target.checked,
               })
+            }
+          />
+        </SettingField>
+        <SettingField
+          label="Pré-visualizar antes de imprimir"
+          help="Abre a pré-visualização da factura antes de enviar para a impressora"
+        >
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={printOptions.previewBeforePrint !== false}
+            onChange={(e) =>
+              update("documents.printOptions", { ...printOptions, previewBeforePrint: e.target.checked })
+            }
+          />
+        </SettingField>
+        <SettingField label="Número de vias" help="Cópias impressas por factura (1 a 5)">
+          <input
+            type="number"
+            min="1"
+            max="5"
+            disabled={disabled}
+            value={printOptions.copies ?? 1}
+            onChange={(e) =>
+              update("documents.printOptions", { ...printOptions, copies: Math.max(1, Math.min(5, Number(e.target.value))) })
             }
           />
         </SettingField>
@@ -433,10 +502,140 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
           }
           {...{ draft, update, disabled }}
         />
+        <ManualBackupButton />
+        <RestoreBackupPanel />
+      </div>
+    );
+  }
+  if (section === "integracoes") {
+    const gs = draft["reports.googleSheets"] || {};
+    return (
+      <div className="settings-form-grid">
+        <SettingField
+          label="Envio automático para Google Sheets"
+          help="Activa o envio diário de relatórios para a planilha do CEO"
+        >
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={Boolean(gs.syncEnabled)}
+            onChange={(e) =>
+              update("reports.googleSheets", { ...gs, syncEnabled: e.target.checked })
+            }
+          />
+        </SettingField>
+        <SettingField
+          label="Horário de envio (HH:MM)"
+          help="Hora local Angola — padrão: 21:00"
+        >
+          <input
+            disabled={disabled}
+            value={gs.syncTime || "21:00"}
+            placeholder="21:00"
+            onChange={(e) =>
+              update("reports.googleSheets", { ...gs, syncTime: e.target.value })
+            }
+          />
+        </SettingField>
+        <SettingField
+          label="ID da Planilha Google"
+          help="Identificador único da Google Sheet (extraído do URL)"
+        >
+          <input
+            disabled={disabled}
+            value={gs.spreadsheetId || ""}
+            placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+            onChange={(e) =>
+              update("reports.googleSheets", { ...gs, spreadsheetId: e.target.value })
+            }
+          />
+        </SettingField>
+        <SettingField
+          label="Retenção de registos (dias)"
+          help="Dias a manter o histórico de sincronização na fila"
+        >
+          <input
+            type="number"
+            min="1"
+            disabled={disabled}
+            value={gs.retentionDays || 90}
+            onChange={(e) =>
+              update("reports.googleSheets", { ...gs, retentionDays: Number(e.target.value) })
+            }
+          />
+        </SettingField>
+        <SettingField
+          label="Credenciais da Conta de Serviço Google"
+          help="Cole aqui o conteúdo JSON do ficheiro de credenciais da Service Account"
+        >
+          <textarea
+            disabled={disabled}
+            rows={8}
+            value={gs.credentials || ""}
+            placeholder={'{\n  "type": "service_account",\n  "project_id": "...",\n  ...\n}'}
+            onChange={(e) =>
+              update("reports.googleSheets", { ...gs, credentials: e.target.value })
+            }
+          />
+        </SettingField>
+        <div className="settings-sync-action">
+          <button
+            type="button"
+            className="primary-button"
+            disabled={syncStatus === 'loading' || !gs.spreadsheetId || !gs.credentials}
+            onClick={sendNow}
+          >
+            {syncStatus === 'loading' ? 'Enviando...' : 'Enviar dados agora'}
+          </button>
+          {syncStatus === 'success' && (
+            <p className="form-success" role="status">{syncMessage}</p>
+          )}
+          {syncStatus === 'error' && (
+            <p className="form-error" role="alert">{syncMessage}</p>
+          )}
+        </div>
       </div>
     );
   }
   return null;
+}
+
+function LogoPicker({ identity, disabled }) {
+  const [logoDataUrl, setLogoDataUrl] = useState(() => getStoredBranding().logoDataUrl);
+
+  useEffect(() => subscribeBrandingChange((b) => setLogoDataUrl(b.logoDataUrl)), []);
+
+  function handleFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      saveStoredBranding({ pharmacyName: identity?.pharmacyName || '', logoDataUrl: String(reader.result ?? '') });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearLogo() {
+    saveStoredBranding({ pharmacyName: identity?.pharmacyName || '', logoDataUrl: '' });
+  }
+
+  return (
+    <div className="settings-logo-picker">
+      <label className="image-picker" style={disabled ? { cursor: 'not-allowed', opacity: 0.65 } : undefined}>
+        <span className={logoDataUrl ? 'image-preview' : 'image-preview empty'}>
+          {logoDataUrl ? <img src={logoDataUrl} alt="Logo da farmácia" /> : <ImagePlus size={34} />}
+        </span>
+        <input type="file" accept="image/*" disabled={disabled} onChange={handleFile} />
+        <strong>Logo da farmácia</strong>
+        <small>Exibido no menu lateral e na página de login</small>
+      </label>
+      {logoDataUrl && !disabled && (
+        <button type="button" className="soft-button" style={{ marginTop: '8px' }} onClick={clearLogo}>
+          Remover logo
+        </button>
+      )}
+    </div>
+  );
 }
 
 function NumberField({
@@ -463,5 +662,135 @@ function NumberField({
         }
       />
     </SettingField>
+  );
+}
+
+function ManualBackupButton() {
+  const [status, setStatus] = React.useState(null);
+  const [message, setMessage] = React.useState('');
+
+  async function doBackup() {
+    setStatus('loading');
+    setMessage('');
+    try {
+      const result = await request('backup.create');
+      if (result?.canceled) { setStatus(null); return; }
+      setStatus('success');
+      setMessage(`Backup guardado em: ${result.filePath}`);
+    } catch (err) {
+      setStatus('error');
+      setMessage(err?.message || 'Erro ao criar backup.');
+    }
+  }
+
+  return (
+    <div style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
+      <strong style={{ display: 'block', marginBottom: '6px' }}>Backup manual</strong>
+      <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '8px' }}>
+        Cria uma cópia da base de dados actual num ficheiro à sua escolha.
+      </p>
+      <button
+        type="button"
+        className="soft-button"
+        onClick={doBackup}
+        disabled={status === 'loading'}
+      >
+        {status === 'loading' ? 'A criar backup...' : 'Fazer backup agora'}
+      </button>
+      {status === 'success' && (
+        <p style={{ color: 'var(--color-success, #2e7d32)', marginTop: '6px', fontSize: '0.82rem', wordBreak: 'break-all' }}>
+          {message}
+        </p>
+      )}
+      {status === 'error' && (
+        <p style={{ color: 'var(--color-error, #c0392b)', marginTop: '6px', fontSize: '0.85rem' }}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RestoreBackupPanel() {
+  const [selectedPath, setSelectedPath] = React.useState('');
+  const [status, setStatus] = React.useState(null);
+  const [message, setMessage] = React.useState('');
+  const [confirming, setConfirming] = React.useState(false);
+
+  async function selectFile() {
+    setStatus(null);
+    setMessage('');
+    try {
+      const result = await request('backup.selectFile');
+      if (result?.canceled || !result?.filePath) return;
+      setSelectedPath(result.filePath);
+      setConfirming(false);
+    } catch (err) {
+      setStatus('error');
+      setMessage(err?.message || 'Erro ao seleccionar ficheiro.');
+    }
+  }
+
+  async function doRestore() {
+    if (!selectedPath) return;
+    setConfirming(false);
+    setStatus('loading');
+    setMessage('');
+    try {
+      const result = await request('backup.restore', { filePath: selectedPath });
+      setStatus('success');
+      setMessage(result?.message || 'Backup restaurado. Reinicie o sistema.');
+      setSelectedPath('');
+    } catch (err) {
+      setStatus('error');
+      setMessage(err?.message || 'Erro ao restaurar backup.');
+    }
+  }
+
+  return (
+    <div style={{ gridColumn: '1 / -1', marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+      <strong style={{ display: 'block', marginBottom: '6px' }}>Restauração de backup</strong>
+      <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '8px' }}>
+        Seleccione um ficheiro de backup SQLite (.sqlite ou .db). Esta operação substitui todos os dados actuais. Reinicie manualmente após a restauração.
+      </p>
+
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+        <button type="button" className="soft-button" onClick={selectFile} disabled={status === 'loading'}>
+          Seleccionar ficheiro...
+        </button>
+        {selectedPath && (
+          <span style={{ fontSize: '0.82rem', color: 'var(--ink)', fontFamily: 'monospace', flex: 1, wordBreak: 'break-all' }}>
+            {selectedPath}
+          </span>
+        )}
+      </div>
+
+      {selectedPath && !confirming && (
+        <div style={{ background: '#fff8e1', border: '1px solid #f2ce3d', borderRadius: '6px', padding: '10px 12px', marginBottom: '8px' }}>
+          <p style={{ color: '#7a5c00', fontSize: '0.85rem', margin: '0 0 8px' }}>
+            ⚠ Atenção: todos os dados actuais serão substituídos pelo conteúdo do ficheiro seleccionado. Esta acção não pode ser desfeita.
+          </p>
+          <button type="button" className="primary-button" onClick={() => setConfirming(true)}>
+            Restaurar este backup
+          </button>
+          <button type="button" className="soft-button" onClick={() => setSelectedPath('')} style={{ marginLeft: '8px' }}>
+            Cancelar
+          </button>
+        </div>
+      )}
+
+      {confirming && (
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ color: '#c0392b', fontSize: '0.9rem', fontWeight: 600 }}>Confirma a substituição irreversível de todos os dados?</span>
+          <button type="button" className="soft-button" onClick={() => setConfirming(false)}>Não</button>
+          <button type="button" className="primary-button" onClick={doRestore} disabled={status === 'loading'} style={{ background: '#c0392b' }}>
+            {status === 'loading' ? 'A restaurar...' : 'Sim, restaurar'}
+          </button>
+        </div>
+      )}
+
+      {status === 'success' && <p style={{ color: 'var(--color-success, #2e7d32)', marginTop: '6px', fontSize: '0.85rem' }}>{message}</p>}
+      {status === 'error' && <p style={{ color: 'var(--color-error, #c0392b)', marginTop: '6px', fontSize: '0.85rem' }}>{message}</p>}
+    </div>
   );
 }

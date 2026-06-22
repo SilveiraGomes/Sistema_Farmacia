@@ -23,9 +23,9 @@ import {
   filterDocuments,
   prepareSecondCopy,
 } from '../data/documents.mjs';
-import { getStoredBranding } from '../data/branding.mjs';
-import { buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
-import { getStoredInvoiceA4Settings } from '../data/invoiceSettings.mjs';
+import { buildDocumentSettingsFromSnapshot, buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
+import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
+import { useCatalog, useSettings } from '../configuration/SettingsContext';
 import { formatKwanza } from '../data/pharmacyData.mjs';
 import { confirmSensitiveAction } from '../utils/confirmations.mjs';
 import InvoiceA4 from './InvoiceA4';
@@ -43,6 +43,9 @@ function getDisplayUserName(user) {
 }
 
 function Documentos() {
+  const { snapshot } = useSettings();
+  const documentTypes = useCatalog(CATALOG_KEYS.DOCUMENT_TYPES);
+  const documentStatuses = useCatalog(CATALOG_KEYS.DOCUMENT_STATUSES);
   const { hasPermission, user } = useAuth();
   const canPrint = hasPermission('documentos.imprimir');
   const canExport = hasPermission('documentos.exportar');
@@ -149,14 +152,14 @@ function Documentos() {
         </label>
         <select value={filters.type} onChange={(event) => updateFilter('type', event.target.value)} aria-label="Tipo de documento">
           <option value="">Todos os tipos</option>
-          {Object.values(DOCUMENT_TYPES).map((type) => (
-            <option key={type} value={type}>{documentTypeLabels[type]}</option>
+          {documentTypes.map((type) => (
+            <option key={type.code} value={type.code.replaceAll('-', '_').toUpperCase()}>{type.name}</option>
           ))}
         </select>
         <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} aria-label="Estado do documento">
           <option value="">Todos os estados</option>
-          {Object.values(DOCUMENT_STATUSES).map((status) => (
-            <option key={status} value={status}>{documentStatusLabels[status]}</option>
+          {documentStatuses.map((status) => (
+            <option key={status.code} value={status.code.replaceAll('-', '_').toUpperCase()}>{status.name}</option>
           ))}
         </select>
         <input type="date" value={filters.dateFrom} onChange={(event) => updateFilter('dateFrom', event.target.value)} aria-label="Data inicial" />
@@ -236,7 +239,7 @@ function Documentos() {
       </div>
 
       {selectedDocument ? (
-        <DocumentDetails document={selectedDocument} onClose={() => setSelectedDocument(null)} />
+        <DocumentDetails document={selectedDocument} snapshot={snapshot} onClose={() => setSelectedDocument(null)} />
       ) : null}
 
       {annulTarget ? (
@@ -264,11 +267,11 @@ function Documentos() {
   );
 }
 
-function DocumentDetails({ document, onClose }) {
+function DocumentDetails({ document, snapshot, onClose }) {
+  const documentSettings = buildDocumentSettingsFromSnapshot(snapshot);
   const viewModel = buildInvoiceA4ViewModel({
     document,
-    branding: getStoredBranding(),
-    settings: getStoredInvoiceA4Settings(),
+    ...documentSettings,
     printedBy: document.userName || 'Usuario',
   });
 

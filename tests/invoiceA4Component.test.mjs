@@ -139,8 +139,9 @@ test('Documentos uses InvoiceA4 for printable document details', async () => {
 
   assert.match(source, /import InvoiceA4 from '\.\/InvoiceA4'/);
   assert.match(source, /buildInvoiceA4ViewModel/);
-  assert.match(source, /getStoredInvoiceA4Settings/);
-  assert.match(source, /getStoredBranding/);
+  assert.match(source, /buildDocumentSettingsFromSnapshot/);
+  assert.match(source, /useSettings/);
+  assert.doesNotMatch(source, /getStoredInvoiceA4Settings|getStoredBranding/);
   assert.match(source, /invoice-a4-print-scope/);
   assert.match(source, /<InvoiceA4 viewModel=\{viewModel\} \/>/);
 });
@@ -158,23 +159,18 @@ test('Documentos exposes PDF and print actions inside A4 preview', async () => {
   assert.doesNotMatch(source, /<Printer size=\{17\} \/>\s*Imprimir/);
 });
 
-test('Configuracoes exposes the Modelo de Factura A4 settings', async () => {
+test('Configuracoes exposes central document settings without localStorage', async () => {
   const source = await readFile('src/components/Configuracoes.jsx', 'utf8');
 
-  assert.match(source, /id: 'invoiceA4'/);
-  assert.match(source, /Modelo de Factura A4/);
-  assert.match(source, /getStoredInvoiceA4Settings/);
-  assert.match(source, /saveStoredInvoiceA4Settings/);
+  assert.match(source, /useSettings/);
+  assert.match(source, /'documents\.headerText'/);
+  assert.match(source, /'documents\.fiscal'/);
+  assert.match(source, /configuration\.updateSection/);
   assert.match(source, /validationNumber/);
   assert.match(source, /softwareName/);
-  assert.match(source, /documentHeaderText/);
-  assert.match(source, /Dados da empresa/);
-  assert.match(source, /image-picker/);
-  assert.match(source, /onSaveDocumentHeader/);
-  assert.doesNotMatch(source, /updateInvoiceSettings\('companyName'/);
-  assert.doesNotMatch(source, /updateInvoiceSettings\('pharmacyAddress'/);
   assert.match(source, /showQrCode/);
   assert.match(source, /showTotalInWords/);
+  assert.doesNotMatch(source, /getStoredInvoiceA4Settings|saveStoredInvoiceA4Settings/);
   assert.doesNotMatch(source, /Mostrar lote e validade/);
   assert.doesNotMatch(source, /showWatermark.*input/);
 });

@@ -8,8 +8,10 @@ test('Vendas opens an A4 invoice preview after finalizing a sale', async () => {
   assert.match(source, /import InvoiceA4 from '\.\/InvoiceA4'/);
   assert.match(source, /buildFinalizedSaleDocument/);
   assert.match(source, /buildInvoiceA4ViewModel/);
-  assert.match(source, /getStoredInvoiceA4Settings/);
-  assert.match(source, /getStoredBranding/);
+  assert.match(source, /buildDocumentSettingsFromSnapshot/);
+  assert.match(source, /useSettings/);
+  assert.match(source, /configuration\.document\.reserveNumber/);
+  assert.doesNotMatch(source, /getStoredInvoiceA4Settings|getStoredBranding/);
   assert.match(source, /finalizedDocument/);
   assert.match(source, /function finalizeSale/);
   assert.match(source, /<InvoiceA4 viewModel=\{viewModel\} \/>/);

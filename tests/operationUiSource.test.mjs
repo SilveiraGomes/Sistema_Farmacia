@@ -79,7 +79,7 @@ test('Vendas and Financeiro block critical actions without an open operation ses
 test('Dashboard surfaces current operation state', async () => {
   const source = await readFile(new URL('../src/components/Dashboard.jsx', import.meta.url), 'utf8');
 
-  assert.match(source, /import \{ useOperation \} from '\.\.\/operation\/OperationContext'/);
+  assert.match(source, /import \{ useOperation \} from ["']\.\.\/operation\/OperationContext["']/);
   assert.match(source, /const operation = useOperation\(\)/);
   assert.match(source, /Estado operacional/);
   assert.match(source, /operation\.canOperate/);

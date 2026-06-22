@@ -88,6 +88,23 @@ const SETTING_DEFINITIONS = deepFreeze({
   'migration.legacyLocalStorageVersion': {
     group: 'migration', type: 'number', min: 0, defaultValue: 0,
   },
+  'reports.googleSheets': {
+    group: 'reports',
+    type: 'object',
+    defaultValue: {
+      syncEnabled: true,
+      syncTime: '21:00',
+      reportTypes: ['venda_turno', 'venda_dia', 'financeiro', 'estoque'],
+      retentionDays: 90,
+      spreadsheetId: '',
+      credentials: '',
+    },
+  },
+  'documents.printOptions': {
+    group: 'documents',
+    type: 'object',
+    defaultValue: { previewBeforePrint: true, copies: 1 },
+  },
 });
 
 const CATALOG_DEFINITIONS = deepFreeze({
@@ -112,8 +129,9 @@ const CATALOG_DEFINITIONS = deepFreeze({
   ),
   stock_units: editable('unidade', 'caixa', 'frasco', 'blister'),
   stock_locations: editable('loja', 'armazem'),
+  product_locations: editable('prateleira-a1', 'prateleira-a2', 'gaveta-g1', 'gaveta-g2', 'zona-principal'),
   client_statuses: technical('activo', 'pendente', 'inactivo'),
-  document_types: technical('factura', 'recibo', 'proforma', 'nota-credito'),
+  document_types: technical('factura', 'factura_recibo', 'recibo', 'proforma', 'credito', 'nota-credito'),
   document_statuses: technical('emitido', 'pago', 'pendente', 'anulado', 'convertido'),
   financial_entry_types: technical('expense', 'revenue', 'loss'),
   financial_statuses: technical('pendente', 'paga', 'cancelada'),

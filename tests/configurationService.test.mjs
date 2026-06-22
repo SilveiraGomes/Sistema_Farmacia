@@ -316,7 +316,7 @@ describe('configurationService', () => {
       secondService.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
     ]);
 
-    assert.deepEqual(numbers, ['FAT001/26', 'FAT002/26']);
+    assert.deepEqual(numbers, ['FT00001/26', 'FT00002/26']);
   });
 
   test('two Sequelize connections contend safely for a file-backed fiscal sequence', async () => {
@@ -350,7 +350,7 @@ describe('configurationService', () => {
         }),
       ]);
 
-      assert.deepEqual(numbers.sort(), ['FAT001/26', 'FAT002/26']);
+      assert.deepEqual(numbers.sort(), ['FT00001/26', 'FT00002/26']);
       assert.equal(await firstModels.AuditoriaConfiguracao.count({ where: { acao: 'reserve' } }), 2);
     } finally {
       await Promise.allSettled([firstDb.close(), secondDb.close()]);
@@ -376,7 +376,7 @@ describe('configurationService', () => {
 
     assert.equal(
       await service.reserveNextDocumentNumber({ actorUserId: actor.id, documentType: 'factura' }),
-      'FAT001/26',
+      'FT00001/26',
     );
   });
 

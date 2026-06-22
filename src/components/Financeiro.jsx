@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import {
   AlertTriangle,
   ArrowDownCircle,
@@ -27,14 +28,14 @@ import {
 } from '../data/pharmacyData.mjs';
 import { confirmDelete } from '../utils/confirmations.mjs';
 import { useOperation } from '../operation/OperationContext';
+import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
+import { useCatalog } from '../configuration/SettingsContext';
 
 const periodOptions = [
   { value: 'month', label: 'Mes' },
   { value: 'week', label: 'Semana' },
   { value: 'shift', label: 'Turno' },
 ];
-
-const shiftOptions = ['Todos', 'Manha', 'Tarde', 'Noite'];
 
 const manualEntryDefaults = {
   type: 'expense',
@@ -49,10 +50,6 @@ const manualEntryDefaults = {
   reason: 'Danificado',
 };
 
-const expenseCategories = ['Infraestrutura', 'Recursos Humanos', 'Servicos', 'Fornecedores', 'Marketing', 'Outro'];
-const revenueCategories = ['Servico', 'Rendimento extra', 'Ajuste de caixa', 'Outro'];
-const lossReasons = ['Expiracao', 'Danificado', 'Furto', 'Consumo interno', 'Obsolescencia', 'Outro'];
-
 const paymentIcons = {
   Dinheiro: WalletCards,
   TPA: CreditCard,
@@ -62,6 +59,12 @@ const paymentIcons = {
 
 function Financeiro() {
   const operation = useOperation();
+  const shiftCatalog = useCatalog(CATALOG_KEYS.OPERATION_SHIFTS);
+  const expenseCatalog = useCatalog(CATALOG_KEYS.EXPENSE_CATEGORIES);
+  const revenueCatalog = useCatalog(CATALOG_KEYS.REVENUE_CATEGORIES);
+  const lossCatalog = useCatalog(CATALOG_KEYS.LOSS_REASONS);
+  const statusCatalog = useCatalog(CATALOG_KEYS.FINANCIAL_STATUSES);
+  const shiftOptions = [{ code: 'Todos', name: 'Todos os turnos' }, ...shiftCatalog];
   const [showModal, setShowModal] = useState(false);
   const [rows, setRows] = useState(transactions);
   const [manualExpenses, setManualExpenses] = useState([]);
@@ -83,7 +86,15 @@ function Financeiro() {
 
   function openManualEntryModal() {
     if (!operation.canOperate) return;
-    setManualEntry((current) => ({ ...manualEntryDefaults, date: referenceDate, type: current.type }));
+    setManualEntry((current) => ({
+      ...manualEntryDefaults,
+      date: referenceDate,
+      type: current.type,
+      category: (current.type === 'revenue' ? revenueCatalog : expenseCatalog)[0]?.name || '',
+      reason: lossCatalog[0]?.name || '',
+      shift: shiftCatalog[0]?.name || '',
+      status: statusCatalog[0]?.name || '',
+    }));
     setShowModal(true);
   }
 
@@ -148,6 +159,18 @@ function Financeiro() {
     setShowModal(false);
   }
 
+  function exportMovementsExcel() {
+    const headers = ['Data', 'Tipo', 'Descrição', 'Categoria', 'Valor (AKZ)', 'Status', 'Turno'];
+    const dataRows = rows.map((r) => [
+      r.date || '', r.type || '', r.description || '',
+      r.category || '', r.value ?? '', r.status || '', r.shift || '',
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Financeiro');
+    XLSX.writeFile(wb, `financeiro-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
   async function removeMovement(item) {
     if (!(await confirmDelete(`o movimento ${item.description}`))) {
       return;
@@ -179,7 +202,7 @@ function Financeiro() {
           disabled={period !== 'shift'}
         >
           {shiftOptions.map((option) => (
-            <option key={option} value={option}>{option === 'Todos' ? 'Todos os turnos' : option}</option>
+            <option key={option.code} value={option.name}>{option.name}</option>
           ))}
         </select>
       </div>
@@ -198,25 +221,6 @@ function Financeiro() {
         <Metric title="Gastos Pagos" value={formatKwanza(overview.totals.expenses)} tone="red" icon={ArrowDownCircle} />
         <Metric title="Lucro Liquido" value={formatKwanza(overview.totals.netProfit)} tone={overview.totals.netProfit >= 0 ? 'green' : 'red'} icon={Receipt} />
       </div>
-
-      <section className="finance-source-grid">
-        <DataSourceCard
-          title="Automático"
-          items={[
-            'Vendas finalizadas geram receita e custo do produto.',
-            'Baixas de estoque geram perdas por motivo.',
-            'Turno vem do movimento operacional.',
-          ]}
-        />
-        <DataSourceCard
-          title="Manual"
-          items={[
-            'Gastos fixos e variáveis do negócio.',
-            'Receitas extras que não vêm de produto.',
-            'Ajustes de perda quando não passam pelo estoque.',
-          ]}
-        />
-      </section>
 
       <section className="finance-payment-panel panel">
         <div className="panel-title-row">
@@ -329,7 +333,7 @@ function Financeiro() {
           <h2>Movimentos Financeiros</h2>
           <div className="stock-toolbar-actions">
             <button type="button" onClick={openManualEntryModal} disabled={!operation.canOperate}><PlusCircle size={17} /> Novo Lancamento</button>
-            <button type="button"><Download size={17} /> Exportar</button>
+            <button type="button" onClick={exportMovementsExcel}><Download size={17} /> Exportar</button>
           </div>
         </div>
         <table>
@@ -378,12 +382,12 @@ function Financeiro() {
               </select>
               {manualEntry.type === 'loss' ? (
                 <select value={manualEntry.reason} onChange={(event) => updateManualEntry('reason', event.target.value)} aria-label="Motivo da perda">
-                  {lossReasons.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+                  {lossCatalog.map((reason) => <option key={reason.code} value={reason.name}>{reason.name}</option>)}
                 </select>
               ) : (
                 <select value={manualEntry.category} onChange={(event) => updateManualEntry('category', event.target.value)} aria-label="Categoria do lancamento">
-                  {(manualEntry.type === 'expense' ? expenseCategories : revenueCategories).map((category) => (
-                    <option key={category} value={category}>{category}</option>
+                  {(manualEntry.type === 'expense' ? expenseCatalog : revenueCatalog).map((category) => (
+                    <option key={category.code} value={category.name}>{category.name}</option>
                   ))}
                 </select>
               )}
@@ -408,14 +412,12 @@ function Financeiro() {
                     onChange={(event) => updateManualEntry('quantity', event.target.value)}
                   />
                   <select value={manualEntry.shift} onChange={(event) => updateManualEntry('shift', event.target.value)} aria-label="Turno da perda">
-                    {shiftOptions.filter((option) => option !== 'Todos').map((option) => <option key={option} value={option}>{option}</option>)}
+                    {shiftCatalog.map((option) => <option key={option.code} value={option.name}>{option.name}</option>)}
                   </select>
                 </>
               ) : (
                 <select value={manualEntry.status} onChange={(event) => updateManualEntry('status', event.target.value)} aria-label="Status do lancamento">
-                  <option>Pendente</option>
-                  <option>Paga</option>
-                  <option>Cancelada</option>
+                  {statusCatalog.map((option) => <option key={option.code} value={option.name}>{option.name}</option>)}
                 </select>
               )}
             </div>
@@ -445,17 +447,6 @@ function Metric({ title, value, tone, icon: Icon }) {
         <h2>{title}</h2>
         <strong>{value}</strong>
       </div>
-    </div>
-  );
-}
-
-function DataSourceCard({ title, items }) {
-  return (
-    <div className="finance-source-card">
-      <strong>{title}</strong>
-      <ul>
-        {items.map((item) => <li key={item}>{item}</li>)}
-      </ul>
     </div>
   );
 }

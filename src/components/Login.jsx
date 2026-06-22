@@ -82,18 +82,18 @@ function Login() {
     }
 
     focusPasswordField();
-    window.addEventListener("focus", refocusPasswordField);
-    document.addEventListener("visibilitychange", refocusWhenVisible);
+    window.addEventListener('focus', refocusPasswordField);
+    document.addEventListener('visibilitychange', refocusWhenVisible);
 
     return () => {
-      window.removeEventListener("focus", refocusPasswordField);
-      document.removeEventListener("visibilitychange", refocusWhenVisible);
+      window.removeEventListener('focus', refocusPasswordField);
+      document.removeEventListener('visibilitychange', refocusWhenVisible);
     };
   }, [isLoadingUsers]);
 
   function handleUsernameChange(event) {
     setUsername(event.target.value);
-    setPassword("");
+    setPassword('');
     setError("");
     setIsPasswordVisible(false);
     focusPasswordField();

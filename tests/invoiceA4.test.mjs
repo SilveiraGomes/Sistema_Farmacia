@@ -1,11 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildDocumentSettingsFromSnapshot,
   buildFiscalReference,
   buildInvoiceA4ViewModel,
   calculateInvoiceA4Totals,
   numberToPortugueseWords,
 } from '../src/data/invoiceA4.mjs';
+import { createSafeDefaultSnapshot } from '../src/configuration/catalogKeys.mjs';
+
+test('buildDocumentSettingsFromSnapshot maps central identity and fiscal settings', () => {
+  const snapshot = createSafeDefaultSnapshot();
+  snapshot.settings.company.identity.value.pharmacyName = 'Farmacia ESAYOS';
+  snapshot.settings.documents.headerText.value = 'Farmacia ESAYOS\nNIF 123';
+  snapshot.settings.documents.fiscal.value.validationNumber = '123/AGT/2026';
+  const result = buildDocumentSettingsFromSnapshot(snapshot);
+  assert.equal(result.branding.pharmacyName, 'Farmacia ESAYOS');
+  assert.equal(result.settings.documentHeaderText, 'Farmacia ESAYOS\nNIF 123');
+  assert.equal(result.settings.validationNumber, '123/AGT/2026');
+});
 import { DOCUMENT_STATUSES, DOCUMENT_TYPES } from '../src/data/documents.mjs';
 
 const document = {

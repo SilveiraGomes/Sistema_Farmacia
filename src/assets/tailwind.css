@@ -543,6 +543,43 @@ button:disabled {
 
 .best-sellers h2,
 .panel h2,
+.invoice-doc-type-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.invoice-doc-type-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.invoice-doc-type-select {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.invoice-doc-type-notice {
+  font-size: 0.78rem;
+  color: #8a6a00;
+  background: #fff8e1;
+  border: 1px solid #f2ce3d;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+}
+
 .invoice-panel h2 {
   margin: 0 0 12px;
   color: var(--ink);
@@ -1035,7 +1072,7 @@ tr:nth-child(even) td {
 .invoice-panel {
   grid-area: invoice;
   position: static;
-  height: clamp(520px, calc(100vh - 90px), 760px);
+  height: clamp(620px, calc(100vh - 60px), 920px);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2711,15 +2748,14 @@ textarea {
   min-height: 62px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 8px 0;
   color: #082d11;
-  background: #edf4ea;
+  background: transparent;
   font-family: Georgia, serif;
   font-size: 24px;
   line-height: 0.92;
-  overflow: hidden;
 }
 
 .auth-brand strong {
@@ -2797,13 +2833,18 @@ textarea {
 
 .auth-submit {
   width: 100%;
-  min-height: 42px;
+  min-height: 46px;
   background: var(--brand);
   color: white;
   font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 10px;
 }
 
 .form-error {
@@ -2877,6 +2918,20 @@ textarea {
 
 .modal-card.wide {
   width: min(820px, 100%);
+}
+
+.modal-card.stock-modal {
+  max-height: min(860px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-card.stock-modal .form-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
 }
 
 .modal-card.permissions-modal {
@@ -3035,27 +3090,58 @@ textarea {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
 .modal-title-row h2 {
   margin: 0;
   color: var(--ink);
+  font-size: 18px;
+  font-weight: 650;
 }
 
 .modal-title-row button {
-  width: 38px;
-  height: 38px;
-  border: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
   border-radius: 999px;
-  color: white;
-  background: var(--brand-dark);
-  font-size: 26px;
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: 20px;
+  line-height: 1;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  gap: 14px 12px;
+}
+
+.form-grid input,
+.form-grid select,
+.form-grid textarea {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  transition: border-color 0.15s;
+}
+
+.form-grid input:focus,
+.form-grid select:focus,
+.form-grid textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+
+.form-grid textarea {
+  min-height: 70px;
+  resize: vertical;
 }
 
 .permissions-layout {
@@ -3196,6 +3282,33 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+/* Labels empilhadas — label > span + input/select/textarea */
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-grid label > span:first-child,
+.form-grid label > span.field-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  line-height: 1.2;
+}
+
+.form-grid label > input,
+.form-grid label > select,
+.form-grid label > textarea {
+  margin-top: 0;
+}
+
+.form-span-2 {
+  grid-column: span 2;
 }
 
 .form-grid textarea,
@@ -3468,6 +3581,43 @@ textarea {
   color: var(--ink);
 }
 
+.inventory-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafafa;
+  color: var(--muted);
+}
+
+.form-grid .inventory-search-bar {
+  grid-column: 1 / -1;
+}
+
+.inventory-search-bar input {
+  flex: 1;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.inventory-search-bar > button {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
 .inventory-sheet {
   min-height: 0;
   display: grid;
@@ -3638,6 +3788,7 @@ textarea {
   grid-template-columns: 112px 1fr;
   gap: 14px;
   padding: 12px;
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: white;
 }
@@ -4460,7 +4611,7 @@ button :is(strong, b) {
   }
 
   .invoice-panel {
-    height: min(620px, calc(100vh - 90px));
+    height: min(820px, calc(100vh - 60px));
     min-height: auto;
   }
 }
@@ -4925,7 +5076,7 @@ button :is(strong, b) {
 }
 
 .invoice-a4-items thead th {
-  background: #a5a5a5;
+  background: #A5A5A5;
   border-top: 0;
   border-bottom: 2px solid #111;
   font-weight: 700;
@@ -4940,7 +5091,7 @@ button :is(strong, b) {
 }
 
 .invoice-a4-tax-summary thead th {
-  background: #a5a5a5;
+  background: #A5A5A5;
   border-top: 0;
   border-bottom: 2px solid #111;
   font-weight: 700;
@@ -4954,27 +5105,27 @@ button :is(strong, b) {
 }
 
 .invoice-a4-items tbody tr:nth-child(odd) {
-  background: #ffffff;
+  background: #FFFFFF;
 }
 
 .invoice-a4-items tbody tr:nth-child(odd) td {
-  background: #ffffff;
+  background: #FFFFFF;
 }
 
 .invoice-a4-items tbody tr:nth-child(even) {
-  background: #ededed;
+  background: #EDEDED;
 }
 
 .invoice-a4-items tbody tr:nth-child(even) td {
-  background: #ededed;
+  background: #EDEDED;
 }
 
 .invoice-a4-tax-summary tbody tr:nth-child(odd) td {
-  background: #ffffff;
+  background: #FFFFFF;
 }
 
 .invoice-a4-tax-summary tbody tr:nth-child(even) td {
-  background: #ededed;
+  background: #EDEDED;
 }
 
 .invoice-a4-summary {
@@ -5336,6 +5487,9 @@ button :is(strong, b) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 14px;
+}
+.settings-logo-picker {
+  grid-column: 1 / -1;
 }
 .setting-field {
   display: grid;

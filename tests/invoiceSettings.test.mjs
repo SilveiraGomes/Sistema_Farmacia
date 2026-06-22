@@ -39,6 +39,20 @@ test('uses safe default invoice A4 settings', () => {
   assert.equal(DEFAULT_INVOICE_A4_SETTINGS.showWatermark, false);
 });
 
+test('uses safe defaults when browser storage access is blocked', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get() { throw new Error('storage blocked'); },
+  });
+  try {
+    assert.deepEqual(getStoredInvoiceA4Settings(), DEFAULT_INVOICE_A4_SETTINGS);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
+    else delete globalThis.localStorage;
+  }
+});
+
 test('normalizes invoice A4 settings for fiscal footer and options', () => {
   const result = normalizeInvoiceA4Settings({
     companyName: '  Empresa Exemplo LDA  ',

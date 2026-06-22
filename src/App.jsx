@@ -1,54 +1,54 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, ChevronDown, LogOut, Search } from 'lucide-react';
-import { useAuth } from './auth/AuthContext';
-import { SettingsProvider } from './configuration/SettingsContext';
-import { OperationProvider } from './operation/OperationContext';
-import Navbar from './components/Navbar';
-import ChangePassword from './components/ChangePassword';
-import Dashboard from './components/Dashboard';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Bell, ChevronDown, LogOut, Search } from "lucide-react";
+import { useAuth } from "./auth/AuthContext";
+import { SettingsProvider } from "./configuration/SettingsContext";
+import { OperationProvider } from "./operation/OperationContext";
+import Navbar from "./components/Navbar";
+import ChangePassword from "./components/ChangePassword";
+import Dashboard from "./components/Dashboard";
 import Operacao from './components/Operacao';
-import Estoque from './components/Estoque';
-import Vendas from './components/Vendas';
-import Financeiro from './components/Financeiro';
-import Clientes from './components/Clientes';
-import Login from './components/Login';
-import Relatorios from './components/Relatorios';
-import Documentos from './components/Documentos';
-import Configuracoes from './components/Configuracoes';
-import Usuarios from './components/Usuarios';
-import BrandMark from './components/BrandMark';
-import { confirmLogout } from './utils/confirmations.mjs';
+import Estoque from "./components/Estoque";
+import Vendas from "./components/Vendas";
+import Financeiro from "./components/Financeiro";
+import Clientes from "./components/Clientes";
+import Login from "./components/Login";
+import Relatorios from "./components/Relatorios";
+import Documentos from "./components/Documentos";
+import Configuracoes from "./components/Configuracoes";
+import Usuarios from "./components/Usuarios";
+import BrandMark from "./components/BrandMark";
+import { confirmLogout } from "./utils/confirmations.mjs";
 import {
   buildDashboardNotifications,
   financeExpenses,
   invoices,
   stockItems,
-} from './data/pharmacyData.mjs';
+} from "./data/pharmacyData.mjs";
 
 const viewTitles = {
-  dashboard: 'Dashboard',
+  dashboard: "Dashboard",
   operacao: 'Operacao',
-  vendas: 'Vendas',
-  estoque: 'Estoque',
-  financeiro: 'Finanças',
-  clientes: 'Clientes',
-  relatorios: 'Relatórios',
-  documentos: 'Documentos',
-  configuracoes: 'Configurações',
-  usuarios: 'Usuários',
+  vendas: "Vendas",
+  estoque: "Estoque",
+  financeiro: "Finanças",
+  clientes: "Clientes",
+  relatorios: "Relatórios",
+  documentos: "Documentos",
+  configuracoes: "Configurações",
+  usuarios: "Usuários",
 };
 
 const viewPermissions = {
-  dashboard: 'dashboard.ver',
+  dashboard: "dashboard.ver",
   operacao: 'operacao.ver',
-  vendas: 'vendas.ver',
-  estoque: 'estoque.ver',
-  financeiro: 'financeiro.ver',
-  clientes: 'clientes.ver',
-  relatorios: 'relatorios.ver',
-  documentos: 'documentos.ver',
-  configuracoes: 'configuracoes.ver',
-  usuarios: 'usuarios.ver',
+  vendas: "vendas.ver",
+  estoque: "estoque.ver",
+  financeiro: "financeiro.ver",
+  clientes: "clientes.ver",
+  relatorios: "relatorios.ver",
+  documentos: "documentos.ver",
+  configuracoes: "configuracoes.ver",
+  usuarios: "usuarios.ver",
 };
 
 const canonicalViewOrder = Object.keys(viewPermissions);
@@ -175,25 +175,25 @@ function App() {
 
   const currentScreen = useMemo(() => {
     switch (activeView) {
-      case 'dashboard':
+      case "dashboard":
         return <Dashboard />;
       case 'operacao':
         return <Operacao />;
-      case 'vendas':
+      case "vendas":
         return <Vendas />;
-      case 'estoque':
+      case "estoque":
         return <Estoque />;
-      case 'financeiro':
+      case "financeiro":
         return <Financeiro />;
-      case 'clientes':
+      case "clientes":
         return <Clientes />;
-      case 'relatorios':
+      case "relatorios":
         return <Relatorios />;
-      case 'documentos':
+      case "documentos":
         return <Documentos />;
-      case 'configuracoes':
+      case "configuracoes":
         return <Configuracoes />;
-      case 'usuarios':
+      case "usuarios":
         return <Usuarios />;
       default:
         return (

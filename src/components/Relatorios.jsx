@@ -6,9 +6,9 @@ import {
   Printer,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { getStoredBranding } from '../data/branding.mjs';
 import { documents as reportDocuments } from '../data/documents.mjs';
-import { getStoredInvoiceA4Settings } from '../data/invoiceSettings.mjs';
+import { buildDocumentSettingsFromSnapshot } from '../data/invoiceA4.mjs';
+import { useSettings } from '../configuration/SettingsContext';
 import {
   REPORT_CATALOG,
   buildReportCsv,
@@ -47,6 +47,8 @@ function findReportDefinition(reportId) {
 }
 
 function Relatorios() {
+  const { snapshot } = useSettings();
+  const documentSettings = buildDocumentSettingsFromSnapshot(snapshot);
   const { hasPermission, user } = useAuth();
   const operation = useOperation();
   const canExport = hasPermission('relatorios.exportar');
@@ -204,7 +206,7 @@ function Relatorios() {
       </div>
 
       {previewOpen ? (
-        <ReportPreview report={report} userName={getUserName(user)} onClose={() => setPreviewOpen(false)} />
+        <ReportPreview report={report} documentSettings={documentSettings} userName={getUserName(user)} onClose={() => setPreviewOpen(false)} />
       ) : null}
     </section>
   );
@@ -234,7 +236,7 @@ function formatReportCell(value, type) {
   return String(value);
 }
 
-function ReportPreview({ report, userName, onClose }) {
+function ReportPreview({ report, documentSettings, userName, onClose }) {
   function handlePrintA4() {
     window.setTimeout(() => window.print(), 0);
   }
@@ -260,8 +262,8 @@ function ReportPreview({ report, userName, onClose }) {
         </div>
         <ReportA4
           report={report}
-          branding={getStoredBranding()}
-          settings={getStoredInvoiceA4Settings()}
+          branding={documentSettings.branding}
+          settings={documentSettings.settings}
           printedBy={userName}
         />
       </div>

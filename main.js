@@ -1,7 +1,12 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, Menu } = require("electron");
 const path = require("path");
 const ipcHandlers = require("./src/backend/ipcHandlers");
-const { connectDB, getModels, syncDatabaseSchema } = require("./src/backend/database");
+const {
+  connectDB,
+  getModels,
+  syncDatabaseSchema,
+} = require("./src/backend/database");
+const reportSyncService = require("./src/backend/services/reportSyncService");
 
 let db = null;
 let models = null;
@@ -14,10 +19,38 @@ async function initializeDatabase(electronApp) {
   console.log("Modelos sincronizados com o banco de dados.");
 }
 
-function createWindow () {
+async function initializeReportSyncService(electronApp) {
+  try {
+    const { ConfiguracaoSistema } = getModels();
+    let syncConfig = null;
+    try {
+      const row = await ConfiguracaoSistema.findOne({ where: { chave: "reports.googleSheets" } });
+      if (row) syncConfig = JSON.parse(row.valor_json);
+    } catch {
+      syncConfig = null;
+    }
+    if (!syncConfig) {
+      syncConfig = {
+        syncEnabled: true,
+        syncTime: "21:00",
+        reportTypes: ["venda_turno", "venda_dia", "financeiro", "estoque"],
+        retentionDays: 90,
+        spreadsheetId: "",
+        credentials: "",
+      };
+    }
+    await reportSyncService.initializeSyncScheduler(electronApp, syncConfig);
+    console.log("Serviço de sincronização de relatórios inicializado.");
+  } catch (error) {
+    console.error("Erro ao inicializar serviço de sincronização:", error);
+  }
+}
+
+function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: path.join(__dirname, "resources", "icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
@@ -31,10 +64,13 @@ function createWindow () {
   // mainWindow.webContents.openDevTools();
 }
 
+Menu.setApplicationMenu(null);
+
 app.whenReady().then(async () => {
   try {
     await initializeDatabase(app);
-    await ipcHandlers.init({ db, ...models });
+    await ipcHandlers.init({ db, ...models }, { electronApp: app });
+    await initializeReportSyncService(app);
     createWindow();
 
     app.on("activate", () => {
