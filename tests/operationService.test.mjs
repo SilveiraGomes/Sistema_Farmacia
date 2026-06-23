@@ -443,6 +443,32 @@ test('operations reject invalid money values with a coded operation error', asyn
   });
 });
 
+test('multiple closed shifts can coexist without UNIQUE constraint violation', async () => {
+  await withOperations(async () => {
+    const { TurnoOperacional } = getModels();
+
+    await openDay({ actorUserId: 1, data: { saldo_inicial: 100 } });
+
+    await openShift({ actorUserId: 1, data: { nome: 'Manha', saldo_inicial: 50 } });
+    const shift1 = await closeShift({ actorUserId: 1, data: { saldo_final_informado: 60 } });
+    assert.equal(shift1.status, 'Fechado');
+
+    await openShift({ actorUserId: 1, data: { nome: 'Tarde', saldo_inicial: 60 } });
+    const shift2 = await closeShift({ actorUserId: 1, data: { saldo_final_informado: 70 } });
+    assert.equal(shift2.status, 'Fechado');
+
+    await openShift({ actorUserId: 1, data: { nome: 'Noite', saldo_inicial: 70 } });
+    const shift3 = await closeShift({ actorUserId: 1, data: { saldo_final_informado: 80 } });
+    assert.equal(shift3.status, 'Fechado');
+
+    const closedShifts = await TurnoOperacional.findAll({ where: { status: 'Fechado' } });
+    assert.equal(closedShifts.length, 3, 'deve permitir multiplos turnos fechados');
+
+    const openShifts = await TurnoOperacional.findAll({ where: { status: 'Aberto' } });
+    assert.equal(openShifts.length, 0, 'nao deve haver turnos abertos');
+  });
+});
+
 test('SAFE_OPERATION_ERRORS includes operation blocking and validation messages', () => {
   assert.ok(Object.isFrozen(SAFE_OPERATION_ERRORS));
 

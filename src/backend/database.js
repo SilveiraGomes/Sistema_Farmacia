@@ -524,18 +524,16 @@ async function dropSqliteAlterBackupTables(db) {
 
   const queryInterface = db.getQueryInterface();
   const tables = await queryInterface.showAllTables();
-  const backupTables = tables.flatMap((table) => {
-    if (typeof table === "string") {
-      return table.endsWith("_backup") ? [table] : [];
-    }
 
-    return Object.values(table).filter(
-      (value) => typeof value === "string" && value.endsWith("_backup"),
-    );
+  const residualSuffixes = ['_backup', '_status_fix', '_normalized'];
+  const residualTables = tables.flatMap((table) => {
+    const name = typeof table === 'string' ? table : Object.values(table).find((v) => typeof v === 'string') || '';
+    return residualSuffixes.some((s) => name.endsWith(s)) ? [name] : [];
   });
 
-  for (const backupTable of backupTables) {
-    await db.query(`DROP TABLE IF EXISTS ${backupTable}`);
+  for (const tableName of residualTables) {
+    console.log(`[syncDB] Dropping residual table: "${tableName}"`);
+    await db.query(`DROP TABLE IF EXISTS "${tableName}"`);
   }
 }
 
@@ -622,6 +620,18 @@ async function ensureSqliteOperationalOpenIndexes(db) {
 }
 
 async function recreatePartialStatusIndex(db, tableName, indexName) {
+  // Remove any full (non-partial) unique index on 'status' that could block closing shifts/days
+  const conflictingIndexes = await db.query(
+    `SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND name != ? AND sql IS NOT NULL`,
+    { replacements: [tableName, indexName], type: db.QueryTypes.SELECT },
+  );
+  for (const idx of conflictingIndexes) {
+    const sql = idx.sql || '';
+    if (sql.includes('UNIQUE') && /\bstatus\b/.test(sql) && !sql.includes('WHERE')) {
+      await db.query(`DROP INDEX IF EXISTS "${idx.name}"`);
+    }
+  }
+
   const rows = await db.query(
     `SELECT sql FROM sqlite_master WHERE type='index' AND name=?`,
     { replacements: [indexName], type: db.QueryTypes.SELECT },
@@ -1100,6 +1110,95 @@ async function seedPermissionsAndProfiles() {
   }
 }
 
+
+async function normalizeOperationalTablesForSqliteAlter(db) {
+  if (db.getDialect() !== 'sqlite') return;
+
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+
+  // Map SQLite table name → Sequelize model name (as registered in db.models)
+  const modelMap = {
+    DiaOperacionals: 'DiaOperacional',
+    TurnoOperacionals: 'TurnoOperacional',
+  };
+
+  for (const [tableName, modelName] of Object.entries(modelMap)) {
+    if (!hasTable(tables, tableName)) continue;
+
+    const [tableInfo] = await db.query(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`,
+      { replacements: [tableName], type: db.QueryTypes.SELECT },
+    );
+    const tableSql = tableInfo?.sql || '';
+    console.log(`[syncDB] ${tableName} DDL: ${tableSql}`);
+
+    // 1) PRAGMA index_list: detect full UNIQUE on status column
+    const indexList = await db.query(
+      `PRAGMA index_list("${tableName}")`,
+      { type: db.QueryTypes.SELECT },
+    );
+
+    let needsRebuild = false;
+    for (const idx of indexList) {
+      if (!idx.unique || idx.partial) continue;
+      const idxInfo = await db.query(
+        `PRAGMA index_info("${idx.name}")`,
+        { type: db.QueryTypes.SELECT },
+      );
+      const cols = idxInfo.map((r) => String(r.name || '').toLowerCase());
+      if (!cols.includes('status')) continue;
+
+      if (idx.origin === 'c') {
+        // Standalone CREATE INDEX — drop it without rebuilding the table
+        console.log(`[syncDB] ${tableName}: dropping standalone full UNIQUE on status: "${idx.name}"`);
+        await db.query(`DROP INDEX IF EXISTS "${idx.name}"`);
+      } else {
+        // Inline constraint in CREATE TABLE (origin='u') — table rebuild required
+        console.log(`[syncDB] ${tableName}: inline UNIQUE on status (origin=${idx.origin}) — rebuild needed`);
+        needsRebuild = true;
+      }
+    }
+
+    // 2) If timestamps have 'Invalid date' default, sync({ alter: true }) will try to
+    //    alter the table and may create a backup that inherits stale constraints.
+    //    Rebuild now using Sequelize's own schema so the alter cycle is skipped entirely.
+    if (!needsRebuild && tableSql.includes("'Invalid date'")) {
+      console.log(`[syncDB] ${tableName}: 'Invalid date' timestamp default — rebuild needed`);
+      needsRebuild = true;
+    }
+
+    if (!needsRebuild) {
+      console.log(`[syncDB] ${tableName}: schema ok`);
+      continue;
+    }
+
+    // Rebuild using createTableQuery so the resulting schema exactly matches what
+    // sync({ alter: true }) expects — preventing a second alter cycle on next startup.
+    const model = db.models[modelName];
+    const tmpName = `${tableName}_normalized`;
+    const processedAttrs = queryInterface.queryGenerator.attributesToSQL(model.rawAttributes);
+    const createSql = queryInterface.queryGenerator.createTableQuery(tmpName, processedAttrs, {});
+
+    const existingCols = await queryInterface.describeTable(tableName);
+    const existingColSet = new Set(Object.keys(existingCols));
+    const colsToTransfer = Object.keys(model.rawAttributes).filter((c) => existingColSet.has(c));
+    const colsCsv = colsToTransfer.map((c) => `"${c}"`).join(', ');
+
+    await db.query(`DROP TABLE IF EXISTS "${tmpName}"`);
+    await db.query(createSql);
+    await db.query(`INSERT INTO "${tmpName}" (${colsCsv}) SELECT ${colsCsv} FROM "${tableName}"`);
+    await db.query(`DROP TABLE "${tableName}"`);
+    await db.query(`ALTER TABLE "${tmpName}" RENAME TO "${tableName}"`);
+
+    const [rebuilt] = await db.query(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name=?`,
+      { replacements: [tableName], type: db.QueryTypes.SELECT },
+    );
+    console.log(`[syncDB] ${tableName} rebuilt. New DDL: ${rebuilt?.sql}`);
+  }
+}
+
 async function syncModels(db) {
   if (db.getDialect() !== "sqlite") {
     await db.sync({ alter: true });
@@ -1109,6 +1208,14 @@ async function syncModels(db) {
   await db.query("PRAGMA foreign_keys = OFF");
   try {
     await dropSqliteAlterBackupTables(db);
+    // Drop partial UNIQUE indexes before sync. Sequelize's describeTable does not
+    // check the partial flag, so it marks status.unique=true for partial indexes.
+    // This causes changeColumn to generate a backup with status UNIQUE, which
+    // then fails on INSERT when multiple Fechado rows exist. The indexes are
+    // recreated by ensureSqliteOperationalOpenIndexes after sync completes.
+    await db.query(`DROP INDEX IF EXISTS "${DIA_OPERACIONAL_ONE_OPEN_INDEX}"`);
+    await db.query(`DROP INDEX IF EXISTS "${TURNO_OPERACIONAL_ONE_OPEN_INDEX}"`);
+    await normalizeOperationalTablesForSqliteAlter(db);
     await normalizeOpcaoCatalogoTableForSqliteAlter(db);
     await normalizePerfilPermissaoTableForSqliteAlter(db);
     await db.sync({ alter: true });
@@ -1117,10 +1224,59 @@ async function syncModels(db) {
   }
 }
 
+async function ensureSqliteOperationalColumns(db) {
+  if (db.getDialect() !== "sqlite") {
+    return;
+  }
+
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+
+  const decimalZero = { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0, allowNull: true };
+  const dateNullable = { type: DataTypes.DATE, allowNull: true };
+  const textNullable = { type: DataTypes.TEXT, allowNull: true };
+  const intNullable = { type: DataTypes.INTEGER, allowNull: true };
+
+  const sharedFinancialColumns = [
+    ["saldo_final_informado", decimalZero],
+    ["total_vendas", decimalZero],
+    ["total_despesas", decimalZero],
+    ["total_perdas", decimalZero],
+    ["diferenca_caixa", decimalZero],
+    ["observacao_abertura", textNullable],
+    ["observacao_fechamento", textNullable],
+    ["fechado_por_usuario_id", intNullable],
+    ["fechado_em", dateNullable],
+  ];
+
+  if (hasTable(tables, "DiaOperacionals")) {
+    const columns = await queryInterface.describeTable("DiaOperacionals");
+    for (const [name, definition] of sharedFinancialColumns) {
+      if (!columns[name]) {
+        await queryInterface.addColumn("DiaOperacionals", name, definition);
+      }
+    }
+  }
+
+  if (hasTable(tables, "TurnoOperacionals")) {
+    const columns = await queryInterface.describeTable("TurnoOperacionals");
+    const turnoColumns = [
+      ...sharedFinancialColumns,
+      ["aberto_por_usuario_id", intNullable],
+    ];
+    for (const [name, definition] of turnoColumns) {
+      if (!columns[name]) {
+        await queryInterface.addColumn("TurnoOperacionals", name, definition);
+      }
+    }
+  }
+}
+
 async function syncDatabaseSchema(db) {
   await ensureSqliteVendasColumns(db);
   await ensureSqliteFinanceColumns(db);
   await ensureSqliteUsuarioSecurityColumns(db);
+  await ensureSqliteOperationalColumns(db);
   await syncModels(db);
   await ensureVendasInvoiceIndex(db);
   await ensureSqliteOperationalOpenIndexes(db);
