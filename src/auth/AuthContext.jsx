@@ -127,6 +127,35 @@ export function AuthProvider({ children }) {
     return permissions.includes(permissionKey);
   }, [permissions]);
 
+  // Idle tracker: throttled heartbeat + auto-logout on inactivity
+  const lastHeartbeat = React.useRef(0);
+  useEffect(() => {
+    if (!session) return;
+
+    function sendHeartbeat() {
+      const now = Date.now();
+      if (now - lastHeartbeat.current < 60_000) return; // once per minute max
+      lastHeartbeat.current = now;
+      request('auth.activity').catch(() => {});
+    }
+
+    function onActivity() { sendHeartbeat(); }
+
+    const EVENTS = ['mousemove', 'keydown', 'pointerdown', 'wheel', 'touchstart'];
+    EVENTS.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
+
+    // Poll session every 2 min to detect backend-side timeout
+    const pollId = setInterval(async () => {
+      const next = await request('auth.currentSession').catch(() => null);
+      if (!next) setSession(null);
+    }, 2 * 60 * 1000);
+
+    return () => {
+      EVENTS.forEach((e) => window.removeEventListener(e, onActivity));
+      clearInterval(pollId);
+    };
+  }, [session]);
+
   const value = useMemo(() => ({
     session,
     user: session?.user || null,

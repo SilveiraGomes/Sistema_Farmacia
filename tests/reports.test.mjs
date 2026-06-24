@@ -37,6 +37,7 @@ test('REPORT_CATALOG exposes all required report groups', () => {
     'clientes',
     'documentos',
     'operacao',
+    'avancados',
   ]);
 
   const reportIds = REPORT_CATALOG.flatMap((group) => group.reports.map((report) => report.id));

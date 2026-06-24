@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu } = require("electron");
+const { app, BrowserWindow, Menu, globalShortcut } = require("electron");
 const path = require("path");
 const ipcHandlers = require("./src/backend/ipcHandlers");
 const {
@@ -7,9 +7,12 @@ const {
   syncDatabaseSchema,
 } = require("./src/backend/database");
 const reportSyncService = require("./src/backend/services/reportSyncService");
+const backupService = require("./src/backend/services/backupService");
+const authService = require("./src/backend/services/authService");
 
 let db = null;
 let models = null;
+let mainWindow = null;
 
 async function initializeDatabase(electronApp) {
   db = await connectDB(electronApp, process.env.NODE_ENV || "development");
@@ -17,6 +20,30 @@ async function initializeDatabase(electronApp) {
   // Sincronizar modelos com o banco de dados
   await syncDatabaseSchema(db); // Use { force: true } para recriar tabelas em desenvolvimento
   console.log("Modelos sincronizados com o banco de dados.");
+}
+
+async function initializeSessionTimeout() {
+  try {
+    const { ConfiguracaoSistema } = getModels();
+    const row = await ConfiguracaoSistema.findOne({ where: { chave: "alerts.sessionTimeoutMinutes" } });
+    const minutes = row ? JSON.parse(row.valor_json) : 30;
+    authService.setSessionTimeout(Number(minutes) || 30);
+  } catch { /* use default 30 min */ }
+}
+
+async function initializeBackupService(electronApp) {
+  try {
+    const { ConfiguracaoSistema } = getModels();
+    let config = { intervalHours: 24, keepCount: 10 };
+    try {
+      const row = await ConfiguracaoSistema.findOne({ where: { chave: "backup.auto" } });
+      if (row) config = { ...config, ...JSON.parse(row.valor_json) };
+    } catch { /* use defaults */ }
+    await backupService.initializeBackupScheduler(electronApp, config);
+    console.log("Serviço de backup inicializado.");
+  } catch (error) {
+    console.error("Erro ao inicializar backup:", error);
+  }
 }
 
 async function initializeReportSyncService(electronApp) {
@@ -46,10 +73,26 @@ async function initializeReportSyncService(electronApp) {
   }
 }
 
-function createWindow() {
-  const mainWindow = new BrowserWindow({
+async function readStartFullscreen() {
+  try {
+    const { ConfiguracaoSistema } = getModels();
+    const row = await ConfiguracaoSistema.findOne({ where: { chave: "appearance.startFullscreen" } });
+    if (row) {
+      const parsed = JSON.parse(row.valor_json);
+      return typeof parsed === "boolean" ? parsed : true;
+    }
+  } catch {
+    // ignore — use default
+  }
+  return true;
+}
+
+function createWindow(startFullscreen = true) {
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    fullscreen: startFullscreen,
+    autoHideMenuBar: true,
     icon: path.join(__dirname, "resources", "icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -59,9 +102,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "dist", "index.html"));
-
-  // Open the DevTools.
-  // mainWindow.webContents.openDevTools();
+  mainWindow.on("closed", () => { mainWindow = null; });
 }
 
 Menu.setApplicationMenu(null);
@@ -69,13 +110,21 @@ Menu.setApplicationMenu(null);
 app.whenReady().then(async () => {
   try {
     await initializeDatabase(app);
-    await ipcHandlers.init({ db, ...models }, { electronApp: app });
+    await ipcHandlers.init({ db, ...models }, { electronApp: app, getMainWindow: () => mainWindow });
     await initializeReportSyncService(app);
-    createWindow();
+    await initializeBackupService(app);
+    await initializeSessionTimeout();
+
+    const startFullscreen = await readStartFullscreen();
+    createWindow(startFullscreen);
+
+    globalShortcut.register("F11", () => {
+      if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    });
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
+        createWindow(startFullscreen);
       }
     });
   } catch (error) {
@@ -88,4 +137,8 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });

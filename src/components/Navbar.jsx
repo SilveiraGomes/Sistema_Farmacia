@@ -5,17 +5,22 @@ import {
   CalendarClock,
   ChevronRight,
   ChevronLeft,
+  ClipboardList,
   Coins,
   FileText,
   Gauge,
   PackageCheck,
+  Power,
   ReceiptText,
   Settings,
+  Truck,
   UserRound,
   UsersRound,
 } from "lucide-react";
 import BrandMark from "./BrandMark";
 import { useSetting } from "../configuration/SettingsContext";
+import { request } from "../services/ipcClient.js";
+import { confirmSensitiveAction } from "../utils/confirmations.mjs";
 
 const menuItems = [
   {
@@ -50,6 +55,18 @@ const menuItems = [
     permission: "clientes.ver",
   },
   {
+    id: "fornecedores",
+    label: "Fornecedores",
+    icon: Truck,
+    permission: "fornecedores.ver",
+  },
+  {
+    id: "encomendas",
+    label: "Encomendas",
+    icon: ClipboardList,
+    permission: "compras.ver",
+  },
+  {
     id: "relatorios",
     label: "Relatórios",
     icon: BarChart3,
@@ -82,9 +99,20 @@ function Navbar({
   isCollapsed,
   setCurrentView,
   toggleCollapsed,
+  badges = {},
 }) {
   const identity = useSetting("company.identity", {});
   const pharmacyName = identity?.pharmacyName;
+
+  async function handleCloseApp() {
+    const confirmed = await confirmSensitiveAction(
+      'Tem a certeza que deseja fechar o sistema?',
+      null,
+      { title: 'Fechar sistema', confirmLabel: 'Fechar sistema', tone: 'close' },
+    );
+    if (!confirmed) return;
+    request('window.close').catch(() => {});
+  }
   const canView =
     typeof hasPermission === "function" ? hasPermission : () => true;
   const primaryItems = menuItems
@@ -110,7 +138,9 @@ function Navbar({
       </button>
 
       <nav className="side-menu" aria-label="Menu principal">
-        {primaryItems.map((item) => (
+        {primaryItems.map((item) => {
+          const badge = badges[item.id];
+          return (
           <button
             key={item.id}
             type="button"
@@ -122,10 +152,12 @@ function Navbar({
           >
             <span className="side-icon">
               <item.icon size={23} strokeWidth={2.1} />
+              {badge ? <span className="nav-badge">{badge > 99 ? '99+' : badge}</span> : null}
             </span>
             <span className="side-label">{item.label}</span>
           </button>
-        ))}
+          );
+        })}
 
         {shouldShowDivider ? <div className="side-divider" /> : null}
 
@@ -153,6 +185,16 @@ function Navbar({
         </span>
         <strong>Backup</strong>
         <small>Actualizações</small>
+      </button>
+
+      <button
+        type="button"
+        className="close-app-button"
+        title={isCollapsed ? 'Fechar sistema' : undefined}
+        onClick={handleCloseApp}
+      >
+        <Power size={20} />
+        <span className="close-app-label">Fechar sistema</span>
       </button>
     </aside>
   );

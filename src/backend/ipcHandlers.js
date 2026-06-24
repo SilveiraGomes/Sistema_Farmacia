@@ -7,6 +7,13 @@ const profileService = require("./services/profileService");
 const operationService = require("./services/operationService");
 const reportQueueService = require("./services/reportQueueService");
 const reportSyncService = require("./services/reportSyncService");
+const dashboardService = require("./services/dashboardService");
+const fornecedorService = require("./services/fornecedorService");
+const estoqueService = require("./services/estoqueService");
+const encomendaService = require("./services/encomendaService");
+const financeiroService = require("./services/financeiroService");
+const relatorioService = require("./services/relatorioService");
+const backupService = require("./services/backupService");
 const { assertPermission } = require("./services/authorizationService");
 const {
   CONFIGURATION_ERROR_CODES,
@@ -30,6 +37,11 @@ const SAFE_ERROR_MESSAGES = new Set([
   "Acao IPC desconhecida.",
   "Sessao expirada.",
   "Permissao insuficiente.",
+  ...fornecedorService.SAFE_ERRORS,
+  ...estoqueService.SAFE_ERRORS,
+  ...encomendaService.SAFE_ERRORS,
+  ...financeiroService.SAFE_ERRORS,
+  ...backupService.SAFE_ERRORS,
   "Credenciais invalidas.",
   "Usuario inativo.",
   "Usuario temporariamente bloqueado.",
@@ -141,9 +153,17 @@ function buildRouteMap(overrides = {}) {
     operationService,
     reportQueueService,
     reportSyncService,
+    dashboardService,
+    fornecedorService,
+    estoqueService,
+    encomendaService,
+    financeiroService,
+    relatorioService,
+    backupService,
     configurationService: null,
     assertPermission,
     electronApp: null,
+    getMainWindow: null,
     ...overrides,
   };
 
@@ -154,6 +174,14 @@ function buildRouteMap(overrides = {}) {
     "auth.currentSession": () => dependencies.authService.getCurrentSession(),
     "auth.changeOwnPassword": (data) =>
       dependencies.authService.changeOwnPassword(data),
+    "auth.activity": () => {
+      dependencies.authService.touchActivity();
+      return { ok: true };
+    },
+    "auth.setSessionTimeout": (data = {}) => {
+      dependencies.authService.setSessionTimeout(data.minutes ?? 30);
+      return { ok: true };
+    },
 
     "users.list": () =>
       withPermission(dependencies, "usuarios.ver", () =>
@@ -212,6 +240,96 @@ function buildRouteMap(overrides = {}) {
           actorUserId,
           profileId: data.profileId,
           permissionKeys: data.permissionKeys,
+        }),
+      ),
+
+    "fornecedores.list": (data = {}) =>
+      withPermission(dependencies, "fornecedores.ver", () =>
+        dependencies.fornecedorService.listFornecedores(data),
+      ),
+    "fornecedores.create": (data = {}) =>
+      withPermission(dependencies, "fornecedores.criar", () =>
+        dependencies.fornecedorService.createFornecedor(data),
+      ),
+    "fornecedores.update": (data = {}) =>
+      withPermission(dependencies, "fornecedores.editar", () =>
+        dependencies.fornecedorService.updateFornecedor(data),
+      ),
+    "fornecedores.toggle": (data = {}) =>
+      withPermission(dependencies, "fornecedores.editar", () =>
+        dependencies.fornecedorService.toggleFornecedor(data),
+      ),
+
+    "estoque.addLot": (data = {}) =>
+      withPermission(dependencies, "estoque.ajustar", () =>
+        dependencies.estoqueService.addStockLot(data),
+      ),
+    "estoque.deduct": (data = {}) =>
+      withPermission(dependencies, "estoque.ajustar", () =>
+        dependencies.estoqueService.deductStockFIFO(data),
+      ),
+    "estoque.getLotes": (data = {}) =>
+      withPermission(dependencies, "estoque.ver", () =>
+        dependencies.estoqueService.getLotes(data.produto_id),
+      ),
+    "estoque.updatePrice": (data = {}) =>
+      withPermission(dependencies, "estoque.preco", () =>
+        dependencies.estoqueService.updateProductPrice(data),
+      ),
+    "estoque.listPrices": (data = {}) =>
+      withPermission(dependencies, "estoque.ver", () =>
+        dependencies.estoqueService.listPrices(data),
+      ),
+
+    "compras.list": (data = {}) =>
+      withPermission(dependencies, "compras.ver", () =>
+        dependencies.encomendaService.listEncomendas(data),
+      ),
+    "compras.create": (data = {}) =>
+      withPermission(dependencies, "compras.criar", (actorUserId) =>
+        dependencies.encomendaService.createEncomenda({ ...data, actorUserId }),
+      ),
+    "compras.updateStatus": (data = {}) =>
+      withPermission(dependencies, "compras.editar", () =>
+        dependencies.encomendaService.updateEncomendaStatus(data),
+      ),
+    "compras.receive": (data = {}) =>
+      withPermission(dependencies, "compras.receber", (actorUserId) =>
+        dependencies.encomendaService.receberEncomenda({ ...data, actorUserId }),
+      ),
+
+    "financeiro.contasPagar": () =>
+      withPermission(dependencies, "financeiro.ver", () =>
+        dependencies.financeiroService.listContasPagar(),
+      ),
+    "financeiro.marcarPago": (data = {}) =>
+      withPermission(dependencies, "financeiro.ver", () =>
+        dependencies.financeiroService.marcarPago(data.id),
+      ),
+
+    "relatorio.data": (data = {}) =>
+      withPermission(dependencies, "relatorios.ver", () =>
+        dependencies.relatorioService.getReportData({ reportId: data.reportId, filters: data.filters || {} }),
+      ),
+
+    "backup.manual": () =>
+      withPermission(dependencies, "configuracoes.ver", () =>
+        dependencies.backupService.createBackup({ app: dependencies.electronApp }),
+      ),
+    "backup.list": () =>
+      withPermission(dependencies, "configuracoes.ver", () =>
+        dependencies.backupService.listBackups({ app: dependencies.electronApp }),
+      ),
+    "backup.restore": (data = {}) =>
+      withPermission(dependencies, "configuracoes.ver", () =>
+        dependencies.backupService.restoreBackup({ name: data.name, app: dependencies.electronApp }),
+      ),
+
+    "dashboard.metrics": (data = {}) =>
+      withPermission(dependencies, "dashboard.ver", () =>
+        dependencies.dashboardService.getDashboardMetrics({
+          shiftOpenAt: data.shiftOpenAt || null,
+          lowStockThreshold: data.lowStockThreshold || 25,
         }),
       ),
 
@@ -363,6 +481,24 @@ function buildRouteMap(overrides = {}) {
         fs.copyFileSync(srcPath, dbPath);
         return { success: true, message: "Backup restaurado com sucesso. Reinicie o sistema para aplicar as alteracoes." };
       }),
+
+    "window.setFullscreen": (data = {}) => {
+      const win = dependencies.getMainWindow?.();
+      if (!win) return { fullscreen: false };
+      const value = typeof data.value === 'boolean' ? data.value : !win.isFullScreen();
+      win.setFullScreen(value);
+      return { fullscreen: win.isFullScreen() };
+    },
+
+    "window.isFullscreen": () => {
+      const win = dependencies.getMainWindow?.();
+      return { fullscreen: win ? win.isFullScreen() : false };
+    },
+
+    "window.close": () => {
+      dependencies.electronApp?.quit();
+      return { ok: true };
+    },
   };
 }
 
@@ -499,6 +635,7 @@ async function init(models, options = {}) {
       ? { assertPermission: options.assertPermission }
       : {}),
     ...(options.electronApp ? { electronApp: options.electronApp } : {}),
+    ...(options.getMainWindow ? { getMainWindow: options.getMainWindow } : {}),
   };
   await configurationService.seedDefaults();
   const routes = buildRouteMap(dependencies);

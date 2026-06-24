@@ -9,6 +9,7 @@ import {
   RefreshCw,
   SquareCheckBig,
   WalletCards,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useOperation } from '../operation/OperationContext';
@@ -234,7 +235,7 @@ function Operacao() {
         <dl>
           <div><dt>Dia</dt><dd>{day?.data_operacional || 'Sem dia aberto'}</dd></div>
           <div><dt>Turno</dt><dd>{shift?.nome || 'Sem turno aberto'}</dd></div>
-          <div><dt>Aberto por</dt><dd>{shift?.aberto_por_usuario_id ?? day?.aberto_por_usuario_id ?? '-'}</dd></div>
+          <div><dt>Aberto por</dt><dd>{shift?.aberto_por_nome ?? day?.aberto_por_nome ?? '-'}</dd></div>
           <div><dt>Aberto em</dt><dd>{formatDateTime(shift?.aberto_em || day?.aberto_em)}</dd></div>
           <div><dt>Nota de abertura</dt><dd>{shift?.observacao_abertura || day?.observacao_abertura || '-'}</dd></div>
           <div><dt>Ultimo fechamento</dt><dd>{formatDateTime(shift?.fechado_em || day?.fechado_em)}</dd></div>
@@ -304,7 +305,7 @@ function OperationModal({ modal, form, isSubmitting, onChange, onClose, onSubmit
       <form className="modal-card operation-modal" onSubmit={onSubmit}>
         <div className="modal-title-row">
           <h2>{title}</h2>
-          <button type="button" onClick={onClose}>x</button>
+          <button type="button" className="modal-close-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button>
         </div>
         <div className="form-grid">
           {modal === 'open-day' ? (

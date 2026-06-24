@@ -122,7 +122,7 @@ export function buildFinalizedSaleDocument({
 export function buildRecentSaleDocuments(documentRows, limit = 5) {
   const saleTypes = new Set([
     DOCUMENT_TYPES.INVOICE, DOCUMENT_TYPES.INVOICE_RECEIPT,
-    DOCUMENT_TYPES.RECEIPT, DOCUMENT_TYPES.CREDIT,
+    DOCUMENT_TYPES.RECEIPT, DOCUMENT_TYPES.CREDIT, DOCUMENT_TYPES.CREDIT_NOTE,
   ]);
 
   return documentRows

@@ -16,10 +16,13 @@ import Relatorios from "./components/Relatorios";
 import Documentos from "./components/Documentos";
 import Configuracoes from "./components/Configuracoes";
 import Usuarios from "./components/Usuarios";
+import Fornecedores from "./components/Fornecedores";
+import Encomendas from "./components/Encomendas";
 import BrandMark from "./components/BrandMark";
 import { confirmLogout } from "./utils/confirmations.mjs";
 import {
   buildDashboardNotifications,
+  buildExpiryAlerts,
   financeExpenses,
   invoices,
   stockItems,
@@ -36,6 +39,8 @@ const viewTitles = {
   documentos: "Documentos",
   configuracoes: "Configurações",
   usuarios: "Usuários",
+  fornecedores: "Fornecedores",
+  encomendas: "Encomendas",
 };
 
 const viewPermissions = {
@@ -49,6 +54,8 @@ const viewPermissions = {
   documentos: "documentos.ver",
   configuracoes: "configuracoes.ver",
   usuarios: "usuarios.ver",
+  fornecedores: "fornecedores.ver",
+  encomendas: "compras.ver",
 };
 
 const canonicalViewOrder = Object.keys(viewPermissions);
@@ -114,6 +121,7 @@ function App() {
   const unreadNotifications = notifications.filter(
     (notification) => !readNotificationIds.has(notification.id),
   );
+  const navBadges = {};
 
   useEffect(() => {
     const fallbackView = firstAllowedView ?? "dashboard";
@@ -195,6 +203,10 @@ function App() {
         return <Configuracoes />;
       case "usuarios":
         return <Usuarios />;
+      case "fornecedores":
+        return <Fornecedores />;
+      case "encomendas":
+        return <Encomendas />;
       default:
         return (
           <section className="empty-state">
@@ -238,6 +250,7 @@ function App() {
             isCollapsed={isMenuCollapsed}
             setCurrentView={setCurrentView}
             toggleCollapsed={() => setIsMenuCollapsed((current) => !current)}
+            badges={navBadges}
           />
           <div className="workspace">
             <header className="topbar">
@@ -261,9 +274,9 @@ function App() {
                   >
                     <Bell size={24} />
                     {unreadNotifications.length ? (
-                      <span
-                        aria-label={`${unreadNotifications.length} notificações novas`}
-                      />
+                      <span className="nav-badge" aria-label={`${unreadNotifications.length} notificações novas`}>
+                        {unreadNotifications.length > 99 ? '99+' : unreadNotifications.length}
+                      </span>
                     ) : null}
                   </button>
                   {isNotificationsOpen ? (

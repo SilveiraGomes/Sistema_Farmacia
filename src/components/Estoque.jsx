@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { request } from '../services/ipcClient.js';
 import * as XLSX from 'xlsx';
 import InventarioA4 from './InventarioA4';
 import {
@@ -24,12 +25,15 @@ import {
 import {
   STOCK_OUT_REASONS,
   addStockQuantity,
+  buildExpiryAlerts,
   buildStockFormOptions,
   buildStockImportReference,
   buildStockInventoryCount,
   buildStockListPage,
   buildStockMetrics,
+  daysUntilExpiry,
   formatKwanza,
+  getExpiryStatus,
   parseStockImportCsv,
   removeStockQuantity,
   stockItems,
@@ -52,6 +56,7 @@ const modalTitles = {
   inventory: 'Contagem de Inventario',
   stockIn: 'Adicionar Quantidade',
   stockOut: 'Dar Baixa de Produto',
+  prices: 'Gestão de Preços',
 };
 
 const visibleCategoryCount = 8;
@@ -69,6 +74,7 @@ function Estoque() {
   const [currentPage, setCurrentPage] = useState(1);
   const [categoryOffset, setCategoryOffset] = useState(0);
   const [openActionsId, setOpenActionsId] = useState(null);
+  const [menuOpenUp, setMenuOpenUp] = useState(false);
   const [categoryNames, setCategoryNames] = useState(() => buildStockFormOptions(stockItems).categories);
   const [subcategoryRows, setSubcategoryRows] = useState(() => buildStockImportReference(stockItems).subcategories);
   const referenceRows = useMemo(
@@ -106,7 +112,15 @@ function Estoque() {
       const matchesStatus = !statusFilter || item.status === statusFilter;
       const matchesCategory = !activeFilters.category || item.category === activeFilters.category;
       const matchesLocation = !activeFilters.location || item.location === activeFilters.location;
-      return matchesQuery && matchesStatus && matchesCategory && matchesLocation;
+      let matchesExpiry = true;
+      if (activeFilters.expiry) {
+        const days = daysUntilExpiry(item.expiry);
+        if (activeFilters.expiry === 'expired') matchesExpiry = days !== null && days < 0;
+        else if (activeFilters.expiry === '30') matchesExpiry = days !== null && days >= 0 && days <= 30;
+        else if (activeFilters.expiry === '60') matchesExpiry = days !== null && days >= 0 && days <= 60;
+        else if (activeFilters.expiry === '90') matchesExpiry = days !== null && days >= 0 && days <= 90;
+      }
+      return matchesQuery && matchesStatus && matchesCategory && matchesLocation && matchesExpiry;
     }),
     [query, statusFilter, activeFilters, rows],
   );
@@ -184,12 +198,31 @@ function Estoque() {
     setCurrentPage(1);
   }
 
-  function handleStockMovement(type, movement) {
+  async function handleStockMovement(type, movement) {
+    try {
+      if (type === 'stockIn') {
+        await request('estoque.addLot', {
+          produto_id: selectedItem?.dbId || null,
+          lote: movement.lote,
+          quantidade: movement.quantity,
+          data_validade: movement.dataValidade,
+          preco_custo: movement.precoCusto || null,
+          localizacao: movement.localizacao || null,
+        });
+      } else {
+        await request('estoque.deduct', {
+          produto_id: selectedItem?.dbId || null,
+          quantidade: movement.quantity,
+          motivo: movement.reason,
+        });
+      }
+    } catch {
+      // IPC unavailable — fall through to mock update
+    }
     setRows((current) => {
       if (type === 'stockIn') {
         return addStockQuantity(current, selectedItem.id, movement.quantity, movement.reason);
       }
-
       return removeStockQuantity(current, selectedItem.id, movement.quantity, movement.reason);
     });
     closeModal();
@@ -248,12 +281,39 @@ function Estoque() {
     closeModal();
   }
 
+  const expiryAlerts = useMemo(() => buildExpiryAlerts(rows), [rows]);
+
+  function applyExpiryQuickFilter(value) {
+    setActiveFilters((prev) => ({ ...prev, expiry: prev.expiry === value ? '' : value }));
+    setCurrentPage(1);
+  }
+
   return (
     <section className="stock-screen">
       <div className="stock-summary">
         <SummaryCard title="Total de Produtos" value={metrics.totalProducts} icon={PackagePlus} />
         <SummaryCard title="Itens Baixo Estoque" value={metrics.lowStock} icon={AlertTriangle} tone="warning" />
         <SummaryCard title="Itens fora de Estoque" value={metrics.outOfStock} icon={XCircle} tone="danger" />
+        {expiryAlerts.expired > 0 && (
+          <SummaryCard
+            title="Produtos Vencidos"
+            value={expiryAlerts.expired}
+            icon={AlertTriangle}
+            tone="danger"
+            onClick={() => applyExpiryQuickFilter('expired')}
+            active={activeFilters.expiry === 'expired'}
+          />
+        )}
+        {expiryAlerts.critical > 0 && (
+          <SummaryCard
+            title="Vencem em 30 dias"
+            value={expiryAlerts.critical}
+            icon={AlertTriangle}
+            tone="warning"
+            onClick={() => applyExpiryQuickFilter('30')}
+            active={activeFilters.expiry === '30'}
+          />
+        )}
       </div>
 
       <div className="stock-category-carousel">
@@ -291,6 +351,7 @@ function Estoque() {
             <button type="button" onClick={() => openModal('product')}><PlusCircle size={17} /> Novo Produto</button>
             <button type="button" onClick={() => openModal('importProducts')}><Upload size={17} /> Importar</button>
             <button type="button" onClick={() => openModal('inventory')}><ClipboardList size={17} /> Inventario</button>
+            <button type="button" onClick={() => openModal('prices')}><Tags size={17} /> Preços</button>
             <button type="button" onClick={() => openModal('category')}><Tags size={17} /> Categoria</button>
             <button type="button" onClick={() => openModal('subcategory')}><Tags size={17} /> Subcategoria</button>
             <button type="button" onClick={() => openModal('filter')}><Filter size={17} /> Filtrar</button>
@@ -313,14 +374,18 @@ function Estoque() {
             </tr>
           </thead>
           <tbody>
-            {listPage.rows.map((item) => (
-              <tr key={item.id}>
+            {listPage.rows.map((item) => {
+              const expiryStatus = getExpiryStatus(item.expiry);
+              return (
+              <tr key={item.id} className={expiryStatus !== 'ok' && expiryStatus !== 'unknown' ? `row-expiry-${expiryStatus}` : undefined}>
                 <td>{item.id}</td>
                 <td>{item.name}</td>
                 <td>{item.category}</td>
                 <td>{item.quantity}</td>
                 <td>{formatKwanza(item.price).replace('KZ ', '')}</td>
-                <td>{item.expiry}</td>
+                <td>
+                  <span className={`expiry-cell expiry-${expiryStatus}`}>{item.expiry}</span>
+                </td>
                 <td><span className={getStockStatusClass(item.status)}>{item.status}</span></td>
                 <td>{item.location}</td>
                 <td className="stock-options-menu-cell">
@@ -328,12 +393,17 @@ function Estoque() {
                     type="button"
                     className="icon-button stock-more-button"
                     aria-label={`Opcoes para ${item.name}`}
-                    onClick={() => setOpenActionsId((current) => (current === item.id ? null : item.id))}
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const spaceBelow = window.innerHeight - rect.bottom;
+                      setMenuOpenUp(spaceBelow < 200);
+                      setOpenActionsId((current) => (current === item.id ? null : item.id));
+                    }}
                   >
                     <MoreVertical size={18} />
                   </button>
                   {openActionsId === item.id && (
-                    <div className="stock-row-menu">
+                    <div className={`stock-row-menu${menuOpenUp ? ' open-up' : ''}`}>
                       <button type="button" onClick={() => openModal('viewProduct', item)}><Eye size={15} /> Ver</button>
                       <button type="button" onClick={() => openModal('stockIn', item)}><PlusCircle size={15} /> Quantidade</button>
                       <button type="button" onClick={() => openModal('stockOut', item)}><MinusCircle size={15} /> Baixa</button>
@@ -343,7 +413,8 @@ function Estoque() {
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
 
@@ -399,9 +470,10 @@ function Estoque() {
   );
 }
 
-function SummaryCard({ title, value, icon: Icon, tone = '' }) {
+function SummaryCard({ title, value, icon: Icon, tone = '', onClick, active = false }) {
+  const classes = ['stock-total-card', onClick ? 'clickable' : '', active ? 'active-filter' : ''].filter(Boolean).join(' ');
   return (
-    <div className="stock-total-card">
+    <div className={classes} onClick={onClick} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}>
       <span className={`metric-icon ${tone}`}><Icon size={42} /></span>
       <div>
         <h2>{title}</h2>
@@ -417,6 +489,9 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
   const [movementQuantity, setMovementQuantity] = useState('');
   const [movementReason, setMovementReason] = useState('');
   const [movementNote, setMovementNote] = useState('');
+  const [movementLote, setMovementLote] = useState('');
+  const [movementValidade, setMovementValidade] = useState('');
+  const [movementCusto, setMovementCusto] = useState('');
   const [inventoryCounts, setInventoryCounts] = useState({});
   const [inventoryResult, setInventoryResult] = useState(null);
   const [showInventoryPrint, setShowInventoryPrint] = useState(false);
@@ -447,9 +522,37 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
   }));
 
   const [filterForm, setFilterForm] = useState({ category: '', location: '', expiry: '' });
+  const [priceRows, setPriceRows] = useState([]);
+  const [priceQuery, setPriceQuery] = useState('');
+  const [priceEdits, setPriceEdits] = useState({});
+  const [priceSaving, setPriceSaving] = useState(null);
+
+  const isPrices = type === 'prices';
+
+  useEffect(() => {
+    if (!isPrices) return;
+    request('estoque.listPrices', {}).then((data) => setPriceRows(data || [])).catch(() => {});
+  }, [isPrices]);
 
   function setPF(key, val) { setProductForm(p => ({ ...p, [key]: val })); }
   function setFF(key, val) { setFilterForm(p => ({ ...p, [key]: val })); }
+
+  async function savePrice(produtoId) {
+    const edit = priceEdits[produtoId];
+    if (!edit) return;
+    setPriceSaving(produtoId);
+    try {
+      const updated = await request('estoque.updatePrice', {
+        produto_id: produtoId,
+        preco_venda: edit.preco_venda !== undefined ? Number(edit.preco_venda) : undefined,
+        preco_custo: edit.preco_custo !== undefined ? Number(edit.preco_custo) : undefined,
+      });
+      setPriceRows((rows) => rows.map((r) => r.id === updated.id ? { ...r, ...updated } : r));
+      setPriceEdits((e) => { const next = { ...e }; delete next[produtoId]; return next; });
+    } catch { /* silent */ } finally {
+      setPriceSaving(null);
+    }
+  }
 
   function saveProduct() {
     onSaveProduct?.(productForm, item?.id ?? null);
@@ -503,7 +606,13 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
 
   function submitStockMovement() {
     const reason = isStockOut ? movementReason : movementNote;
-    onStockMovement(type, { quantity: movementQuantity, reason });
+    onStockMovement(type, {
+      quantity: movementQuantity,
+      reason,
+      lote: movementLote,
+      dataValidade: movementValidade,
+      precoCusto: movementCusto,
+    });
   }
 
   function updateImportMode(mode) {
@@ -614,15 +723,116 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
               {isStockOut ? (
                 <OptionSelect label="Motivo da baixa" value={movementReason} options={STOCK_OUT_REASONS} onChange={setMovementReason} />
               ) : (
-                <label>
-                  Origem ou observação
-                  <input
-                    value={movementNote}
-                    onChange={(event) => setMovementNote(event.target.value)}
-                  />
-                </label>
+                <>
+                  <label>
+                    Lote (opcional — gerado auto se vazio)
+                    <input
+                      value={movementLote}
+                      onChange={(event) => setMovementLote(event.target.value)}
+                      placeholder="Ex: LOTE-2026-01"
+                    />
+                  </label>
+                  <label>
+                    Data de validade *
+                    <input
+                      type="date"
+                      value={movementValidade}
+                      onChange={(event) => setMovementValidade(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Preço de custo (KZ)
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={movementCusto}
+                      onChange={(event) => setMovementCusto(event.target.value)}
+                      placeholder="Actualiza preço de custo"
+                    />
+                  </label>
+                  <label>
+                    Origem ou observação
+                    <input
+                      value={movementNote}
+                      onChange={(event) => setMovementNote(event.target.value)}
+                    />
+                  </label>
+                </>
               )}
             </>
+          )}
+
+          {isPrices && (
+            <div className="prices-panel">
+              <div className="prices-search-row">
+                <label className="compact-search">
+                  <Search size={15} />
+                  <input
+                    placeholder="Pesquisar produto"
+                    value={priceQuery}
+                    onChange={(e) => setPriceQuery(e.target.value)}
+                  />
+                </label>
+              </div>
+              <table className="prices-table">
+                <thead>
+                  <tr>
+                    <th>Produto</th>
+                    <th>Stock</th>
+                    <th>Preço venda (KZ)</th>
+                    <th>Preço custo (KZ)</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priceRows
+                    .filter((r) => !priceQuery || r.nome.toLowerCase().includes(priceQuery.toLowerCase()))
+                    .map((r) => {
+                      const edit = priceEdits[r.id] || {};
+                      const isEditing = Boolean(priceEdits[r.id]);
+                      return (
+                        <tr key={r.id}>
+                          <td>{r.nome}</td>
+                          <td>{r.totalStock}</td>
+                          <td>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              defaultValue={r.preco_venda}
+                              onChange={(e) => setPriceEdits((prev) => ({ ...prev, [r.id]: { ...prev[r.id], preco_venda: e.target.value } }))}
+                              className="price-input"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              defaultValue={r.preco_custo}
+                              onChange={(e) => setPriceEdits((prev) => ({ ...prev, [r.id]: { ...prev[r.id], preco_custo: e.target.value } }))}
+                              className="price-input"
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="soft-button"
+                              style={{ fontSize: 12, padding: '4px 10px' }}
+                              disabled={priceSaving === r.id}
+                              onClick={() => savePrice(r.id)}
+                            >
+                              {priceSaving === r.id ? '...' : 'Guardar'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+              {!priceRows.length ? <div className="empty-state"><Tags size={22} /><strong>Nenhum produto encontrado</strong></div> : null}
+            </div>
           )}
 
           {isProductForm && (
@@ -740,8 +950,14 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
               </label>
               <OptionSelect label="Localização" value={filterForm.location} options={options.locations} onChange={v => setFF('location', v)} />
               <label>
-                <span>Validade até</span>
-                <input type="date" value={filterForm.expiry} onChange={e => setFF('expiry', e.target.value)} />
+                <span>Validade</span>
+                <select value={filterForm.expiry} onChange={e => setFF('expiry', e.target.value)}>
+                  <option value="">Todos</option>
+                  <option value="expired">Vencidos</option>
+                  <option value="30">Vencem em 30 dias</option>
+                  <option value="60">Vencem em 60 dias</option>
+                  <option value="90">Vencem em 90 dias</option>
+                </select>
               </label>
             </>
           )}
@@ -754,7 +970,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
               type="button"
               className="primary-button"
               onClick={submitStockMovement}
-              disabled={!movementQuantity || (isStockOut && !movementReason)}
+              disabled={!movementQuantity || (isStockOut && !movementReason) || (isStockIn && !movementValidade)}
             >
               {isStockIn ? 'Adicionar' : 'Confirmar Baixa'}
             </button>

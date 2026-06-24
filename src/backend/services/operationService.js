@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { getModels } = require('../database');
 
 const STATUS_OPEN = 'Aberto';
@@ -140,6 +141,11 @@ function calculateCashDifference(record, finalBalance) {
   return roundToCents(finalBalance - expected);
 }
 
+function calculateCashDifferenceWithTotals(saldoInicial, finalBalance, totalVendas, totalDespesas, totalPerdas) {
+  const expected = saldoInicial + totalVendas - totalDespesas - totalPerdas;
+  return roundToCents(finalBalance - expected);
+}
+
 function serializeDay(day) {
   if (!day) {
     return null;
@@ -159,6 +165,7 @@ function serializeDay(day) {
     observacao_abertura: plain.observacao_abertura || null,
     observacao_fechamento: plain.observacao_fechamento || null,
     aberto_por_usuario_id: plain.aberto_por_usuario_id || null,
+    aberto_por_nome: plain.abertoPor?.nome_completo || null,
     fechado_por_usuario_id: plain.fechado_por_usuario_id || null,
     aberto_em: asIsoTimestamp(plain.aberto_em),
     fechado_em: asIsoTimestamp(plain.fechado_em),
@@ -185,6 +192,7 @@ function serializeShift(shift) {
     observacao_abertura: plain.observacao_abertura || null,
     observacao_fechamento: plain.observacao_fechamento || null,
     aberto_por_usuario_id: plain.aberto_por_usuario_id || null,
+    aberto_por_nome: plain.abertoPor?.nome_completo || null,
     fechado_por_usuario_id: plain.fechado_por_usuario_id || null,
     aberto_em: asIsoTimestamp(plain.aberto_em),
     fechado_em: asIsoTimestamp(plain.fechado_em),
@@ -212,6 +220,62 @@ async function findOpenShift(dayId = null, options = {}) {
     order: [['aberto_em', 'DESC'], ['id', 'DESC']],
     ...options,
   });
+}
+
+async function calculateShiftTotals(shiftRecord) {
+  const { Venda, TransacaoFinanceira } = getModels();
+  const sinceTime = shiftRecord.aberto_em;
+
+  const [totalVendas, totalDespesas, totalPerdas] = await Promise.all([
+    Venda.sum('total', {
+      where: {
+        data_venda: { [Op.gte]: sinceTime },
+        status: { [Op.ne]: 'Cancelada' },
+      },
+    }).then((v) => roundToCents(Number(v) || 0)),
+    TransacaoFinanceira.sum('valor', {
+      where: {
+        tipo: 'expense',
+        data_transacao: { [Op.gte]: sinceTime },
+      },
+    }).then((v) => roundToCents(Number(v) || 0)),
+    TransacaoFinanceira.sum('valor', {
+      where: {
+        tipo: 'loss',
+        data_transacao: { [Op.gte]: sinceTime },
+      },
+    }).then((v) => roundToCents(Number(v) || 0)),
+  ]);
+
+  return { totalVendas, totalDespesas, totalPerdas };
+}
+
+async function calculateDayTotals(dayRecord) {
+  const { Venda, TransacaoFinanceira } = getModels();
+  const sinceTime = dayRecord.aberto_em;
+
+  const [totalVendas, totalDespesas, totalPerdas] = await Promise.all([
+    Venda.sum('total', {
+      where: {
+        data_venda: { [Op.gte]: sinceTime },
+        status: { [Op.ne]: 'Cancelada' },
+      },
+    }).then((v) => roundToCents(Number(v) || 0)),
+    TransacaoFinanceira.sum('valor', {
+      where: {
+        tipo: 'expense',
+        data_transacao: { [Op.gte]: sinceTime },
+      },
+    }).then((v) => roundToCents(Number(v) || 0)),
+    TransacaoFinanceira.sum('valor', {
+      where: {
+        tipo: 'loss',
+        data_transacao: { [Op.gte]: sinceTime },
+      },
+    }).then((v) => roundToCents(Number(v) || 0)),
+  ]);
+
+  return { totalVendas, totalDespesas, totalPerdas };
 }
 
 async function openDay({ actorUserId, data = {} }) {
@@ -262,16 +326,28 @@ async function closeDayMutation({ actorUserId, data = {} }) {
   }
 
   const finalBalance = normalizeMoney(data.saldo_final_informado);
+  const { totalVendas, totalDespesas, totalPerdas } = await calculateDayTotals(openDayRecord);
+
   try {
     await openDayRecord.update({
       status: STATUS_CLOSED,
       saldo_final_informado: finalBalance,
-      diferenca_caixa: calculateCashDifference(openDayRecord, finalBalance),
+      total_vendas: totalVendas,
+      total_despesas: totalDespesas,
+      total_perdas: totalPerdas,
+      diferenca_caixa: calculateCashDifferenceWithTotals(
+        asNumber(openDayRecord.saldo_inicial),
+        finalBalance,
+        totalVendas,
+        totalDespesas,
+        totalPerdas,
+      ),
       observacao_fechamento: normalizeOptionalText(data.observacao_fechamento),
       fechado_por_usuario_id: actorUserId || null,
       fechado_em: new Date(),
     });
-  } catch {
+  } catch (error) {
+    console.error('Erro ao fechar o dia operacional:', error);
     throw createOperationError(MESSAGES.CLOSE_DAY_DB_ERROR);
   }
 
@@ -332,16 +408,28 @@ async function closeShiftMutation({ actorUserId, data = {} }) {
   }
 
   const finalBalance = normalizeMoney(data.saldo_final_informado);
+  const { totalVendas, totalDespesas, totalPerdas } = await calculateShiftTotals(openShiftRecord);
+
   try {
     await openShiftRecord.update({
       status: STATUS_CLOSED,
       saldo_final_informado: finalBalance,
-      diferenca_caixa: calculateCashDifference(openShiftRecord, finalBalance),
+      total_vendas: totalVendas,
+      total_despesas: totalDespesas,
+      total_perdas: totalPerdas,
+      diferenca_caixa: calculateCashDifferenceWithTotals(
+        asNumber(openShiftRecord.saldo_inicial),
+        finalBalance,
+        totalVendas,
+        totalDespesas,
+        totalPerdas,
+      ),
       observacao_fechamento: normalizeOptionalText(data.observacao_fechamento),
       fechado_por_usuario_id: actorUserId || null,
       fechado_em: new Date(),
     });
-  } catch {
+  } catch (error) {
+    console.error('Erro ao fechar o turno operacional:', error);
     throw createOperationError(MESSAGES.CLOSE_SHIFT_DB_ERROR);
   }
 
@@ -349,7 +437,12 @@ async function closeShiftMutation({ actorUserId, data = {} }) {
 }
 
 async function getOperationalState() {
-  const day = await findOpenDay();
+  const { Usuario } = getModels();
+  const userInclude = [
+    { model: Usuario, as: 'abertoPor', attributes: ['id', 'nome_completo'], required: false },
+  ];
+
+  const day = await findOpenDay({ include: userInclude });
   if (!day) {
     return {
       day: null,
@@ -359,7 +452,7 @@ async function getOperationalState() {
     };
   }
 
-  const shift = await findOpenShift(day.id);
+  const shift = await findOpenShift(day.id, { include: userInclude });
   if (!shift) {
     return {
       day: serializeDay(day),

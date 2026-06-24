@@ -236,12 +236,37 @@ function defineModels(db) {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     nome_fantasia: { type: DataTypes.STRING, allowNull: false },
     razao_social: { type: DataTypes.STRING },
-    cnpj: { type: DataTypes.STRING, unique: true, allowNull: false },
+    cnpj: { type: DataTypes.STRING },
+    nif: { type: DataTypes.STRING },
     telefone: { type: DataTypes.STRING },
-    email: { type: DataTypes.STRING, unique: true },
+    email: { type: DataTypes.STRING },
     endereco: { type: DataTypes.TEXT },
+    contacto: { type: DataTypes.STRING },
+    ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
+
+  const OrdemCompra = db.define("OrdemCompra", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    numero: { type: DataTypes.STRING, allowNull: false, unique: true },
+    fornecedor_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Fornecedor, key: "id" } },
+    status: { type: DataTypes.STRING, defaultValue: "RASCUNHO", allowNull: false },
+    total: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+    data_emissao: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW },
+    data_entrega_prevista: { type: DataTypes.DATEONLY },
+    observacao: { type: DataTypes.TEXT },
+    usuario_id: { type: DataTypes.INTEGER },
+  }, { tableName: "OrdensCompra" });
+
+  const ItemOrdemCompra = db.define("ItemOrdemCompra", {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    ordem_compra_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: OrdemCompra, key: "id" } },
+    produto_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: Produto, key: "id" } },
+    quantidade: { type: DataTypes.INTEGER, allowNull: false },
+    preco_unitario: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+    quantidade_recebida: { type: DataTypes.INTEGER, defaultValue: 0 },
+    subtotal: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  }, { tableName: "ItensOrdemCompra" });
 
   const Perfil = db.define(
     "Perfil",
@@ -427,6 +452,12 @@ function defineModels(db) {
   TransacaoFinanceira.belongsTo(Fornecedor, { foreignKey: "fornecedor_id" });
   Fornecedor.hasMany(TransacaoFinanceira, { foreignKey: "fornecedor_id" });
 
+  OrdemCompra.belongsTo(Fornecedor, { foreignKey: "fornecedor_id" });
+  Fornecedor.hasMany(OrdemCompra, { foreignKey: "fornecedor_id" });
+  OrdemCompra.hasMany(ItemOrdemCompra, { foreignKey: "ordem_compra_id" });
+  ItemOrdemCompra.belongsTo(OrdemCompra, { foreignKey: "ordem_compra_id" });
+  ItemOrdemCompra.belongsTo(Produto, { foreignKey: "produto_id" });
+
   DiaOperacional.hasMany(TurnoOperacional, {
     foreignKey: "dia_operacional_id",
   });
@@ -504,6 +535,8 @@ function defineModels(db) {
     OpcaoCatalogo,
     AuditoriaConfiguracao,
     ReportSyncQueue,
+    OrdemCompra,
+    ItemOrdemCompra,
   };
 }
 

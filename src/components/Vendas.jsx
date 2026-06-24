@@ -14,6 +14,7 @@ import {
   FileDown,
   Package,
   Printer,
+  RotateCcw,
   Search,
   Smartphone,
   Trash2,
@@ -45,6 +46,8 @@ import {
   resumeHeldSale,
 } from '../data/salesWorkflow.mjs';
 import {
+  buildCancellationResult,
+  canCancelDocument,
   DOCUMENT_STATUSES,
   DOCUMENT_TYPES,
   documentStatusLabels,
@@ -58,6 +61,7 @@ import { request } from '../services/ipcClient';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog, useSetting, useSettings } from '../configuration/SettingsContext';
 import InvoiceA4 from './InvoiceA4';
+import CancellationModal from './CancellationModal';
 
 const paymentMethodIcons = { dinheiro: Banknote, tpa: CreditCard, transferencia: Building2, credito: Smartphone };
 
@@ -110,7 +114,22 @@ function Vendas() {
   const [saleError, setSaleError] = useState('');
   const [recentSaleDocuments, setRecentSaleDocuments] = useState(() => buildRecentSaleDocuments(storedDocuments));
   const [pendingPayment, setPendingPayment] = useState(null);
-  const [docType, setDocType] = useState(DOCUMENT_TYPES.INVOICE);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [docType, setDocType] = useState(DOCUMENT_TYPES.INVOICE_RECEIPT);
+
+  const previewDocNumber = useMemo(() => {
+    const prefixMap = {
+      [DOCUMENT_TYPES.INVOICE]: 'FT',
+      [DOCUMENT_TYPES.INVOICE_RECEIPT]: 'FR',
+      [DOCUMENT_TYPES.RECEIPT]: 'RC',
+      [DOCUMENT_TYPES.PROFORMA]: 'PF',
+      [DOCUMENT_TYPES.CREDIT]: 'CR',
+    };
+    const prefix = prefixMap[docType] ?? 'FT';
+    const year = String(new Date().getFullYear()).slice(-2);
+    const typeCount = recentSaleDocuments.filter((d) => d.type === docType).length + 1;
+    return `${prefix}${String(typeCount).padStart(5, '0')}/${year}`;
+  }, [docType, recentSaleDocuments]);
 
   const visibleProducts = useMemo(
     () => filterProductsForSale(products, activeCategory, productQuery),
@@ -191,6 +210,30 @@ function Vendas() {
     setReceived('');
     setDiscount(0);
     setShowCheckout(false);
+  }
+
+  function handleCancelDocument(reason) {
+    const document = cancelTarget;
+    if (!document || !canCancelDocument(document)) return;
+
+    const cancelledAt = new Date().toISOString();
+    const ncCount = recentSaleDocuments.filter((d) => d.type === DOCUMENT_TYPES.CREDIT_NOTE).length + 1;
+    const year = String(new Date().getFullYear()).slice(-2);
+    const creditNoteNumber = `NC${String(ncCount).padStart(3, '0')}/${year}`;
+
+    const { cancelledDoc, creditNote } = buildCancellationResult(document, {
+      reason,
+      cancelledBy: user?.nome_completo || 'Utilizador',
+      cancelledAt,
+      creditNoteNumber,
+    });
+
+    setRecentSaleDocuments((current) => {
+      const updated = current.map((d) => (d.id === cancelledDoc.id ? cancelledDoc : d));
+      return buildRecentSaleDocuments([creditNote, ...updated]);
+    });
+    setCancelTarget(null);
+    setFinalizedDocument(creditNote);
   }
 
   function choosePaymentMethod(mode) {
@@ -367,6 +410,7 @@ function Vendas() {
             selectedClient={selectedClient}
             summary={summary}
             docType={docType}
+            previewDocNumber={previewDocNumber}
             onDocTypeChange={setDocType}
             onRemoveItem={async (item) => {
               if (await confirmDelete(`o produto ${item.name} da factura`)) {
@@ -387,7 +431,11 @@ function Vendas() {
 
       <HeldSalesTable rows={heldSales} onContinue={resumeSale} onCancel={cancelHeldSale} />
 
-      <RecentSaleDocumentsTable rows={recentSaleDocuments} onOpenDocument={(document) => setFinalizedDocument(document)} />
+      <RecentSaleDocumentsTable
+        rows={recentSaleDocuments}
+        onOpenDocument={(document) => setFinalizedDocument(document)}
+        onCancelDocument={(document) => setCancelTarget(document)}
+      />
 
       {finalizedDocument ? (
         <FinalizedSalePreview document={finalizedDocument} snapshot={snapshot} onClose={() => setFinalizedDocument(null)} />
@@ -419,6 +467,14 @@ function Vendas() {
             </div>
           </div>
         </div>
+      )}
+
+      {cancelTarget && (
+        <CancellationModal
+          document={cancelTarget}
+          onConfirm={handleCancelDocument}
+          onClose={() => setCancelTarget(null)}
+        />
       )}
 
       {showClientPopup && (
@@ -520,6 +576,7 @@ function InvoiceDetails({
   selectedClient,
   summary,
   docType,
+  previewDocNumber,
   onDocTypeChange,
   onRemoveItem,
   onChangeQuantity,
@@ -557,7 +614,7 @@ function InvoiceDetails({
         </span>
         <Search size={22} />
       </button>
-      <h3>{currentDocLabel} n.º FAT027/26</h3>
+      <h3>{currentDocLabel} n.º {previewDocNumber}</h3>
 
       <div className="cart-list">
         {cart.map((item) => (
@@ -683,7 +740,16 @@ function HeldInvoiceItems({ items }) {
   return <span className="held-items-list">{items}</span>;
 }
 
-function RecentSaleDocumentsTable({ rows, onOpenDocument }) {
+const DOC_STATUS_CLASS = {
+  [DOCUMENT_STATUSES.PAID]: 'paid',
+  [DOCUMENT_STATUSES.ISSUED]: 'issued',
+  [DOCUMENT_STATUSES.CANCELLED]: 'cancelled',
+  [DOCUMENT_STATUSES.PENDING]: 'waiting',
+  [DOCUMENT_STATUSES.DRAFT]: 'waiting',
+  [DOCUMENT_STATUSES.CONVERTED]: 'issued',
+};
+
+function RecentSaleDocumentsTable({ rows, onOpenDocument, onCancelDocument }) {
   return (
     <div className="table-panel recent-sale-documents-table">
       <div className="held-sales-title">
@@ -702,27 +768,42 @@ function RecentSaleDocumentsTable({ rows, onOpenDocument }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((document) => (
+          {rows.map((document) => {
+            const statusClass = DOC_STATUS_CLASS[document.status] || 'issued';
+            const cancellable = canCancelDocument(document);
+            return (
             <tr key={document.id || document.number}>
               <td>{document.number}</td>
               <td>{documentTypeLabels[document.type] || document.type}</td>
               <td>{document.clientName || 'Consumidor final'}</td>
               <td>{document.issueDate}</td>
               <td>{formatKwanza(document.total).replace('KZ ', '')}</td>
-              <td><span className="status paid">{documentStatusLabels[document.status] || document.status}</span></td>
-              <td className="held-actions">
+              <td><span className={`status ${statusClass}`}>{documentStatusLabels[document.status] || document.status}</span></td>
+              <td className="options-cell">
                 <button
                   type="button"
-                  className="held-icon-action continue"
+                  className="icon-button"
                   aria-label={`Verificar ou reimprimir ${document.number}`}
                   title="Verificar ou reimprimir"
                   onClick={() => onOpenDocument(document)}
                 >
-                  <Printer size={18} />
+                  <Printer size={16} />
                 </button>
+                {cancellable && (
+                  <button
+                    type="button"
+                    className="icon-button danger"
+                    aria-label={`Anular ${document.number}`}
+                    title="Anular documento"
+                    onClick={() => onCancelDocument(document)}
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                )}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
       {!rows.length && (

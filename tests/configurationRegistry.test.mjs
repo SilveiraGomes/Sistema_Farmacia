@@ -62,6 +62,7 @@ const expectedSettings = {
   },
   'alerts.dashboardEnabled': { group: 'alerts', type: 'boolean', defaultValue: true },
   'alerts.defaultMessage': { group: 'alerts', type: 'text', defaultValue: '' },
+  'alerts.sessionTimeoutMinutes': { group: 'alerts', type: 'number', min: 0, defaultValue: 30 },
   'backup.options': {
     group: 'backup',
     type: 'object',
@@ -86,6 +87,11 @@ const expectedSettings = {
     group: 'documents',
     type: 'object',
     defaultValue: { previewBeforePrint: true, copies: 1 },
+  },
+  'appearance.startFullscreen': {
+    group: 'appearance',
+    type: 'boolean',
+    defaultValue: true,
   },
 };
 

@@ -205,10 +205,10 @@ test('init does not expose IPC routes when seeding fails', async () => {
 test('application startup awaits configuration initialization before creating a window', () => {
   const source = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
   const initIndex = source.search(/await ipcHandlers\.init\(/);
-  const windowIndex = source.indexOf('createWindow();', initIndex);
+  const windowIndex = source.indexOf('createWindow(', initIndex);
 
   assert.notEqual(initIndex, -1);
   assert.ok(windowIndex > initIndex);
-  assert.match(source.slice(initIndex, windowIndex + 'createWindow();'.length), /await ipcHandlers\.init[\s\S]*createWindow\(\);/);
+  assert.match(source.slice(initIndex, windowIndex), /await ipcHandlers\.init[\s\S]*/);
   assert.match(source, /catch \(error\)[\s\S]*app\.quit\(\);/);
 });

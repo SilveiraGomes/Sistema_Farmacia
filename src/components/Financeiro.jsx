@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   AlertTriangle,
   ArrowDownCircle,
   ArrowUpCircle,
   Calendar,
+  CheckCircle,
   Clock,
   CreditCard,
   Download,
@@ -17,6 +18,7 @@ import {
   Trash2,
   WalletCards,
 } from 'lucide-react';
+import { request } from '../services/ipcClient.js';
 import {
   buildFinancialOverview,
   financeExpenses,
@@ -83,6 +85,23 @@ function Financeiro() {
     }, { period, referenceDate, shift }),
     [manualExpenses, manualLosses, manualRevenues, period, referenceDate, shift],
   );
+
+  const [contasPagar, setContasPagar] = useState([]);
+  const [contasLoading, setContasLoading] = useState(true);
+
+  useEffect(() => {
+    request('financeiro.contasPagar', {})
+      .then((data) => setContasPagar(data || []))
+      .catch(() => {})
+      .finally(() => setContasLoading(false));
+  }, []);
+
+  async function marcarPago(id) {
+    try {
+      await request('financeiro.marcarPago', { id });
+      setContasPagar((prev) => prev.filter((c) => c.id !== id));
+    } catch { /* silent */ }
+  }
 
   function openManualEntryModal() {
     if (!operation.canOperate) return;
@@ -375,50 +394,74 @@ function Financeiro() {
               <button type="button" onClick={() => setShowModal(false)}>x</button>
             </div>
             <div className="form-grid">
-              <select value={manualEntry.type} onChange={(event) => updateManualEntry('type', event.target.value)} aria-label="Tipo de lancamento">
-                <option value="expense">Gasto do negocio</option>
-                <option value="revenue">Receita extra</option>
-                <option value="loss">Perda manual</option>
-              </select>
+              <label>
+                <span>Tipo de lançamento</span>
+                <select value={manualEntry.type} onChange={(event) => updateManualEntry('type', event.target.value)}>
+                  <option value="expense">Gasto do negócio</option>
+                  <option value="revenue">Receita extra</option>
+                  <option value="loss">Perda manual</option>
+                </select>
+              </label>
               {manualEntry.type === 'loss' ? (
-                <select value={manualEntry.reason} onChange={(event) => updateManualEntry('reason', event.target.value)} aria-label="Motivo da perda">
-                  {lossCatalog.map((reason) => <option key={reason.code} value={reason.name}>{reason.name}</option>)}
-                </select>
+                <label>
+                  <span>Motivo da perda</span>
+                  <select value={manualEntry.reason} onChange={(event) => updateManualEntry('reason', event.target.value)}>
+                    {lossCatalog.map((reason) => <option key={reason.code} value={reason.name}>{reason.name}</option>)}
+                  </select>
+                </label>
               ) : (
-                <select value={manualEntry.category} onChange={(event) => updateManualEntry('category', event.target.value)} aria-label="Categoria do lancamento">
-                  {(manualEntry.type === 'expense' ? expenseCatalog : revenueCatalog).map((category) => (
-                    <option key={category.code} value={category.name}>{category.name}</option>
-                  ))}
-                </select>
+                <label>
+                  <span>Categoria</span>
+                  <select value={manualEntry.category} onChange={(event) => updateManualEntry('category', event.target.value)}>
+                    {(manualEntry.type === 'expense' ? expenseCatalog : revenueCatalog).map((category) => (
+                      <option key={category.code} value={category.name}>{category.name}</option>
+                    ))}
+                  </select>
+                </label>
               )}
-              <input
-                placeholder={manualEntry.type === 'loss' ? 'Produto ou item perdido' : 'Descricao'}
-                value={manualEntry.description}
-                onChange={(event) => updateManualEntry('description', event.target.value)}
-              />
-              <input
-                placeholder="Valor"
-                type="number"
-                value={manualEntry.value}
-                onChange={(event) => updateManualEntry('value', event.target.value)}
-              />
-              <input type="date" value={manualEntry.date} onChange={(event) => updateManualEntry('date', event.target.value)} />
+              <label className="form-span-2">
+                <span>{manualEntry.type === 'loss' ? 'Produto ou item perdido' : 'Descrição'}</span>
+                <input
+                  value={manualEntry.description}
+                  onChange={(event) => updateManualEntry('description', event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Valor (AKZ)</span>
+                <input
+                  type="number"
+                  value={manualEntry.value}
+                  onChange={(event) => updateManualEntry('value', event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Data</span>
+                <input type="date" value={manualEntry.date} onChange={(event) => updateManualEntry('date', event.target.value)} />
+              </label>
               {manualEntry.type === 'loss' ? (
                 <>
-                  <input
-                    placeholder="Quantidade"
-                    type="number"
-                    value={manualEntry.quantity}
-                    onChange={(event) => updateManualEntry('quantity', event.target.value)}
-                  />
-                  <select value={manualEntry.shift} onChange={(event) => updateManualEntry('shift', event.target.value)} aria-label="Turno da perda">
-                    {shiftCatalog.map((option) => <option key={option.code} value={option.name}>{option.name}</option>)}
-                  </select>
+                  <label>
+                    <span>Quantidade</span>
+                    <input
+                      type="number"
+                      value={manualEntry.quantity}
+                      onChange={(event) => updateManualEntry('quantity', event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Turno</span>
+                    <select value={manualEntry.shift} onChange={(event) => updateManualEntry('shift', event.target.value)}>
+                      {shiftCatalog.map((option) => <option key={option.code} value={option.name}>{option.name}</option>)}
+                    </select>
+                  </label>
                 </>
               ) : (
-                <select value={manualEntry.status} onChange={(event) => updateManualEntry('status', event.target.value)} aria-label="Status do lancamento">
-                  {statusCatalog.map((option) => <option key={option.code} value={option.name}>{option.name}</option>)}
-                </select>
+                <label>
+                  <span>Status</span>
+                  <select value={manualEntry.status} onChange={(event) => updateManualEntry('status', event.target.value)}>
+                    {statusCatalog.map((option) => <option key={option.code} value={option.name}>{option.name}</option>)}
+                  </select>
+                </label>
               )}
             </div>
             <div className="modal-actions">
@@ -435,6 +478,42 @@ function Financeiro() {
           </div>
         </div>
       )}
+
+      {contasPagar.length > 0 || contasLoading ? (
+        <section className="panel payables-panel">
+          <div className="payables-header">
+            <h3>Contas a Pagar</h3>
+            <span className="finance-pill">{contasPagar.length} pendente{contasPagar.length !== 1 ? 's' : ''}</span>
+          </div>
+          {contasLoading ? (
+            <div className="empty-state"><span>A carregar...</span></div>
+          ) : (
+            contasPagar.map((c) => {
+              const isOverdue = c.data_vencimento && new Date(c.data_vencimento) < new Date();
+              return (
+                <div key={c.id} className="payable-row">
+                  <div>
+                    <div className="payable-desc">{c.descricao || c.categoria}</div>
+                    {c.fornecedor ? <div className="payable-meta">{c.fornecedor}</div> : null}
+                  </div>
+                  <div className={`payable-due${isOverdue ? ' overdue' : ''}`}>
+                    {c.data_vencimento ? new Date(c.data_vencimento).toLocaleDateString('pt-AO') : '—'}
+                  </div>
+                  <div className="payable-amount">{formatKwanza(c.valor)}</div>
+                  <button
+                    type="button"
+                    className="soft-button"
+                    style={{ fontSize: 12, padding: '4px 10px', display: 'flex', gap: 4, alignItems: 'center' }}
+                    onClick={() => marcarPago(c.id)}
+                  >
+                    <CheckCircle size={13} /> Pago
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </section>
+      ) : null}
     </section>
   );
 }

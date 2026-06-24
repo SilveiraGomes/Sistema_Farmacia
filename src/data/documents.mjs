@@ -175,6 +175,75 @@ export const documents = Object.freeze([
   },
 ]);
 
+const CANCELLABLE_TYPES = new Set([
+  DOCUMENT_TYPES.INVOICE,
+  DOCUMENT_TYPES.INVOICE_RECEIPT,
+  DOCUMENT_TYPES.RECEIPT,
+  DOCUMENT_TYPES.CREDIT,
+]);
+
+export function canCancelDocument(document) {
+  if (!document) return false;
+  if (document.status === DOCUMENT_STATUSES.CANCELLED) return false;
+  return CANCELLABLE_TYPES.has(document.type);
+}
+
+/**
+ * Marks a document as cancelled and produces a matching credit note.
+ * Returns { cancelledDoc, creditNote } — both are plain objects ready to
+ * be merged into the documents list.
+ */
+export function buildCancellationResult(document, { reason, cancelledBy, cancelledAt, creditNoteNumber }) {
+  const cancelledDoc = {
+    ...document,
+    items: document.items.map((item) => ({ ...item })),
+    status: DOCUMENT_STATUSES.CANCELLED,
+    cancellationReason: reason,
+    cancelledBy,
+    cancelledAt,
+    events: [
+      ...(document.events || []).map((e) => ({ ...e })),
+      { action: 'ANULADO', userName: cancelledBy, date: cancelledAt, details: reason },
+    ],
+  };
+
+  const creditNote = {
+    id: `cn-${Date.now()}`,
+    number: creditNoteNumber,
+    type: DOCUMENT_TYPES.CREDIT_NOTE,
+    status: DOCUMENT_STATUSES.ISSUED,
+    clientName: document.clientName,
+    clientTaxId: document.clientTaxId || '',
+    clientPhone: document.clientPhone || '',
+    userName: cancelledBy,
+    issueDate: cancelledAt.slice(0, 10),
+    dueDate: cancelledAt.slice(0, 10),
+    total: document.total,
+    subtotal: document.subtotal ?? document.total,
+    discount: document.discount ?? 0,
+    tax: document.tax ?? 0,
+    retention: 0,
+    saleId: null,
+    originDocumentId: document.id,
+    paymentMethod: '',
+    cancellationReason: '',
+    cancelledBy: '',
+    cancelledAt: '',
+    items: document.items.map((item) => ({
+      ...item,
+      description: `[NC] ${item.description}`,
+    })),
+    events: [{
+      action: 'EMITIDO',
+      userName: cancelledBy,
+      date: cancelledAt,
+      details: `Nota de crédito por anulação de ${document.number}`,
+    }],
+  };
+
+  return { cancelledDoc, creditNote };
+}
+
 function normalize(value) {
   return String(value ?? '').trim().toLowerCase();
 }

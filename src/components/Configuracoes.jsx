@@ -8,6 +8,7 @@ import {
   Database,
   FileText,
   ImagePlus,
+  Monitor,
   Save,
   Users,
 } from "lucide-react";
@@ -28,6 +29,7 @@ const SECTIONS = [
   { id: "references", label: "Clientes e documentos", icon: Users },
   { id: "alerts", label: "Alertas e backup", icon: BellRing },
   { id: "integracoes", label: "Integrações", icon: CloudUpload },
+  { id: "appearance", label: "Aparência", icon: Monitor },
 ];
 
 const CATALOGS_BY_SECTION = {
@@ -97,10 +99,15 @@ function snapshotValues(snapshot, section) {
         ]),
       ),
       "backup.options": snapshot.settings.backup.options.value,
+      "alerts.sessionTimeoutMinutes": snapshot.settings.alerts.sessionTimeoutMinutes?.value ?? 30,
     };
   if (section === "integracoes")
     return {
       'reports.googleSheets': snapshot.settings.reports.googleSheets.value,
+    };
+  if (section === "appearance")
+    return {
+      "appearance.startFullscreen": snapshot.settings.appearance?.startFullscreen?.value ?? true,
     };
   return {};
 }
@@ -502,8 +509,36 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
           }
           {...{ draft, update, disabled }}
         />
+        <SettingField label="Timeout de sessão (minutos)" help="0 = sem timeout. Após inactividade a sessão fecha automaticamente.">
+          <input
+            type="number"
+            min="0"
+            max="480"
+            step="5"
+            disabled={disabled}
+            value={draft["alerts.sessionTimeoutMinutes"] ?? 30}
+            onChange={(e) => update("alerts.sessionTimeoutMinutes", Number(e.target.value))}
+          />
+        </SettingField>
         <ManualBackupButton />
-        <RestoreBackupPanel />
+      </div>
+    );
+  }
+  if (section === "appearance") {
+    return (
+      <div className="settings-form-grid">
+        <SettingField
+          label="Iniciar em Fullscreen"
+          help="A aplicação abre em ecrã inteiro automaticamente ao iniciar"
+        >
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={Boolean(draft["appearance.startFullscreen"])}
+            onChange={(e) => update("appearance.startFullscreen", e.target.checked)}
+          />
+        </SettingField>
+        <FullscreenToggleButton />
       </div>
     );
   }
@@ -668,50 +703,172 @@ function NumberField({
 function ManualBackupButton() {
   const [status, setStatus] = React.useState(null);
   const [message, setMessage] = React.useState('');
+  const [backups, setBackups] = React.useState([]);
+  const [loadingList, setLoadingList] = React.useState(false);
+  const [restoring, setRestoring] = React.useState(null);
+  const [confirmName, setConfirmName] = React.useState(null);
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  async function loadList() {
+    setLoadingList(true);
+    try {
+      const list = await request('backup.list');
+      setBackups(list || []);
+    } catch { /* silent */ } finally {
+      setLoadingList(false);
+    }
+  }
 
   async function doBackup() {
     setStatus('loading');
     setMessage('');
     try {
-      const result = await request('backup.create');
-      if (result?.canceled) { setStatus(null); return; }
+      const result = await request('backup.manual');
       setStatus('success');
-      setMessage(`Backup guardado em: ${result.filePath}`);
+      setMessage(`Backup criado: ${result.name} (${formatBytes(result.size)})`);
+      loadList();
     } catch (err) {
       setStatus('error');
       setMessage(err?.message || 'Erro ao criar backup.');
     }
   }
 
+  async function confirmRestore() {
+    const name = confirmName;
+    setConfirmName(null);
+    setRestoring(name);
+    try {
+      await request('backup.restore', { name });
+      setStatus('success');
+      setMessage('Backup restaurado. Reinicie a aplicação para aplicar as alterações.');
+    } catch (err) {
+      setStatus('error');
+      setMessage(err?.message || 'Erro ao restaurar backup.');
+    } finally {
+      setRestoring(null);
+    }
+  }
+
+  React.useEffect(() => { loadList(); }, []);
+
+  return (
+    <>
+    {confirmName && (
+      <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <div className="modal-card" style={{ maxWidth: 440 }}>
+          <div className="modal-title-row">
+            <h3 style={{ margin: 0 }}>Restaurar backup</h3>
+          </div>
+          <p style={{ margin: '0 0 6px' }}>
+            Vai restaurar o ficheiro <strong>{confirmName}</strong>.
+          </p>
+          <p style={{ margin: '0 0 16px', color: 'var(--danger)', fontSize: '0.88rem' }}>
+            A base de dados actual será substituída. Esta acção não pode ser desfeita.
+          </p>
+          <div className="modal-actions" style={{ justifyContent: 'flex-end' }}>
+            <button type="button" className="soft-button" onClick={() => setConfirmName(null)}>Cancelar</button>
+            <button type="button" className="danger-button" onClick={confirmRestore}>Sim, restaurar</button>
+          </div>
+        </div>
+      </div>
+    )}
+    <div style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+        <strong>Backup manual e histórico</strong>
+        <button type="button" className="soft-button" onClick={doBackup} disabled={status === 'loading'}>
+          {status === 'loading' ? 'A criar...' : '+ Fazer backup agora'}
+        </button>
+      </div>
+
+      {status === 'success' && <p style={{ color: 'var(--success)', fontSize: '0.82rem', marginBottom: '6px' }}>{message}</p>}
+      {status === 'error' && <p style={{ color: 'var(--danger)', fontSize: '0.82rem', marginBottom: '6px' }}>{message}</p>}
+
+      {loadingList ? <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>A carregar lista…</p> : (
+        backups.length ? (
+          <table className="backup-history-table">
+            <thead>
+              <tr>
+                <th>Ficheiro</th>
+                <th>Tamanho</th>
+                <th>Data</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {backups.map((b) => (
+                <tr key={b.name}>
+                  <td style={{ fontFamily: 'monospace' }}>{b.name}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--muted)' }}>{formatBytes(b.size)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--muted)' }}>{new Date(b.createdAt).toLocaleString('pt-AO')}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button type="button" className="soft-button" style={{ fontSize: '11px', padding: '3px 8px' }} disabled={!!restoring} onClick={() => setConfirmName(b.name)}>
+                      {restoring === b.name ? '…' : 'Restaurar'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Nenhum backup encontrado.</p>
+      )}
+    </div>
+    </>
+  );
+}
+
+function FullscreenToggleButton() {
+  const [isFullscreen, setIsFullscreen] = React.useState(null);
+  const [status, setStatus] = React.useState(null);
+
+  React.useEffect(() => {
+    request('window.isFullscreen').then((res) => {
+      setIsFullscreen(res?.fullscreen ?? false);
+    }).catch(() => setIsFullscreen(false));
+  }, []);
+
+  async function toggle() {
+    setStatus('loading');
+    try {
+      const next = !isFullscreen;
+      const res = await request('window.setFullscreen', { value: next });
+      setIsFullscreen(res?.fullscreen ?? next);
+      setStatus(null);
+    } catch {
+      setStatus('error');
+    }
+  }
+
   return (
     <div style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
-      <strong style={{ display: 'block', marginBottom: '6px' }}>Backup manual</strong>
+      <strong style={{ display: 'block', marginBottom: '6px' }}>Controlo imediato</strong>
       <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '8px' }}>
-        Cria uma cópia da base de dados actual num ficheiro à sua escolha.
+        Comuta o modo ecrã inteiro sem reiniciar. Pode também usar a tecla <strong>F11</strong>.
       </p>
       <button
         type="button"
         className="soft-button"
-        onClick={doBackup}
-        disabled={status === 'loading'}
+        onClick={toggle}
+        disabled={status === 'loading' || isFullscreen === null}
       >
-        {status === 'loading' ? 'A criar backup...' : 'Fazer backup agora'}
+        {isFullscreen ? 'Sair do Fullscreen' : 'Entrar em Fullscreen'}
       </button>
-      {status === 'success' && (
-        <p style={{ color: 'var(--color-success, #2e7d32)', marginTop: '6px', fontSize: '0.82rem', wordBreak: 'break-all' }}>
-          {message}
-        </p>
-      )}
       {status === 'error' && (
         <p style={{ color: 'var(--color-error, #c0392b)', marginTop: '6px', fontSize: '0.85rem' }}>
-          {message}
+          Não foi possível comutar o fullscreen.
         </p>
       )}
     </div>
   );
 }
 
-function RestoreBackupPanel() {
+function RestoreBackupPanel() { return null; }
+
+function _RestoreBackupPanel_UNUSED() {
   const [selectedPath, setSelectedPath] = React.useState('');
   const [status, setStatus] = React.useState(null);
   const [message, setMessage] = React.useState('');

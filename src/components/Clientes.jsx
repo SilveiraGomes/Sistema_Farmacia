@@ -144,18 +144,18 @@ function Clientes() {
               <button type="button" onClick={() => setShowModal(false)}>×</button>
             </div>
             <div className="form-grid">
-              <label>Nome completo<input value={formData.name} onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))} /></label>
-              <label>NIF<input value={formData.nif} onChange={(e) => setFormData((f) => ({ ...f, nif: e.target.value }))} /></label>
-              <label>Telefone<input value={formData.phone} onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))} /></label>
-              <label>Email<input type="email" value={formData.email} onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))} /></label>
-              <label>Limite de crédito (AKZ)<input type="number" min="0" value={formData.creditLimit} onChange={(e) => setFormData((f) => ({ ...f, creditLimit: e.target.value }))} /></label>
+              <label><span>Nome completo</span><input value={formData.name} onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))} /></label>
+              <label><span>NIF</span><input value={formData.nif} onChange={(e) => setFormData((f) => ({ ...f, nif: e.target.value }))} /></label>
+              <label><span>Telefone</span><input value={formData.phone} onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))} /></label>
+              <label><span>Email</span><input type="email" value={formData.email} onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))} /></label>
+              <label><span>Limite de crédito (AKZ)</span><input type="number" min="0" value={formData.creditLimit} onChange={(e) => setFormData((f) => ({ ...f, creditLimit: e.target.value }))} /></label>
               <label>
-                Estado
+                <span>Estado</span>
                 <select value={formData.status} onChange={(e) => setFormData((f) => ({ ...f, status: e.target.value }))}>
                   {clientStatuses.map((s) => <option key={s.code} value={s.name}>{s.name}</option>)}
                 </select>
               </label>
-              <label>Endereço<textarea value={formData.address} onChange={(e) => setFormData((f) => ({ ...f, address: e.target.value }))} /></label>
+              <label className="form-span-2"><span>Endereço</span><textarea value={formData.address} onChange={(e) => setFormData((f) => ({ ...f, address: e.target.value }))} /></label>
             </div>
             <div className="modal-actions">
               <button type="button" className="soft-button" onClick={() => setShowModal(false)}>Cancelar</button>

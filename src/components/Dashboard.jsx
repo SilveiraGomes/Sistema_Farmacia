@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
   Boxes,
   CalendarClock,
   MoreHorizontal,
+  RefreshCw,
   WalletCards,
 } from "lucide-react";
 import {
@@ -23,6 +24,7 @@ import {
 } from "../data/pharmacyData.mjs";
 import { useOperation } from "../operation/OperationContext";
 import { useSetting } from "../configuration/SettingsContext";
+import { useDashboardData } from "../hooks/useDashboardData";
 
 const periodOptions = [
   { id: "week", label: "Semanal" },
@@ -37,13 +39,47 @@ function Dashboard() {
   const dashboardAlertsEnabled = useSetting("alerts.dashboardEnabled", true);
   const [selectedPeriod, setSelectedPeriod] = useState("month");
   const [hoveredPoint, setHoveredPoint] = useState(null);
-  const metrics = {
-    ...buildDashboardMetrics(invoices, stockItems),
-    lowStockCount: stockItems.filter(
-      (item) =>
-        Number(item.quantity) > 0 && Number(item.quantity) <= lowStockThreshold,
-    ).length,
-  };
+
+  const { data: liveData, lastUpdated, refresh: refreshDashboard } = useDashboardData({
+    shiftOpenAt: operation.shift?.aberto_em || null,
+    lowStockThreshold,
+  });
+
+  const metrics = useMemo(() => {
+    if (liveData) {
+      const mock = buildDashboardMetrics(invoices, stockItems);
+      return {
+        ...mock,
+        totalSold: liveData.day.totalVendas,
+        totalTransactions: liveData.day.totalTransacoes,
+        shiftSales: liveData.shift.totalVendas,
+        shiftTransactions: liveData.shift.totalTransacoes,
+        lowStockCount: liveData.stock.lowStock,
+        outOfStockRows: liveData.stock.outOfStock,
+      };
+    }
+    return {
+      ...buildDashboardMetrics(invoices, stockItems),
+      lowStockCount: stockItems.filter(
+        (item) =>
+          Number(item.quantity) > 0 && Number(item.quantity) <= lowStockThreshold,
+      ).length,
+    };
+  }, [liveData, lowStockThreshold]);
+
+  const tableRows = useMemo(() => {
+    if (liveData?.recentSales?.length) {
+      return liveData.recentSales.map((sale) => ({
+        number: sale.number,
+        items: sale.items,
+        value: sale.total,
+        status: sale.status === 'Concluida' ? 'PAGO' : sale.status.toUpperCase(),
+        client: sale.cliente,
+      }));
+    }
+    return invoices;
+  }, [liveData]);
+
   const chart = useMemo(
     () =>
       buildDashboardPeriodChart(
@@ -87,9 +123,30 @@ function Dashboard() {
     ? Math.max(0, chart.points.indexOf(activePoint))
     : 0;
 
+  const lastUpdatedLabel = lastUpdated
+    ? lastUpdated.toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null;
+
   return (
     <section className="dashboard-analytics">
       <div className="dashboard-main-column">
+        <div className="dashboard-metrics-header">
+          {lastUpdatedLabel ? (
+            <span className="dashboard-live-badge">
+              <span className="live-dot" />
+              Actualizado {lastUpdatedLabel}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="icon-button dashboard-refresh-btn"
+            aria-label="Actualizar dados"
+            title="Actualizar dados"
+            onClick={refreshDashboard}
+          >
+            <RefreshCw size={15} />
+          </button>
+        </div>
         <div className="dashboard-metrics-strip">
           <MetricCard
             tone="primary"
@@ -209,6 +266,11 @@ function Dashboard() {
                 className="chart-tooltip"
                 style={{
                   left: `${resolvePointX(activePointIndex, chart.points.length)}%`,
+                  transform: activePointIndex === 0
+                    ? 'translateX(0%)'
+                    : activePointIndex === chart.points.length - 1
+                      ? 'translateX(-100%)'
+                      : 'translateX(-50%)',
                 }}
               >
                 <span>{activePoint.label}</span>
@@ -259,7 +321,7 @@ function Dashboard() {
           </div>
         </div>
 
-        <InvoiceTable rows={invoices} className="dashboard-table" showClient />
+        <InvoiceTable rows={tableRows} className="dashboard-table" showClient />
       </div>
 
       <aside className="dashboard-side-column">
@@ -397,6 +459,10 @@ export function InvoiceTable({
 }) {
   const [tableRows, setTableRows] = useState(rows);
   const [openMenuFor, setOpenMenuFor] = useState("");
+
+  useEffect(() => {
+    setTableRows(rows);
+  }, [rows]);
   const [detailInvoice, setDetailInvoice] = useState(null);
 
   function handleMarkPaid(invoiceNumber) {

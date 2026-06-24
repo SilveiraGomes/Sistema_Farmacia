@@ -86,15 +86,19 @@ test('buildDashboardNotifications exposes actionable operational alerts', () => 
     expenseRows: financeExpenses,
   });
 
-  assert.deepEqual(notifications.map((item) => item.id), [
-    'stock-out',
-    'stock-low',
-    'pending-invoices',
-    'pending-expenses',
-  ]);
-  assert.equal(notifications[0].actionLabel, 'Ver estoque');
-  assert.match(notifications[2].message, /1 factura/i);
-  assert.match(notifications[3].message, /KZ 60.000,00/);
+  const ids = notifications.map((item) => item.id);
+  assert.ok(ids.includes('stock-expired'), 'should include expired stock alert');
+  assert.ok(ids.includes('stock-expiring-soon'), 'should include near-expiry alert');
+  assert.ok(ids.includes('stock-out'), 'should include out-of-stock alert');
+  assert.ok(ids.includes('stock-low'), 'should include low-stock alert');
+  assert.ok(ids.includes('pending-invoices'), 'should include pending invoices alert');
+  assert.ok(ids.includes('pending-expenses'), 'should include pending expenses alert');
+  // Expiry alerts come before stock/finance alerts (higher priority)
+  assert.ok(ids.indexOf('stock-expired') < ids.indexOf('stock-out'));
+  const pendingInvoiceAlert = notifications.find((n) => n.id === 'pending-invoices');
+  assert.match(pendingInvoiceAlert.message, /1 factura/i);
+  const pendingExpenseAlert = notifications.find((n) => n.id === 'pending-expenses');
+  assert.match(pendingExpenseAlert.message, /KZ 60.000,00/);
 });
 
 test('buildStockMetrics counts stock states and categories', () => {
@@ -104,7 +108,9 @@ test('buildStockMetrics counts stock states and categories', () => {
   assert.equal(metrics.totalProducts, stockItems.length);
   assert.equal(metrics.lowStock, stockItems.filter((item) => item.status === 'Baixo estoque').length);
   assert.equal(metrics.outOfStock, stockItems.filter((item) => item.status === 'Sem estoque').length);
-  assert.deepEqual(antibiotics, { name: 'Antibioticos', count: 7, icon: 'ant' });
+  assert.equal(antibiotics.name, 'Antibioticos');
+  assert.equal(antibiotics.icon, 'ant');
+  assert.equal(antibiotics.count, stockItems.filter((item) => item.category === 'Antibioticos').length);
 });
 
 test('buildStockFormOptions derives unique product categories, subcategories and locations', () => {

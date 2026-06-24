@@ -170,9 +170,10 @@ test('buildRecentSaleDocuments returns the latest five invoices and receipts', (
     { id: '9', type: DOCUMENT_TYPES.RECEIPT, number: 'REC003/26', issueDate: '2026-06-16', total: 900 },
   ];
 
+  // CREDIT_NOTE is now included alongside invoices/receipts
   assert.deepEqual(
     buildRecentSaleDocuments(rows).map((document) => document.number),
-    ['REC003/26', 'FAT004/26', 'REC002/26', 'FAT003/26', 'FAT002/26'],
+    ['NC001/26', 'REC003/26', 'FAT004/26', 'REC002/26', 'FAT003/26'],
   );
 });
 

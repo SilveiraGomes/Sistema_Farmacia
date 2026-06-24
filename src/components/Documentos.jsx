@@ -8,13 +8,15 @@ import {
   Printer,
   RefreshCcw,
   Repeat2,
+  RotateCcw,
   Search,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import {
+  buildCancellationResult,
+  canCancelDocument,
   DOCUMENT_STATUSES,
   DOCUMENT_TYPES,
-  annulDocument,
   buildDocumentMetrics,
   convertProformaToInvoice,
   documentStatusLabels,
@@ -23,6 +25,7 @@ import {
   filterDocuments,
   prepareSecondCopy,
 } from '../data/documents.mjs';
+import CancellationModal from './CancellationModal';
 import { buildDocumentSettingsFromSnapshot, buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog, useSettings } from '../configuration/SettingsContext';
@@ -54,13 +57,11 @@ function Documentos() {
   const [rows, setRows] = useState(initialDocuments);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [selectedDocument, setSelectedDocument] = useState(null);
-  const [annulTargetId, setAnnulTargetId] = useState(null);
-  const [annulReason, setAnnulReason] = useState('');
+  const [cancelTarget, setCancelTarget] = useState(null);
   const [message, setMessage] = useState('');
 
   const visibleRows = useMemo(() => filterDocuments(rows, filters), [filters, rows]);
   const metrics = useMemo(() => buildDocumentMetrics(rows, filters), [filters, rows]);
-  const annulTarget = rows.find((document) => document.id === annulTargetId);
 
   function updateFilter(field, value) {
     setFilters((current) => ({ ...current, [field]: value }));
@@ -85,33 +86,25 @@ function Documentos() {
     setMessage(`Documento ${document.number} preparado para exportacao.`);
   }
 
-  function openAnnulModal(document) {
-    setMessage('');
-    setAnnulReason('');
-    setAnnulTargetId(document.id);
-  }
+  function handleCancelDocument(reason) {
+    const document = cancelTarget;
+    if (!document || !canCancelDocument(document)) return;
 
-  async function confirmAnnulment() {
-    if (!annulTarget || !annulReason.trim()) {
-      setMessage('Informe o motivo da anulacao.');
-      return;
-    }
+    const cancelledAt = new Date().toISOString();
+    const ncCount = rows.filter((d) => d.type === DOCUMENT_TYPES.CREDIT_NOTE).length + 1;
+    const year = String(new Date().getFullYear()).slice(-2);
+    const creditNoteNumber = `NC${String(ncCount).padStart(3, '0')}/${year}`;
 
-    if (!(await confirmSensitiveAction(`Deseja realmente anular ${annulTarget.number}?`, undefined, {
-      title: 'Confirmar anulacao',
-      confirmLabel: 'Anular documento',
-      tone: 'warning',
-    }))) {
-      return;
-    }
+    const { cancelledDoc, creditNote } = buildCancellationResult(document, {
+      reason,
+      cancelledBy: getDisplayUserName(user),
+      cancelledAt,
+      creditNoteNumber,
+    });
 
-    setRows((current) => annulDocument(current, annulTarget.id, {
-      reason: annulReason,
-      userName: getDisplayUserName(user),
-    }));
-    setAnnulTargetId(null);
-    setAnnulReason('');
-    setMessage(`${annulTarget.number} foi anulado.`);
+    setRows((current) => [creditNote, ...current.map((d) => (d.id === cancelledDoc.id ? cancelledDoc : d))]);
+    setCancelTarget(null);
+    setMessage(`${document.number} anulado. Nota de Crédito ${creditNoteNumber} gerada.`);
   }
 
   async function convertDocument(document) {
@@ -196,9 +189,7 @@ function Documentos() {
                 <td>{document.issueDate}</td>
                 <td>{formatKwanza(document.total)}</td>
                 <td>
-                  <span className={document.status === DOCUMENT_STATUSES.CANCELLED ? 'status waiting' : 'status paid'}>
-                    {documentStatusLabels[document.status]}
-                  </span>
+                  <DocumentStatusBadge status={document.status} />
                 </td>
                 <td>{document.userName}</td>
                 <td className="options-cell">
@@ -220,9 +211,9 @@ function Documentos() {
                       <Repeat2 size={16} />
                     </button>
                   ) : null}
-                  {canAnnul && document.status !== DOCUMENT_STATUSES.CANCELLED ? (
-                    <button className="icon-button danger" type="button" aria-label="Anular documento" onClick={() => openAnnulModal(document)}>
-                      <Ban size={16} />
+                  {canAnnul && canCancelDocument(document) ? (
+                    <button className="icon-button danger" type="button" aria-label="Anular documento" onClick={() => { setMessage(''); setCancelTarget(document); }}>
+                      <RotateCcw size={16} />
                     </button>
                   ) : null}
                 </td>
@@ -242,26 +233,12 @@ function Documentos() {
         <DocumentDetails document={selectedDocument} snapshot={snapshot} onClose={() => setSelectedDocument(null)} />
       ) : null}
 
-      {annulTarget ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal-card">
-            <div className="modal-title-row">
-              <h2>Anular {annulTarget.number}</h2>
-              <button type="button" onClick={() => setAnnulTargetId(null)}>x</button>
-            </div>
-            <textarea
-              placeholder="Motivo da anulacao"
-              value={annulReason}
-              onChange={(event) => setAnnulReason(event.target.value)}
-            />
-            <div className="modal-actions">
-              <button type="button" className="soft-button" onClick={() => setAnnulTargetId(null)}>Cancelar</button>
-              <button type="button" className="primary-button" onClick={confirmAnnulment} disabled={!annulReason.trim()}>
-                Confirmar anulacao
-              </button>
-            </div>
-          </div>
-        </div>
+      {cancelTarget ? (
+        <CancellationModal
+          document={cancelTarget}
+          onConfirm={handleCancelDocument}
+          onClose={() => setCancelTarget(null)}
+        />
       ) : null}
     </section>
   );
@@ -305,6 +282,20 @@ function DocumentDetails({ document, snapshot, onClose }) {
       </div>
     </div>
   );
+}
+
+const DOC_STATUS_CLASS = {
+  [DOCUMENT_STATUSES.PAID]: 'paid',
+  [DOCUMENT_STATUSES.ISSUED]: 'issued',
+  [DOCUMENT_STATUSES.CANCELLED]: 'cancelled',
+  [DOCUMENT_STATUSES.PENDING]: 'waiting',
+  [DOCUMENT_STATUSES.DRAFT]: 'waiting',
+  [DOCUMENT_STATUSES.CONVERTED]: 'issued',
+};
+
+function DocumentStatusBadge({ status }) {
+  const cls = DOC_STATUS_CLASS[status] || 'issued';
+  return <span className={`status ${cls}`}>{documentStatusLabels[status] || status}</span>;
 }
 
 function Metric({ title, value, icon: Icon }) {

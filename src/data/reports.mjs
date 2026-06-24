@@ -71,6 +71,17 @@ export const REPORT_CATALOG = Object.freeze([
       { id: 'estado-operacional', title: 'Estado operacional', mode: 'status' },
     ],
   },
+  {
+    id: 'avancados',
+    title: 'Avançados',
+    reports: [
+      { id: 'abc-produtos', title: 'ABC de Vendas', mode: 'table', backend: true, extraFilters: ['dateRange', 'limit'] },
+      { id: 'validades-proximas', title: 'Produtos a vencer', mode: 'table', backend: true, extraFilters: ['daysAhead'] },
+      { id: 'stock-valorizado', title: 'Stock valorizado', mode: 'table', backend: true, extraFilters: [] },
+      { id: 'encomendas-resumo', title: 'Encomendas', mode: 'table', backend: true, extraFilters: ['dateRange', 'orderStatus'] },
+      { id: 'fornecedores-resumo', title: 'Fornecedores', mode: 'table', backend: true, extraFilters: [] },
+    ],
+  },
 ]);
 
 const REPORT_LOOKUP = new Map(

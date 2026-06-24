@@ -58,7 +58,66 @@ export const stockItems = [
   { id: '#0024', name: 'Vitamina D3 2000UI', quantity: 66, price: 5100, expiry: '10/10/2028', status: 'Em estoque', location: 'Prateleira PT061', category: 'Suplementos', subcategory: 'Vitaminas' },
   { id: '#0025', name: 'Zinco 20mg', quantity: 0, price: 2600, expiry: '02/02/2027', status: 'Sem estoque', location: 'Prateleira PT062', category: 'Suplementos', subcategory: 'Minerais' },
   { id: '#0026', name: 'Termometro Digital', quantity: 27, price: 4500, expiry: '31/12/2030', status: 'Em estoque', location: 'Balcao BC001', category: 'Material Clinico', subcategory: 'Equipamentos' },
+  { id: '#0027', name: 'Cloranfenicol Gotas', quantity: 14, price: 1800, expiry: '10/05/2026', status: 'Baixo estoque', location: 'Gaveta GT008', category: 'Antibioticos', subcategory: 'Gotas' },
+  { id: '#0028', name: 'Eritromicina 500mg', quantity: 32, price: 2200, expiry: '05/07/2026', status: 'Em estoque', location: 'Prateleira PT016', category: 'Antibioticos', subcategory: 'Comprimidos' },
 ];
+
+// ---------------------------------------------------------------------------
+// Expiry utilities
+// ---------------------------------------------------------------------------
+
+/** Parse DD/MM/YYYY or YYYY-MM-DD strings into a Date (midnight local). */
+export function parseExpiryDate(str) {
+  if (!str || typeof str !== 'string') return null;
+  const ddmm = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmm) return new Date(Number(ddmm[3]), Number(ddmm[2]) - 1, Number(ddmm[1]));
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  return null;
+}
+
+/**
+ * Classify a product's expiry relative to today.
+ * @returns {'expired'|'critical'|'warning'|'ok'|'unknown'}
+ */
+export function getExpiryStatus(expiryStr) {
+  const date = parseExpiryDate(expiryStr);
+  if (!date) return 'unknown';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysLeft = Math.floor((date - today) / 86_400_000);
+  if (daysLeft < 0) return 'expired';
+  if (daysLeft <= 30) return 'critical';
+  if (daysLeft <= 90) return 'warning';
+  return 'ok';
+}
+
+/** Returns how many days until expiry (negative if already expired). */
+export function daysUntilExpiry(expiryStr) {
+  const date = parseExpiryDate(expiryStr);
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((date - today) / 86_400_000);
+}
+
+/**
+ * Build expiry alert counters from a list of stock rows.
+ * Only counts rows with quantity > 0 (expired zero-stock items are irrelevant).
+ */
+export function buildExpiryAlerts(stockRows = stockItems) {
+  let expired = 0;
+  let critical = 0;
+  let warning = 0;
+  for (const item of stockRows) {
+    if ((item.quantity ?? 0) <= 0) continue;
+    const status = getExpiryStatus(item.expiry);
+    if (status === 'expired') expired++;
+    else if (status === 'critical') critical++;
+    else if (status === 'warning') warning++;
+  }
+  return { expired, critical, warning, urgent: expired + critical };
+}
 
 export const STOCK_OUT_REASONS = [
   'Expiracao',
@@ -259,10 +318,36 @@ export function buildDashboardNotifications({
 } = {}) {
   const outOfStock = stockRows.filter((item) => item.status === 'Sem estoque');
   const lowStock = stockRows.filter((item) => item.status === 'Baixo estoque');
+  const expiredItems = stockRows.filter((item) => (item.quantity ?? 0) > 0 && getExpiryStatus(item.expiry) === 'expired');
+  const criticalItems = stockRows.filter((item) => (item.quantity ?? 0) > 0 && getExpiryStatus(item.expiry) === 'critical');
   const pendingInvoices = invoiceRows.filter((invoice) => invoice.status === 'EM ESPERA');
   const pendingExpenses = expenseRows.filter((expense) => expense.status === 'Pendente');
   const pendingExpenseTotal = sumMoney(pendingExpenses, 'value');
   const notifications = [];
+
+  if (expiredItems.length) {
+    notifications.push({
+      id: 'stock-expired',
+      severity: 'danger',
+      title: 'Produtos vencidos em estoque',
+      message: `${expiredItems.length} produto${expiredItems.length === 1 ? '' : 's'} vencido${expiredItems.length === 1 ? '' : 's'} ainda em stock.`,
+      detail: expiredItems.slice(0, 3).map((item) => item.name).join(', '),
+      actionLabel: 'Ver validades',
+      actionView: 'estoque',
+    });
+  }
+
+  if (criticalItems.length) {
+    notifications.push({
+      id: 'stock-expiring-soon',
+      severity: 'warning',
+      title: 'Produtos a vencer em breve',
+      message: `${criticalItems.length} produto${criticalItems.length === 1 ? '' : 's'} vencem dentro de 30 dias.`,
+      detail: criticalItems.slice(0, 3).map((item) => item.name).join(', '),
+      actionLabel: 'Ver validades',
+      actionView: 'estoque',
+    });
+  }
 
   if (outOfStock.length) {
     notifications.push({
@@ -453,10 +538,14 @@ export function buildStockMetrics(stockRows = stockItems) {
     }),
   );
 
+  const expiryAlerts = buildExpiryAlerts(stockRows);
   return {
     totalProducts: stockRows.length,
     lowStock: stockRows.filter((item) => item.status === 'Baixo estoque').length,
     outOfStock: stockRows.filter((item) => item.status === 'Sem estoque').length,
+    expired: expiryAlerts.expired,
+    expiringCritical: expiryAlerts.critical,
+    expiringWarning: expiryAlerts.warning,
     categories: groupedCategories,
     visibleRows: stockRows.length,
   };

@@ -8,6 +8,23 @@ const MAX_LOGIN_FAILURES = 5;
 const LOCK_MINUTES = 15;
 
 let currentSession = null;
+let sessionTimeoutMs = 30 * 60 * 1000; // 30 min default
+
+function setSessionTimeout(minutes) {
+  sessionTimeoutMs = (minutes > 0 ? minutes : 0) * 60 * 1000;
+}
+
+function touchActivity() {
+  if (currentSession) {
+    currentSession = { ...currentSession, lastActivityAt: Date.now() };
+  }
+}
+
+function isSessionTimedOut() {
+  if (!currentSession || !sessionTimeoutMs) return false;
+  const last = currentSession.lastActivityAt || 0;
+  return Date.now() - last > sessionTimeoutMs;
+}
 
 function sanitizeUser(user) {
   return {
@@ -94,7 +111,7 @@ async function login({ username, password }) {
   });
   await recordUserAudit({ actorUserId: user.id, targetUserId: user.id, action: 'LOGIN_SUCESSO' });
 
-  currentSession = await buildSession(user);
+  currentSession = { ...(await buildSession(user)), lastActivityAt: Date.now() };
   return currentSession;
 }
 
@@ -102,18 +119,23 @@ function logout() {
   currentSession = null;
 }
 
-async function getCurrentSession() {
-  return refreshCurrentSession();
-}
-
 async function refreshCurrentSession() {
   const user = await getActiveCurrentUser();
   if (!user) {
     return null;
   }
-
-  currentSession = await buildSession(user);
+  // Preserve lastActivityAt so the idle timeout isn't reset on every permission refresh
+  const preserved = currentSession?.lastActivityAt || Date.now();
+  currentSession = { ...(await buildSession(user)), lastActivityAt: preserved };
   return currentSession;
+}
+
+async function getCurrentSession() {
+  if (isSessionTimedOut()) {
+    currentSession = null;
+    return null;
+  }
+  return refreshCurrentSession();
 }
 
 async function changeOwnPassword({ currentPassword, newPassword }) {
@@ -148,6 +170,8 @@ module.exports = {
   logout,
   getCurrentSession,
   refreshCurrentSession,
+  touchActivity,
+  setSessionTimeout,
   changeOwnPassword,
   sanitizeUser,
 };

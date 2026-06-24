@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, LogOut, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, LogOut, Power, Trash2, X } from 'lucide-react';
 import { setConfirmationDispatcher } from '../utils/confirmations.mjs';
 
 const toneIcons = {
   danger: Trash2,
   logout: LogOut,
+  close: Power,
   success: CheckCircle2,
   warning: AlertTriangle,
 };
