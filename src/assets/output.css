@@ -282,6 +282,9 @@
   .table-row-group {
     display: table-row-group;
   }
+  .flex-shrink {
+    flex-shrink: 1;
+  }
   .shrink {
     flex-shrink: 1;
   }

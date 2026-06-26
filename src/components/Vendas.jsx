@@ -591,6 +591,7 @@ function Vendas() {
 }
 
 function FinalizedSalePreview({ document, snapshot, onClose }) {
+  const [printBusy, setPrintBusy] = React.useState(false);
   const documentSettings = buildDocumentSettingsFromSnapshot(snapshot);
   const viewModel = buildInvoiceA4ViewModel({
     document,
@@ -598,24 +599,28 @@ function FinalizedSalePreview({ document, snapshot, onClose }) {
     printedBy: document.userName || 'Vendedor',
   });
 
-  function handlePrintA4() {
-    window.setTimeout(() => window.print(), 0);
+  async function handlePrintA4() {
+    if (printBusy) return;
+    setPrintBusy(true);
+    try { await request('invoice.print', { viewModel }); } finally { setPrintBusy(false); }
   }
 
-  function handleSavePdf() {
-    window.setTimeout(() => window.print(), 0);
+  async function handleSavePdf() {
+    if (printBusy) return;
+    setPrintBusy(true);
+    try { await request('invoice.savePDF', { viewModel }); } finally { setPrintBusy(false); }
   }
 
   return (
-    <div className="modal-backdrop documents-print-scope invoice-a4-print-scope" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal-card wide document-detail-modal">
         <div className="modal-title-row">
           <h2>{document.number}</h2>
           <div className="invoice-a4-actions">
-            <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" onClick={handleSavePdf}>
+            <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" onClick={handleSavePdf} disabled={printBusy}>
               <FileDown size={20} />
             </button>
-            <button type="button" className="icon-button" aria-label="Imprimir factura" title="Imprimir" onClick={handlePrintA4}>
+            <button type="button" className="icon-button" aria-label="Imprimir factura" title="Imprimir" onClick={handlePrintA4} disabled={printBusy}>
               <Printer size={20} />
             </button>
             <button type="button" className="icon-button" aria-label="Fechar visualizacao" onClick={onClose}>x</button>

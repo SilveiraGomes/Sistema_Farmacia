@@ -1,11 +1,51 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { formatKwanza } from '../data/pharmacyData.mjs';
 
 function formatMoney(value) {
   return formatKwanza(value).replace('KZ ', '');
 }
 
+function formatDisplayDate(str) {
+  if (!str) return '-';
+  const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  try {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      return `${dd}/${mm}/${d.getFullYear()} ${hh}:${min}`;
+    }
+  } catch {}
+  return String(str);
+}
+
+function useQrDataUrl(viewModel) {
+  const [qrUrl, setQrUrl] = useState('');
+  useEffect(() => {
+    if (!viewModel.settings?.showQrCode) return;
+    let cancelled = false;
+    import('qrcode').then(mod => {
+      const QRCode = mod.default || mod;
+      const text = [
+        viewModel.document?.number || '',
+        viewModel.document?.issueDate || '',
+        String(viewModel.totals?.total || 0),
+        viewModel.header?.companyNif || '',
+      ].join(';');
+      return QRCode.toDataURL(text, { width: 60, margin: 1 });
+    }).then(url => {
+      if (!cancelled) setQrUrl(url);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [viewModel.document?.number]);
+  return qrUrl;
+}
+
 function InvoiceA4({ viewModel }) {
+  const qrDataUrl = useQrDataUrl(viewModel);
   return (
     <article className="invoice-a4-page" aria-label={`${viewModel.document.title} ${viewModel.document.number}`}>
       <header className="invoice-a4-header">
@@ -21,7 +61,11 @@ function InvoiceA4({ viewModel }) {
           <h2>{viewModel.document.title}</h2>
           <strong>{viewModel.document.number}</strong>
           {viewModel.document.isCancelled ? <em>Anulado</em> : null}
-          {viewModel.settings.showQrCode ? <div className="invoice-a4-qr" aria-label="QR code fiscal">QR</div> : null}
+          {viewModel.settings.showQrCode ? (
+            qrDataUrl
+              ? <img className="invoice-a4-qr" src={qrDataUrl} alt="QR code fiscal" />
+              : <div className="invoice-a4-qr" aria-label="QR code fiscal">QR</div>
+          ) : null}
         </section>
       </header>
 
@@ -34,8 +78,8 @@ function InvoiceA4({ viewModel }) {
       </section>
 
       <section className="invoice-a4-meta">
-        <span><strong>Data Emissao</strong>{viewModel.document.issueDate}</span>
-        <span><strong>Data Vencimento</strong>{viewModel.document.dueDate || '-'}</span>
+        <span><strong>Data Emissao</strong>{formatDisplayDate(viewModel.document.issueDate)}</span>
+        <span><strong>Data Vencimento</strong>{viewModel.document.dueDate ? formatDisplayDate(viewModel.document.dueDate) : '-'}</span>
         <span><strong>Moeda</strong>{viewModel.document.currency}</span>
         <span><strong>Condicao Pagamento</strong>{viewModel.document.paymentCondition || '-'}</span>
       </section>
@@ -125,8 +169,9 @@ function InvoiceA4({ viewModel }) {
 
       <footer className="invoice-a4-footer">
         <strong>{viewModel.footer.fiscalReference}</strong>
-        <span>Impresso por {viewModel.footer.printedBy} em {viewModel.footer.printedAt}</span>
-        <span>{viewModel.settings.fiscalRegime}</span>
+        <span>Impresso por: {viewModel.footer.printedBy}</span>
+        <span>Data: {formatDisplayDate(viewModel.footer.printedAt)}</span>
+        <span>Regime Fiscal: {viewModel.settings.fiscalRegime}</span>
       </footer>
     </article>
   );

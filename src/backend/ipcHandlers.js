@@ -14,11 +14,15 @@ const encomendaService = require("./services/encomendaService");
 const financeiroService = require("./services/financeiroService");
 const relatorioService = require("./services/relatorioService");
 const backupService = require("./services/backupService");
+const alertService = require("./services/alertService");
+const clienteService = require("./services/clienteService");
+const vendaService = require("./services/vendaService");
 const { assertPermission } = require("./services/authorizationService");
 const {
   CONFIGURATION_ERROR_CODES,
   createConfigurationService,
 } = require("./services/configurationService");
+const invoicePrintService = require("./services/invoicePrintService");
 
 const CONFIGURATION_SAFE_ERROR_MESSAGES = Object.freeze({
   [CONFIGURATION_ERROR_CODES.VALIDATION]: "Dados de configuracao invalidos.",
@@ -39,6 +43,9 @@ const SAFE_ERROR_MESSAGES = new Set([
   "Permissao insuficiente.",
   ...fornecedorService.SAFE_ERRORS,
   ...estoqueService.SAFE_ERRORS,
+  ...clienteService.SAFE_ERRORS,
+  ...vendaService.SAFE_ERRORS,
+  ...financeiroService.SAFE_ERRORS,
   ...encomendaService.SAFE_ERRORS,
   ...financeiroService.SAFE_ERRORS,
   ...backupService.SAFE_ERRORS,
@@ -69,6 +76,10 @@ const SAFE_ERROR_CODES = new Set([
   "UNKNOWN_ACTION",
   "PERMISSION_DENIED",
   "PASSWORD_CHANGE_REQUIRED",
+  "INSUFFICIENT_STOCK",
+  "VALIDATION",
+  "NOT_FOUND",
+  "CONFLICT",
 ]);
 
 function serializeError(error) {
@@ -156,10 +167,13 @@ function buildRouteMap(overrides = {}) {
     dashboardService,
     fornecedorService,
     estoqueService,
+    clienteService,
+    vendaService,
     encomendaService,
     financeiroService,
     relatorioService,
     backupService,
+    alertService,
     configurationService: null,
     assertPermission,
     electronApp: null,
@@ -169,7 +183,10 @@ function buildRouteMap(overrides = {}) {
 
   return {
     "auth.login": (data) => dependencies.authService.login(data),
+    "auth.loginWithPin": (data = {}) =>
+      dependencies.authService.loginWithPin({ userId: data.userId, pin: data.pin }),
     "auth.loginUsers": () => dependencies.userService.listLoginUsers(),
+    "auth.usersWithPin": () => dependencies.userService.listUsersWithPin(),
     "auth.logout": () => dependencies.authService.logout(),
     "auth.currentSession": () => dependencies.authService.getCurrentSession(),
     "auth.changeOwnPassword": (data) =>
@@ -212,6 +229,14 @@ function buildRouteMap(overrides = {}) {
           actorUserId,
           userId: getTargetUserId(data),
         }),
+      ),
+    "users.setPin": (data = {}) =>
+      withPermission(dependencies, "usuarios.editar", (actorUserId) =>
+        dependencies.userService.setUserPin({ actorUserId, targetUserId: data.userId, pin: data.pin }),
+      ),
+    "users.clearPin": (data = {}) =>
+      withPermission(dependencies, "usuarios.editar", (actorUserId) =>
+        dependencies.userService.clearUserPin({ actorUserId, targetUserId: data.userId }),
       ),
     "users.resetPassword": (data = {}) =>
       withPermission(dependencies, "usuarios.resetar_senha", (actorUserId) =>
@@ -280,6 +305,115 @@ function buildRouteMap(overrides = {}) {
       withPermission(dependencies, "estoque.ver", () =>
         dependencies.estoqueService.listPrices(data),
       ),
+    "estoque.listProducts": (data = {}) =>
+      withPermission(dependencies, "estoque.ver", () =>
+        dependencies.estoqueService.listProducts(data),
+      ),
+    "estoque.createProduct": (data = {}) =>
+      withPermission(dependencies, "estoque.criar", () =>
+        dependencies.estoqueService.createProduct(data),
+      ),
+    "estoque.updateProduct": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.updateProduct(data),
+      ),
+    "estoque.deleteProduct": (data = {}) =>
+      withPermission(dependencies, "estoque.apagar", () =>
+        dependencies.estoqueService.deleteProduct(data.produto_id),
+      ),
+    "estoque.getProduct": (data = {}) =>
+      withPermission(dependencies, "estoque.ver", () =>
+        dependencies.estoqueService.getProduct(data.produto_id),
+      ),
+    "estoque.listCategories": () =>
+      withPermission(dependencies, "estoque.ver", () =>
+        dependencies.estoqueService.listCategories(),
+      ),
+    "estoque.createCategory": (data = {}) =>
+      withPermission(dependencies, "estoque.criar", () =>
+        dependencies.estoqueService.createCategory(data),
+      ),
+    "estoque.listSubcategories": (data = {}) =>
+      withPermission(dependencies, "estoque.ver", () =>
+        dependencies.estoqueService.listSubcategories(data),
+      ),
+    "estoque.createSubcategory": (data = {}) =>
+      withPermission(dependencies, "estoque.criar", () =>
+        dependencies.estoqueService.createSubcategory(data),
+      ),
+    "estoque.updateCategory": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.updateCategory(data),
+      ),
+    "estoque.deleteCategory": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.deleteCategory(data),
+      ),
+    "estoque.updateSubcategory": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.updateSubcategory(data),
+      ),
+    "estoque.deleteSubcategory": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.deleteSubcategory(data),
+      ),
+
+    "estoque.importCategories": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.importCategories(data.rows || []),
+      ),
+
+    "estoque.importSubcategories": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.importSubcategories(data.rows || []),
+      ),
+
+    "estoque.importProducts": (data = {}) =>
+      withPermission(dependencies, "estoque.editar", () =>
+        dependencies.estoqueService.importProducts(data.rows || []),
+      ),
+
+    "clientes.list": (data = {}) =>
+      withPermission(dependencies, "clientes.ver", () =>
+        dependencies.clienteService.listClientes(data),
+      ),
+    "clientes.getById": (data = {}) =>
+      withPermission(dependencies, "clientes.ver", () =>
+        dependencies.clienteService.getCliente(data.id),
+      ),
+    "clientes.create": (data = {}) =>
+      withPermission(dependencies, "clientes.criar", () =>
+        dependencies.clienteService.createCliente(data),
+      ),
+    "clientes.update": (data = {}) =>
+      withPermission(dependencies, "clientes.editar", () =>
+        dependencies.clienteService.updateCliente(data.id, data),
+      ),
+    "clientes.delete": (data = {}) =>
+      withPermission(dependencies, "clientes.apagar", () =>
+        dependencies.clienteService.deleteCliente(data.id),
+      ),
+
+    "vendas.create": (data = {}) =>
+      withPermission(dependencies, "vendas.criar", (actorUserId) =>
+        dependencies.vendaService.createVenda(data, actorUserId),
+      ),
+    "vendas.recentDocuments": (data = {}) =>
+      withPermission(dependencies, "vendas.ver", () =>
+        dependencies.vendaService.listRecentDocuments(data),
+      ),
+    "vendas.listDocuments": (data = {}) =>
+      withPermission(dependencies, "vendas.ver", () =>
+        dependencies.vendaService.listDocuments(data),
+      ),
+    "vendas.cancelDocument": (data = {}) =>
+      withPermission(dependencies, "vendas.cancelar", (actorUserId) =>
+        dependencies.vendaService.cancelDocument(data, actorUserId),
+      ),
+    "vendas.convertProforma": (data = {}) =>
+      withPermission(dependencies, "vendas.criar", (actorUserId) =>
+        dependencies.vendaService.convertProforma(data, actorUserId),
+      ),
 
     "compras.list": (data = {}) =>
       withPermission(dependencies, "compras.ver", () =>
@@ -306,23 +440,93 @@ function buildRouteMap(overrides = {}) {
       withPermission(dependencies, "financeiro.ver", () =>
         dependencies.financeiroService.marcarPago(data.id),
       ),
+    "financeiro.list": (data = {}) =>
+      withPermission(dependencies, "financeiro.ver", () =>
+        dependencies.financeiroService.listTransactions(data),
+      ),
+    "financeiro.overview": (data = {}) =>
+      withPermission(dependencies, "financeiro.ver", () =>
+        dependencies.financeiroService.getOverviewData(data),
+      ),
+    "financeiro.create": (data = {}) =>
+      withPermission(dependencies, "financeiro.criar", (actorUserId) =>
+        dependencies.financeiroService.createTransaction(data, actorUserId),
+      ),
+    "financeiro.delete": (data = {}) =>
+      withPermission(dependencies, "financeiro.apagar", (actorUserId) =>
+        dependencies.financeiroService.deleteTransaction(data.id, actorUserId),
+      ),
 
     "relatorio.data": (data = {}) =>
       withPermission(dependencies, "relatorios.ver", () =>
         dependencies.relatorioService.getReportData({ reportId: data.reportId, filters: data.filters || {} }),
       ),
-
-    "backup.manual": () =>
-      withPermission(dependencies, "configuracoes.ver", () =>
-        dependencies.backupService.createBackup({ app: dependencies.electronApp }),
+    "relatorio.rawData": (data = {}) =>
+      withPermission(dependencies, "relatorios.ver", () =>
+        dependencies.relatorioService.getRawData({ startDate: data.startDate, endDate: data.endDate }),
       ),
-    "backup.list": () =>
+
+    "backup.manual": (data = {}) =>
+      withPermission(dependencies, "configuracoes.ver", (userId) => {
+        const userName = userId ? String(userId) : "Manual";
+        return dependencies.backupService.createBackup({
+          app: dependencies.electronApp,
+          type: "manual",
+          createdBy: userName,
+          folderPath: data.folderPath || undefined,
+        });
+      }),
+    "backup.list": (data = {}) =>
       withPermission(dependencies, "configuracoes.ver", () =>
-        dependencies.backupService.listBackups({ app: dependencies.electronApp }),
+        dependencies.backupService.listBackups({ app: dependencies.electronApp, folderPath: data.folderPath || undefined }),
       ),
     "backup.restore": (data = {}) =>
       withPermission(dependencies, "configuracoes.ver", () =>
         dependencies.backupService.restoreBackup({ name: data.name, app: dependencies.electronApp }),
+      ),
+    "backup.delete": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", () =>
+        dependencies.backupService.deleteBackup({ name: data.name, app: dependencies.electronApp, folderPath: data.folderPath }),
+      ),
+    "backup.integrityCheck": () =>
+      withPermission(dependencies, "configuracoes.ver", () =>
+        dependencies.backupService.integrityCheck(),
+      ),
+    "backup.serviceStatus": (data = {}) =>
+      withPermission(dependencies, "configuracoes.ver", () => {
+        const status = dependencies.backupService.getServiceStatus({
+          app: dependencies.electronApp,
+          autoConfig: data.autoConfig || {},
+          folderPath: data.folderPath,
+        });
+        return status;
+      }),
+    "backup.openFolder": (data = {}) =>
+      withPermission(dependencies, "configuracoes.ver", async () => {
+        const folderPath = dependencies.backupService.getBackupFolderPath(
+          dependencies.electronApp,
+          data.folderPath,
+        );
+        if (folderPath && dependencies.electronApp) {
+          const { shell } = require("electron");
+          const fs = require("fs");
+          if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+          await shell.openPath(folderPath);
+        }
+        return { opened: true };
+      }),
+    "backup.chooseLocation": () =>
+      withPermission(dependencies, "configuracoes.editar", async () => {
+        const result = await dialog.showOpenDialog({
+          title: "Selecionar pasta de backups",
+          properties: ["openDirectory", "createDirectory"],
+        });
+        if (result.canceled || !result.filePaths[0]) return { canceled: true };
+        return { folderPath: result.filePaths[0] };
+      }),
+    "alerts.getSystemAlerts": (data = {}) =>
+      withPermission(dependencies, "dashboard.ver", () =>
+        dependencies.alertService.getSystemAlerts(data.alertConfig || {}),
       ),
 
     "dashboard.metrics": (data = {}) =>
@@ -481,6 +685,31 @@ function buildRouteMap(overrides = {}) {
         fs.copyFileSync(srcPath, dbPath);
         return { success: true, message: "Backup restaurado com sucesso. Reinicie o sistema para aplicar as alteracoes." };
       }),
+
+    "invoice.savePDF": async (data = {}) => {
+      const { dialog, shell } = require('electron');
+      const viewModel = data.viewModel || {};
+      const docNumber = viewModel.document?.number || 'documento';
+      const pdfBuffer = await invoicePrintService.generatePDF(viewModel);
+      const parentWin = dependencies.getMainWindow ? dependencies.getMainWindow() : null;
+      const dialogOpts = {
+        title: 'Guardar documento em PDF',
+        defaultPath: `${docNumber}.pdf`,
+        filters: [{ name: 'Documento PDF', extensions: ['pdf'] }],
+      };
+      const result = parentWin
+        ? await dialog.showSaveDialog(parentWin, dialogOpts)
+        : await dialog.showSaveDialog(dialogOpts);
+      if (result.canceled || !result.filePath) return { canceled: true };
+      fs.writeFileSync(result.filePath, pdfBuffer);
+      shell.openPath(result.filePath);
+      return { saved: true, filePath: result.filePath };
+    },
+
+    "invoice.print": async (data = {}) => {
+      await invoicePrintService.printDocument(data.viewModel || {});
+      return { ok: true };
+    },
 
     "window.setFullscreen": (data = {}) => {
       const win = dependencies.getMainWindow?.();

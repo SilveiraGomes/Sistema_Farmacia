@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Ban,
   Download,
@@ -13,15 +13,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import {
-  buildCancellationResult,
   canCancelDocument,
   DOCUMENT_STATUSES,
   DOCUMENT_TYPES,
   buildDocumentMetrics,
-  convertProformaToInvoice,
   documentStatusLabels,
   documentTypeLabels,
-  documents as initialDocuments,
   filterDocuments,
   prepareSecondCopy,
 } from '../data/documents.mjs';
@@ -31,14 +28,22 @@ import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog, useSettings } from '../configuration/SettingsContext';
 import { formatKwanza } from '../data/pharmacyData.mjs';
 import { confirmSensitiveAction } from '../utils/confirmations.mjs';
+import { request } from '../services/ipcClient.js';
 import InvoiceA4 from './InvoiceA4';
+
+function currentMonthRange() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+  return { dateFrom: `${y}-${m}-01`, dateTo: `${y}-${m}-${lastDay}` };
+}
 
 const EMPTY_FILTERS = {
   query: '',
   type: '',
   status: '',
-  dateFrom: '2026-06-01',
-  dateTo: '2026-06-30',
+  ...currentMonthRange(),
 };
 
 function getDisplayUserName(user) {
@@ -54,21 +59,47 @@ function Documentos() {
   const canExport = hasPermission('documentos.exportar');
   const canAnnul = hasPermission('documentos.anular');
   const canConvert = hasPermission('documentos.converter');
-  const [rows, setRows] = useState(initialDocuments);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [message, setMessage] = useState('');
 
+  const loadDocuments = useCallback(async (dateFrom, dateTo) => {
+    setLoading(true);
+    try {
+      const data = await request('vendas.listDocuments', { dateFrom, dateTo });
+      setRows(data);
+    } catch (err) {
+      console.error('Erro ao carregar documentos:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const { dateFrom, dateTo } = currentMonthRange();
+    loadDocuments(dateFrom, dateTo);
+  }, [loadDocuments]);
+
   const visibleRows = useMemo(() => filterDocuments(rows, filters), [filters, rows]);
   const metrics = useMemo(() => buildDocumentMetrics(rows, filters), [filters, rows]);
 
   function updateFilter(field, value) {
-    setFilters((current) => ({ ...current, [field]: value }));
+    setFilters((current) => {
+      const next = { ...current, [field]: value };
+      if (field === 'dateFrom' || field === 'dateTo') {
+        loadDocuments(next.dateFrom, next.dateTo);
+      }
+      return next;
+    });
   }
 
   function resetFilters() {
-    setFilters(EMPTY_FILTERS);
+    const range = currentMonthRange();
+    setFilters({ ...EMPTY_FILTERS, ...range });
+    loadDocuments(range.dateFrom, range.dateTo);
   }
 
   function openDocument(document) {
@@ -76,35 +107,42 @@ function Documentos() {
   }
 
   function printSecondCopy(document) {
-    const copy = prepareSecondCopy(rows, document.id);
-
-    setSelectedDocument(copy);
-    setMessage(`${copy.copyLabel} preparada para ${copy.number}.`);
+    setSelectedDocument({ ...document, copyLabel: '2a VIA' });
+    setMessage(`2a VIA preparada para ${document.number}.`);
   }
 
   function exportDocument(document) {
     setMessage(`Documento ${document.number} preparado para exportacao.`);
   }
 
-  function handleCancelDocument(reason) {
+  async function handleCancelDocument(reason) {
     const document = cancelTarget;
     if (!document || !canCancelDocument(document)) return;
 
-    const cancelledAt = new Date().toISOString();
-    const ncCount = rows.filter((d) => d.type === DOCUMENT_TYPES.CREDIT_NOTE).length + 1;
-    const year = String(new Date().getFullYear()).slice(-2);
-    const creditNoteNumber = `NC${String(ncCount).padStart(3, '0')}/${year}`;
+    try {
+      const ncCount = rows.filter((d) => d.type === 'NOTA_CREDITO').length + 1;
+      const year = String(new Date().getFullYear()).slice(-2);
+      const fallbackNc = `NC${String(ncCount).padStart(3, '0')}/${year}`;
+      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota_credito' }).catch(() => fallbackNc);
 
-    const { cancelledDoc, creditNote } = buildCancellationResult(document, {
-      reason,
-      cancelledBy: getDisplayUserName(user),
-      cancelledAt,
-      creditNoteNumber,
-    });
+      const { cancelledDoc, creditNote } = await request('vendas.cancelDocument', {
+        venda_id: document.vendaId,
+        reason,
+        creditNoteNumber: reservedNc,
+      });
 
-    setRows((current) => [creditNote, ...current.map((d) => (d.id === cancelledDoc.id ? cancelledDoc : d))]);
-    setCancelTarget(null);
-    setMessage(`${document.number} anulado. Nota de Crédito ${creditNoteNumber} gerada.`);
+      setRows((current) => [
+        creditNote,
+        ...current.map((d) => d.vendaId === cancelledDoc.vendaId
+          ? { ...d, status: 'ANULADO', cancelledAt: cancelledDoc.cancelledAt, cancelledBy: cancelledDoc.cancelledBy, cancellationReason: cancelledDoc.cancellationReason }
+          : d),
+      ]);
+      setCancelTarget(null);
+      setMessage(`${document.number} anulado. Nota de Crédito ${reservedNc} gerada.`);
+    } catch (err) {
+      setMessage(err?.message || 'Erro ao anular documento.');
+      setCancelTarget(null);
+    }
   }
 
   async function convertDocument(document) {
@@ -112,14 +150,19 @@ function Documentos() {
       title: 'Confirmar conversao',
       confirmLabel: 'Converter',
       tone: 'success',
-    }))) {
-      return;
-    }
+    }))) return;
 
-    setRows((current) => convertProformaToInvoice(current, document.id, {
-      userName: getDisplayUserName(user),
-    }));
-    setMessage(`${document.number} foi convertido em factura.`);
+    try {
+      const invoiceNumber = await request('configuration.document.reserveNumber', { documentType: 'factura' });
+      const updated = await request('vendas.convertProforma', {
+        venda_id: document.vendaId,
+        invoiceNumber,
+      });
+      setRows((current) => current.map((d) => d.vendaId === document.vendaId ? updated : d));
+      setMessage(`${document.number} convertido em Factura ${invoiceNumber}.`);
+    } catch (err) {
+      setMessage(err?.message || 'Erro ao converter proforma.');
+    }
   }
 
   return (
@@ -245,6 +288,7 @@ function Documentos() {
 }
 
 function DocumentDetails({ document, snapshot, onClose }) {
+  const [printBusy, setPrintBusy] = React.useState(false);
   const documentSettings = buildDocumentSettingsFromSnapshot(snapshot);
   const viewModel = buildInvoiceA4ViewModel({
     document,
@@ -252,16 +296,20 @@ function DocumentDetails({ document, snapshot, onClose }) {
     printedBy: document.userName || 'Usuario',
   });
 
-  function handlePrintA4() {
-    window.setTimeout(() => window.print(), 0);
+  async function handlePrintA4() {
+    if (printBusy) return;
+    setPrintBusy(true);
+    try { await request('invoice.print', { viewModel }); } finally { setPrintBusy(false); }
   }
 
-  function handleSavePdf() {
-    window.setTimeout(() => window.print(), 0);
+  async function handleSavePdf() {
+    if (printBusy) return;
+    setPrintBusy(true);
+    try { await request('invoice.savePDF', { viewModel }); } finally { setPrintBusy(false); }
   }
 
   return (
-    <div className="modal-backdrop documents-print-scope invoice-a4-print-scope" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal-card wide document-detail-modal">
         <div className="modal-title-row">
           <div>
@@ -269,10 +317,10 @@ function DocumentDetails({ document, snapshot, onClose }) {
             {document.copyLabel ? <span className="copy-label">{document.copyLabel}</span> : null}
           </div>
           <div className="invoice-a4-actions">
-            <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" onClick={handleSavePdf}>
+            <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" onClick={handleSavePdf} disabled={printBusy}>
               <FileDown size={20} />
             </button>
-            <button type="button" className="icon-button" aria-label="Imprimir factura" title="Imprimir" onClick={handlePrintA4}>
+            <button type="button" className="icon-button" aria-label="Imprimir factura" title="Imprimir" onClick={handlePrintA4} disabled={printBusy}>
               <Printer size={20} />
             </button>
             <button type="button" className="icon-button" aria-label="Fechar visualizacao" onClick={onClose}>x</button>

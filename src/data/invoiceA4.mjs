@@ -9,6 +9,7 @@ export function buildDocumentSettingsFromSnapshot(snapshot) {
     branding: {
       pharmacyName: identity.pharmacyName || 'Sistema de Farmacia',
       logoDataUrl: identity.logoDataUrl || '',
+      companyNif: identity.nif || '',
     },
     settings: {
       documentHeaderText: snapshot?.settings?.documents?.headerText?.value || identity.pharmacyName || 'Sistema de Farmacia',
@@ -150,6 +151,7 @@ export function buildInvoiceA4ViewModel({
     header: {
       documentHeaderText: settings.documentHeaderText,
       logoDataUrl: branding.logoDataUrl,
+      companyNif: branding.companyNif || '',
     },
     document: {
       title: getDocumentTitle(document),

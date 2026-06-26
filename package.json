@@ -1,5 +1,5 @@
 {
-  "name": "pharmacy-system",
+  "name": "kilsystem-pharmacy",
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
@@ -12,9 +12,9 @@
     "dist": "npm run build && electron-builder --win nsis"
   },
   "build": {
-    "appId": "com.esayos.farmacia",
-    "productName": "Farmácia ESAYOS",
-    "copyright": "Copyright © 2026 ESAYOS",
+    "appId": "com.kilsystem.pharmacy",
+    "productName": "KILSYSTEM PHARMACY",
+    "copyright": "Copyright © 2026 KILSYSTEM",
     "directories": {
       "output": "release"
     },
@@ -45,7 +45,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Farmácia ESAYOS",
+      "shortcutName": "KILSYSTEM PHARMACY",
       "installerIcon": "resources/icon.ico",
       "uninstallerIcon": "resources/icon.ico"
     }
@@ -55,6 +55,7 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@noble/hashes": "^1.8.0",
     "@tailwindcss/postcss": "^4.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.5.0",
@@ -68,6 +69,7 @@
   "dependencies": {
     "googleapis": "^173.0.0",
     "lucide-react": "^1.17.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "sequelize": "^6.37.8",
