@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 const { getModels } = require('../database');
-const { verifyPassword, hashPassword } = require('../security/passwords');
+const { verifyPassword, hashPassword, verifyPin } = require('../security/passwords');
 const { getUserPermissions } = require('./authorizationService');
 const { recordUserAudit } = require('./auditService');
 
@@ -37,6 +37,7 @@ function sanitizeUser(user) {
     ativo: user.ativo,
     deve_trocar_senha: user.deve_trocar_senha,
     ultimo_login_em: user.ultimo_login_em,
+    has_pin: Boolean(user.pin_hash),
   };
 }
 
@@ -165,8 +166,43 @@ async function changeOwnPassword({ currentPassword, newPassword }) {
   return refreshCurrentSession();
 }
 
+async function loginWithPin({ userId, pin }) {
+  const { Usuario } = getModels();
+  const user = await Usuario.findByPk(userId);
+
+  if (!user || !user.pin_hash) throw new Error('Credenciais invalidas.');
+  if (user.ativo === false) {
+    await recordUserAudit({ targetUserId: user.id, action: 'LOGIN_PIN_USUARIO_INATIVO' });
+    throw new Error('Usuario inativo.');
+  }
+  if (user.bloqueado_ate && new Date(user.bloqueado_ate) > new Date()) {
+    await recordUserAudit({ targetUserId: user.id, action: 'LOGIN_PIN_USUARIO_BLOQUEADO' });
+    throw new Error('Usuario temporariamente bloqueado.');
+  }
+
+  if (!verifyPin(pin, user.pin_hash)) {
+    await Usuario.increment('falhas_login', { by: 1, where: { id: user.id } });
+    await user.reload();
+    const falhas = Number(user.falhas_login || 0);
+    if (falhas >= MAX_LOGIN_FAILURES) {
+      await Usuario.update(
+        { bloqueado_ate: new Date(Date.now() + LOCK_MINUTES * 60 * 1000) },
+        { where: { id: user.id } },
+      );
+    }
+    await recordUserAudit({ targetUserId: user.id, action: 'LOGIN_PIN_FALHA', details: { falhas } });
+    throw new Error('Credenciais invalidas.');
+  }
+
+  await user.update({ falhas_login: 0, bloqueado_ate: null, ultimo_login_em: new Date() });
+  await recordUserAudit({ actorUserId: user.id, targetUserId: user.id, action: 'LOGIN_PIN_SUCESSO' });
+  currentSession = { ...(await buildSession(user)), lastActivityAt: Date.now() };
+  return currentSession;
+}
+
 module.exports = {
   login,
+  loginWithPin,
   logout,
   getCurrentSession,
   refreshCurrentSession,

@@ -1,22 +1,81 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, Pencil, PlusCircle, Search, ShoppingBag, Trash2, UserRound, UsersRound, WalletCards } from 'lucide-react';
-import { buildClientMetrics, clients, filterClientsForManagement, formatKwanza } from '../data/pharmacyData.mjs';
+import { formatKwanza } from '../data/pharmacyData.mjs';
+import { request } from '../services/ipcClient.js';
 import { confirmDelete } from '../utils/confirmations.mjs';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog } from '../configuration/SettingsContext';
 
 const EMPTY_FORM = { name: '', nif: '', phone: '', email: '', creditLimit: '', status: 'Activo', address: '' };
 
+function formatLastPurchase(isoDate) {
+  if (!isoDate) return '-';
+  const [year, month, day] = isoDate.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function mapCliente(c) {
+  return {
+    id: c.id,
+    name: c.nome,
+    nif: c.nif || '',
+    phone: c.telefone || '',
+    email: c.email || '',
+    address: c.endereco || '',
+    status: c.status || 'Activo',
+    openCredit: c.creditoAberto || 0,
+    totalPurchases: c.totalCompras || 0,
+    lastPurchase: formatLastPurchase(c.ultimaCompra),
+    createdAt: c.data_cadastro || '',
+  };
+}
+
+function buildMetrics(rows, today) {
+  const todayStr = today.slice(0, 10);
+  const monthStr = todayStr.slice(0, 7);
+  return {
+    activeClients: rows.filter((r) => r.status === 'Activo').length,
+    purchasesToday: rows.filter((r) => r.lastPurchase && r.lastPurchase.split('/').reverse().join('-') === todayStr).length,
+    openCredit: rows.reduce((s, r) => s + Number(r.openCredit || 0), 0),
+    newThisMonth: rows.filter((r) => String(r.createdAt || '').startsWith(monthStr)).length,
+  };
+}
+
+function filterClients(rows, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) =>
+    [r.name, r.nif, r.phone, r.status].filter(Boolean).join(' ').toLowerCase().includes(q),
+  );
+}
+
 function Clientes() {
   const clientStatuses = useCatalog(CATALOG_KEYS.CLIENT_STATUSES);
   const [showModal, setShowModal] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [formData, setFormData] = useState(EMPTY_FORM);
-  const [rows, setRows] = useState(clients);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState('');
-  const metrics = useMemo(() => buildClientMetrics(rows, '2026-06-15'), [rows]);
-  const visibleRows = useMemo(() => filterClientsForManagement(rows, query), [query, rows]);
+  const today = new Date().toISOString().slice(0, 10);
+  const metrics = useMemo(() => buildMetrics(rows, today), [rows, today]);
+  const visibleRows = useMemo(() => filterClients(rows, query), [query, rows]);
+
+  const loadClients = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request('clientes.list', {});
+      setRows(data.map(mapCliente));
+    } catch (err) {
+      console.error('Erro ao carregar clientes:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadClients(); }, [loadClients]);
 
   function openNewClient() {
     setEditingClient(null);
@@ -35,33 +94,51 @@ function Clientes() {
       status: client.status || 'Activo',
       address: client.address || '',
     });
+    setSaving(false);
     setShowModal(true);
   }
 
-  function saveClient() {
-    if (editingClient) {
-      setRows((current) =>
-        current.map((r) => r.id === editingClient.id ? { ...r, ...formData, openCredit: Number(formData.creditLimit) || 0 } : r)
-      );
-    } else {
-      setRows((current) => [...current, { id: Date.now(), ...formData, openCredit: Number(formData.creditLimit) || 0, totalPurchases: 0, lastPurchase: '-' }]);
+  async function saveClient() {
+    setSaving(true);
+    try {
+      const payload = {
+        nome: formData.name,
+        nif: formData.nif,
+        telefone: formData.phone,
+        email: formData.email,
+        endereco: formData.address,
+        status: formData.status,
+        limite_credito: Number(formData.creditLimit) || 0,
+      };
+      if (editingClient) {
+        await request('clientes.update', { id: editingClient.id, ...payload });
+      } else {
+        await request('clientes.create', payload);
+      }
+      await loadClients();
+      setShowModal(false);
+    } catch (err) {
+      alert(err?.message || 'Erro ao guardar cliente.');
+    } finally {
+      setSaving(false);
     }
-    setShowModal(false);
   }
 
   async function removeClient(client) {
-    if (!(await confirmDelete(`o cliente ${client.name}`))) {
-      return;
+    if (!(await confirmDelete(`o cliente ${client.name}`))) return;
+    try {
+      await request('clientes.delete', { id: client.id });
+      loadClients();
+    } catch (err) {
+      alert(err?.message || 'Erro ao remover cliente.');
     }
-
-    setRows((current) => current.filter((row) => row.id !== client.id));
   }
 
   function exportClientsExcel() {
     const headers = ['ID', 'Nome', 'Telefone', 'NIF', 'Email', 'Endereço', 'Status', 'Limite de Crédito'];
     const dataRows = visibleRows.map((r) => [
       r.id, r.name, r.phone || '', r.nif || '', r.email || '',
-      r.address || '', r.status || '', r.creditLimit ?? '',
+      r.address || '', r.status || '', r.openCredit ?? '',
     ]);
     const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
     const wb = XLSX.utils.book_new();
@@ -159,7 +236,7 @@ function Clientes() {
             </div>
             <div className="modal-actions">
               <button type="button" className="soft-button" onClick={() => setShowModal(false)}>Cancelar</button>
-              <button type="button" className="primary-button" onClick={saveClient}>Guardar</button>
+              <button type="button" className="primary-button" disabled={saving} onClick={saveClient}>{saving ? '...' : 'Guardar'}</button>
             </div>
           </div>
         </div>

@@ -165,6 +165,35 @@ describe('configurationService', () => {
     assert.equal(await models.AuditoriaConfiguracao.count(), 0);
   });
 
+  test('updateSection protects AGT validation number and software name outside development', async () => {
+    await service.seedDefaults();
+    const current = await service.getSnapshot();
+    const fiscal = current.settings.documents.fiscal.value;
+
+    await assert.rejects(
+      service.updateSection({
+        actorUserId: actor.id,
+        section: 'documents',
+        values: {
+          'documents.fiscal': {
+            ...fiscal,
+            validationNumber: '123/AGT/2026',
+            softwareName: 'Outro Sistema',
+          },
+        },
+        expectedVersions: {
+          'documents.fiscal': current.settings.documents.fiscal.version,
+        },
+      }),
+      (error) => error.code === CONFIGURATION_ERROR_CODES.PROTECTED
+        && error.message === 'Nome do software e número de validação AGT são protegidos.',
+    );
+
+    const after = await service.getSnapshot();
+    assert.equal(after.settings.documents.fiscal.value.validationNumber, fiscal.validationNumber);
+    assert.equal(after.settings.documents.fiscal.value.softwareName, fiscal.softwareName);
+  });
+
   test('updateSection rolls back setting changes and audits after a mid-transaction failure', async () => {
     await service.seedDefaults();
     const originalCreate = models.AuditoriaConfiguracao.create;

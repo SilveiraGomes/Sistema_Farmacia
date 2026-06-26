@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   AlertTriangle,
@@ -19,15 +19,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { request } from '../services/ipcClient.js';
-import {
-  buildFinancialOverview,
-  financeExpenses,
-  financeLosses,
-  financeOtherRevenues,
-  financeProductSales,
-  formatKwanza,
-  transactions,
-} from '../data/pharmacyData.mjs';
+import { buildFinancialOverview, formatKwanza } from '../data/pharmacyData.mjs';
 import { confirmDelete } from '../utils/confirmations.mjs';
 import { useOperation } from '../operation/OperationContext';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
@@ -44,7 +36,7 @@ const manualEntryDefaults = {
   category: 'Infraestrutura',
   description: '',
   value: '',
-  date: '2026-06-15',
+  date: new Date().toISOString().slice(0, 10),
   status: 'Paga',
   shift: 'Manha',
   product: '',
@@ -68,26 +60,35 @@ function Financeiro() {
   const statusCatalog = useCatalog(CATALOG_KEYS.FINANCIAL_STATUSES);
   const shiftOptions = [{ code: 'Todos', name: 'Todos os turnos' }, ...shiftCatalog];
   const [showModal, setShowModal] = useState(false);
-  const [rows, setRows] = useState(transactions);
-  const [manualExpenses, setManualExpenses] = useState([]);
-  const [manualLosses, setManualLosses] = useState([]);
-  const [manualRevenues, setManualRevenues] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [overviewData, setOverviewData] = useState({ sales: [], losses: [], expenses: [], otherRevenues: [] });
   const [manualEntry, setManualEntry] = useState(manualEntryDefaults);
   const [period, setPeriod] = useState('month');
-  const [referenceDate, setReferenceDate] = useState('2026-06-15');
+  const today = new Date().toISOString().slice(0, 10);
+  const [referenceDate, setReferenceDate] = useState(today);
   const [shift, setShift] = useState('Todos');
+
   const overview = useMemo(
-    () => buildFinancialOverview({
-      sales: financeProductSales,
-      losses: [...financeLosses, ...manualLosses],
-      expenses: [...financeExpenses, ...manualExpenses],
-      otherRevenues: [...financeOtherRevenues, ...manualRevenues],
-    }, { period, referenceDate, shift }),
-    [manualExpenses, manualLosses, manualRevenues, period, referenceDate, shift],
+    () => buildFinancialOverview(overviewData, { period, referenceDate, shift }),
+    [overviewData, period, referenceDate, shift],
   );
 
   const [contasPagar, setContasPagar] = useState([]);
   const [contasLoading, setContasLoading] = useState(true);
+
+  const loadFinanceData = useCallback(async (date) => {
+    const refDate = date || referenceDate;
+    try {
+      const [txRows, ovData] = await Promise.all([
+        request('financeiro.list', { referenceDate: refDate }),
+        request('financeiro.overview', { referenceDate: refDate }),
+      ]);
+      setRows(txRows || []);
+      setOverviewData(ovData || { sales: [], losses: [], expenses: [], otherRevenues: [] });
+    } catch (err) {
+      console.error('Erro ao carregar financeiro:', err);
+    }
+  }, [referenceDate]);
 
   useEffect(() => {
     request('financeiro.contasPagar', {})
@@ -95,6 +96,10 @@ function Financeiro() {
       .catch(() => {})
       .finally(() => setContasLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadFinanceData();
+  }, [loadFinanceData]);
 
   async function marcarPago(id) {
     try {
@@ -121,61 +126,35 @@ function Financeiro() {
     setManualEntry((current) => ({ ...current, [field]: value }));
   }
 
-  function saveManualEntry() {
+  async function saveManualEntry() {
     if (!operation.canOperate) return;
     const value = Number(manualEntry.value);
     if (!Number.isFinite(value) || value <= 0 || !manualEntry.description.trim()) return;
 
-    const id = `FM${Date.now()}`;
-    if (manualEntry.type === 'expense') {
-      const row = {
-        id,
-        category: manualEntry.category,
-        description: manualEntry.description.trim(),
-        value,
-        date: manualEntry.date,
-        status: manualEntry.status,
-        source: 'Manual',
-      };
-      setManualExpenses((current) => [row, ...current]);
-      setRows((current) => [toMovementRow(row, 'Despesa'), ...current]);
-    }
+    const isLoss = manualEntry.type === 'loss';
+    const tipoNorm = manualEntry.type === 'revenue' ? 'Receita' : 'Despesa';
 
-    if (manualEntry.type === 'revenue') {
-      const row = {
-        id,
-        category: manualEntry.category,
-        description: manualEntry.description.trim(),
-        value,
-        date: manualEntry.date,
-        status: manualEntry.status,
-        source: 'Manual',
-      };
-      setManualRevenues((current) => [row, ...current]);
-      setRows((current) => [toMovementRow(row, 'Receita'), ...current]);
-    }
+    const payload = {
+      tipo: tipoNorm,
+      categoria: isLoss ? 'Perdas' : manualEntry.category,
+      descricao: isLoss
+        ? `${manualEntry.reason} - ${manualEntry.description.trim()}`
+        : manualEntry.description.trim(),
+      valor: value,
+      data: manualEntry.date,
+      status: isLoss ? 'Paga' : manualEntry.status,
+      turno: isLoss ? manualEntry.shift : null,
+      motivo_perda: isLoss ? manualEntry.reason : null,
+      quantidade: isLoss ? Number(manualEntry.quantity) || 1 : null,
+    };
 
-    if (manualEntry.type === 'loss') {
-      const row = {
-        id,
-        product: manualEntry.product.trim() || manualEntry.description.trim(),
-        reason: manualEntry.reason,
-        quantity: Number(manualEntry.quantity) || 1,
-        value,
-        date: manualEntry.date,
-        shift: manualEntry.shift,
-        source: 'Manual',
-      };
-      setManualLosses((current) => [row, ...current]);
-      setRows((current) => [toMovementRow({
-        ...row,
-        category: 'Perdas',
-        description: `${row.reason} - ${row.product}`,
-        status: 'Paga',
-      }, 'Despesa'), ...current]);
+    try {
+      await request('financeiro.create', payload);
+      await loadFinanceData();
+      setShowModal(false);
+    } catch (err) {
+      alert(err?.message || 'Erro ao guardar lançamento.');
     }
-
-    setShowModal(false);
   }
 
   function exportMovementsExcel() {
@@ -191,11 +170,13 @@ function Financeiro() {
   }
 
   async function removeMovement(item) {
-    if (!(await confirmDelete(`o movimento ${item.description}`))) {
-      return;
+    if (!(await confirmDelete(`o movimento ${item.description}`))) return;
+    try {
+      await request('financeiro.delete', { id: item.id });
+      setRows((current) => current.filter((row) => row.id !== item.id));
+    } catch (err) {
+      alert(err?.message || 'Erro ao remover movimento.');
     }
-
-    setRows((current) => current.filter((row) => row.id !== item.id));
   }
 
   return (
@@ -207,7 +188,7 @@ function Financeiro() {
         </div>
         <label>
           <Calendar size={17} />
-          <input type="date" value={referenceDate} onChange={(event) => setReferenceDate(event.target.value)} />
+          <input type="date" value={referenceDate} onChange={(event) => { setReferenceDate(event.target.value); loadFinanceData(event.target.value); }} />
         </label>
         <select value={period} onChange={(event) => setPeriod(event.target.value)} aria-label="Periodo financeiro">
           {periodOptions.map((option) => (
@@ -543,18 +524,6 @@ function PaymentEntryCard({ entry }) {
       </div>
     </div>
   );
-}
-
-function toMovementRow(row, type) {
-  return {
-    id: row.id,
-    type,
-    description: row.description,
-    value: row.value,
-    date: row.date,
-    status: row.status ?? 'Paga',
-    source: row.source ?? 'Manual',
-  };
 }
 
 export default Financeiro;

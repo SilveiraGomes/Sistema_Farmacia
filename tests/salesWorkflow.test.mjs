@@ -9,6 +9,7 @@ import {
   createHeldSale,
   filterClientsForPicker,
   filterProductsForSale,
+  findProductByExactBarcode,
   resumeHeldSale,
   calculateCheckout,
   appendReceivedDigit,
@@ -74,13 +75,27 @@ test('calculateCheckout returns total, received value and change', () => {
 
 test('filterProductsForSale searches all products when a query is typed', () => {
   const products = [
-    { id: 1, name: 'Aspirina', category: 'Medicamentos', price: 1000, stock: 10 },
-    { id: 2, name: 'Luvas Clinicas', category: 'Material Clinico', price: 700, stock: 20 },
+    { id: 1, name: 'Aspirina', category: 'Medicamentos', price: 1000, stock: 10, barcode: '78910001' },
+    { id: 2, name: 'Luvas Clinicas', category: 'Material Clinico', price: 700, stock: 20, barcode: '311' },
   ];
 
   assert.deepEqual(filterProductsForSale(products, null, '').map((item) => item.name), ['Aspirina', 'Luvas Clinicas']);
   assert.deepEqual(filterProductsForSale(products, 'Medicamentos', '').map((item) => item.name), ['Aspirina']);
   assert.deepEqual(filterProductsForSale(products, 'Medicamentos', 'luvas').map((item) => item.name), ['Luvas Clinicas']);
+  assert.deepEqual(filterProductsForSale(products, 'Medicamentos', '311').map((item) => item.name), ['Luvas Clinicas']);
+});
+
+test('findProductByExactBarcode selects only exact 13 digit barcodes', () => {
+  const products = [
+    { id: 1, name: 'Aspirina', barcode: '5601234567890' },
+    { id: 2, name: 'Luvas Clinicas', codigo_barras: '7891234567895' },
+  ];
+
+  assert.equal(findProductByExactBarcode(products, '5601234567890')?.name, 'Aspirina');
+  assert.equal(findProductByExactBarcode(products, ' 7891234567895 ')?.name, 'Luvas Clinicas');
+  assert.equal(findProductByExactBarcode(products, '560123456789'), null);
+  assert.equal(findProductByExactBarcode(products, '5601234567899'), null);
+  assert.equal(findProductByExactBarcode(products, 'ABC1234567890'), null);
 });
 
 test('filterClientsForPicker searches clients by name, NIF or phone', () => {

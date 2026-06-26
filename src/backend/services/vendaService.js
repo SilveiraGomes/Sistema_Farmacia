@@ -26,6 +26,29 @@ const TIPO_TO_STATUS = {
   NOTA_CREDITO: 'EMITIDO',
 };
 
+function normalizePaymentCode(value) {
+  return String(value || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function validateDocumentPaymentRule({ docType, paymentMethod } = {}) {
+  const tipoDoc = IPC_TO_TIPO[docType] || 'FACTURA_RECIBO';
+  const paymentCode = normalizePaymentCode(paymentMethod);
+  const isCreditDocument = tipoDoc === 'CREDITO';
+  const isCreditPayment = paymentCode === 'credito';
+
+  if (isCreditDocument && !isCreditPayment) {
+    throw Object.assign(new Error('Documento do tipo Crédito deve usar pagamento Crédito.'), { code: 'VALIDATION' });
+  }
+
+  if (!isCreditDocument && isCreditPayment) {
+    throw Object.assign(new Error('Crédito só é permitido quando o tipo de documento for Crédito.'), { code: 'VALIDATION' });
+  }
+}
+
 function serializeVendaAsDocument(row) {
   const v = typeof row.get === 'function' ? row.get({ plain: true }) : row;
   const items = (v.ItemVendas || []).map((item) => ({
@@ -82,6 +105,7 @@ async function createVenda(data, actorUserId) {
   const tipoDoc = IPC_TO_TIPO[docType] || 'FACTURA_RECIBO';
   const isProforma = tipoDoc === 'PROFORMA';
   const status = TIPO_TO_STATUS[tipoDoc] || 'PAGO';
+  validateDocumentPaymentRule({ docType, paymentMethod });
 
   // FIFO stock deduction — collect lot assignments per product
   const lotAssignments = {}; // produto_id → [{ lote, quantidade }]
@@ -364,6 +388,8 @@ const SAFE_ERRORS = Object.freeze([
   'Forma de pagamento e obrigatoria.',
   'Total invalido.',
   'Numero de documento e obrigatorio.',
+  'Documento do tipo Crédito deve usar pagamento Crédito.',
+  'Crédito só é permitido quando o tipo de documento for Crédito.',
   'Documento nao encontrado.',
   'Documento ja foi anulado.',
   'Nota de credito nao pode ser anulada.',
@@ -379,5 +405,6 @@ module.exports = {
   listDocuments,
   convertProforma,
   cancelDocument,
+  validateDocumentPaymentRule,
   SAFE_ERRORS,
 };

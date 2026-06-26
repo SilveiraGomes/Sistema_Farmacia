@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 const { getModels } = require('../database');
-const { createTemporaryPassword, hashPassword } = require('../security/passwords');
+const { createTemporaryPassword, hashPassword, hashPin, assertPin } = require('../security/passwords');
 const { sanitizeUser } = require('./authService');
 const { recordUserAudit } = require('./auditService');
 const { ADMINISTRATOR_PROFILE } = require('./permissionCatalog');
@@ -296,12 +296,50 @@ async function resetUserPassword({ actorUserId, userId }) {
   };
 }
 
+async function listUsersWithPin() {
+  const { Usuario } = getModels();
+  const users = await Usuario.findAll({
+    attributes: ['id', 'nome_usuario', 'nome_completo'],
+    where: { ativo: true, pin_hash: { [Op.ne]: null } },
+    order: [['nome_completo', 'ASC']],
+  });
+  return users.map((u) => ({
+    id: u.id,
+    nome_usuario: u.nome_usuario,
+    nome_completo: u.nome_completo,
+  }));
+}
+
+async function setUserPin({ actorUserId, targetUserId, pin }) {
+  assertPin(pin);
+  const { Usuario } = getModels();
+  const user = await Usuario.findByPk(targetUserId);
+  if (!user) throw new Error('Utilizador nao encontrado.');
+
+  await user.update({ pin_hash: hashPin(pin) });
+  await recordUserAudit({ actorUserId, targetUserId: user.id, action: 'PIN_DEFINIDO' });
+  return { ok: true };
+}
+
+async function clearUserPin({ actorUserId, targetUserId }) {
+  const { Usuario } = getModels();
+  const user = await Usuario.findByPk(targetUserId);
+  if (!user) throw new Error('Utilizador nao encontrado.');
+
+  await user.update({ pin_hash: null });
+  await recordUserAudit({ actorUserId, targetUserId: user.id, action: 'PIN_REMOVIDO' });
+  return { ok: true };
+}
+
 module.exports = {
   listLoginUsers,
+  listUsersWithPin,
   listUsers,
   createUser,
   updateUser,
   deactivateUser,
   activateUser,
   resetUserPassword,
+  setUserPin,
+  clearUserPin,
 };

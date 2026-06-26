@@ -150,8 +150,11 @@ test('init seeds defaults before registering routes and seeds exactly once', asy
     await new Promise((resolve) => { releaseSeed = resolve; });
   };
   const ipcMain = {
-    removeHandler() { calls.push(['removeHandler']); },
-    handle(_channel, handler) { calls.push(['handle']); appHandler = handler; },
+    removeHandler(channel) { calls.push(['removeHandler', channel]); },
+    handle(channel, handler) {
+      calls.push(['handle', channel]);
+      if (channel === 'app:request') appHandler = handler;
+    },
     removeAllListeners() { calls.push(['removeAllListeners']); },
     on() { calls.push(['on']); },
   };
@@ -177,8 +180,16 @@ test('init seeds defaults before registering routes and seeds exactly once', asy
   assert.equal(response.ok, true);
   assert.deepEqual(calls, [
     ['seedDefaults'],
-    ['removeHandler'],
-    ['handle'],
+    ['removeHandler', 'app:request'],
+    ['handle', 'app:request'],
+    ['removeHandler', 'print:window:listPrinters'],
+    ['removeHandler', 'print:window:print'],
+    ['removeHandler', 'print:window:exportPdf'],
+    ['removeHandler', 'print:window:close'],
+    ['handle', 'print:window:listPrinters'],
+    ['handle', 'print:window:print'],
+    ['handle', 'print:window:exportPdf'],
+    ['handle', 'print:window:close'],
     ['removeAllListeners'],
     ['on'],
     ['service', 'getSnapshot'],

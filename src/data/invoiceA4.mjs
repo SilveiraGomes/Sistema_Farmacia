@@ -1,14 +1,17 @@
 import { DOCUMENT_STATUSES, DOCUMENT_TYPES, documentTypeLabels } from './documents.mjs';
+import { getStoredBranding } from './branding.mjs';
 
 const REFERENCE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 export function buildDocumentSettingsFromSnapshot(snapshot) {
   const identity = snapshot?.settings?.company?.identity?.value || {};
   const fiscal = snapshot?.settings?.documents?.fiscal?.value || {};
+  // Logo is stored in localStorage (via branding.mjs), not in the DB snapshot
+  const stored = getStoredBranding();
   return {
     branding: {
       pharmacyName: identity.pharmacyName || 'Sistema de Farmacia',
-      logoDataUrl: identity.logoDataUrl || '',
+      logoDataUrl: stored.logoDataUrl || identity.logoDataUrl || '',
       companyNif: identity.taxId || '',
     },
     settings: {

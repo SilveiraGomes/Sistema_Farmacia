@@ -21,3 +21,22 @@ test('invoice quantity stepper buttons show pointer cursor', async () => {
 
   assert.match(stepperButtonRule, /cursor:\s*pointer;/);
 });
+
+test('sales products keep stock barcode for scanner search', async () => {
+  const source = await readFile(new URL('../src/components/Vendas.jsx', import.meta.url), 'utf8');
+  const mapperStart = source.indexOf('function mapProductForSale');
+  const clientMapperStart = source.indexOf('function mapClientForSale');
+  const mapperSource = source.slice(mapperStart, clientMapperStart);
+
+  assert.match(mapperSource, /barcode:\s*p\.codigo_barras\s*\|\|\s*''/);
+});
+
+test('barcode scanner input adds exact product to invoice items and clears search', async () => {
+  const source = await readFile(new URL('../src/components/Vendas.jsx', import.meta.url), 'utf8');
+
+  assert.match(source, /findProductByExactBarcode/);
+  assert.match(source, /function handleProductQueryChange/);
+  assert.match(source, /setCart\(\(current\) => addCartItem\(current,\s*scannedProduct\)\)/);
+  assert.match(source, /setProductQuery\(''\)/);
+  assert.match(source, /onChange=\{\(event\) => handleProductQueryChange\(event\.target\.value\)\}/);
+});

@@ -61,9 +61,46 @@ function createTemporaryPassword(length = 12) {
   return password;
 }
 
+const PIN_HASH_PREFIX = 'pin_pbkdf2';
+const PIN_ITERATIONS = 10000;
+
+function assertPin(pin) {
+  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+    throw new Error('PIN deve ter exatamente 4 dígitos numéricos.');
+  }
+}
+
+function hashPin(pin) {
+  assertPin(pin);
+  const salt = crypto.randomBytes(16).toString('base64url');
+  const hash = crypto
+    .pbkdf2Sync(pin, salt, PIN_ITERATIONS, KEY_LENGTH, DIGEST)
+    .toString('base64url');
+  return `${PIN_HASH_PREFIX}$${PIN_ITERATIONS}$${salt}$${hash}`;
+}
+
+function verifyPin(pin, storedHash) {
+  if (typeof pin !== 'string' || typeof storedHash !== 'string') return false;
+  const parts = storedHash.split('$');
+  if (parts.length !== 4) return false;
+  const [prefix, iterationsRaw, salt, expectedHash] = parts;
+  if (prefix !== PIN_HASH_PREFIX || !salt || !expectedHash) return false;
+  const iterations = Number(iterationsRaw);
+  if (!Number.isInteger(iterations) || iterations < 1) return false;
+  const actualHash = crypto
+    .pbkdf2Sync(pin, salt, iterations, KEY_LENGTH, DIGEST)
+    .toString('base64url');
+  const expected = Buffer.from(expectedHash);
+  const actual = Buffer.from(actualHash);
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
 module.exports = {
   PASSWORD_HASH_PREFIX,
   hashPassword,
   verifyPassword,
   createTemporaryPassword,
+  hashPin,
+  verifyPin,
+  assertPin,
 };

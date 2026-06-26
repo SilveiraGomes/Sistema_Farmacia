@@ -81,7 +81,7 @@ const EDITABLE_CATALOGS = new Set([
 const SETTING_DEFAULTS = Object.freeze({
   company: {
     identity: {
-      pharmacyName: "Sistema de Farmacia",
+      pharmacyName: "KILSYSTEM PHARMACY",
       taxId: "",
       address: "",
       phone: "",

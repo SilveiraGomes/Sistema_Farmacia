@@ -22,6 +22,7 @@ function defineModels(db) {
     nome: { type: DataTypes.STRING, unique: true, allowNull: false },
     codigo: { type: DataTypes.STRING, unique: true },
     descricao: { type: DataTypes.TEXT },
+    imagem: { type: DataTypes.TEXT },
     ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
@@ -36,6 +37,7 @@ function defineModels(db) {
     nome: { type: DataTypes.STRING, allowNull: false },
     codigo: { type: DataTypes.STRING },
     descricao: { type: DataTypes.TEXT },
+    imagem: { type: DataTypes.TEXT },
     ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
@@ -64,6 +66,7 @@ function defineModels(db) {
     gaveta: { type: DataTypes.STRING },
     zona: { type: DataTypes.STRING },
     observacao_localizacao: { type: DataTypes.TEXT },
+    imagem: { type: DataTypes.TEXT },
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
 
@@ -93,6 +96,11 @@ function defineModels(db) {
     valor_pago: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 },
     troco: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 },
     status: { type: DataTypes.STRING, defaultValue: "Concluida" },
+    tipo_documento: { type: DataTypes.STRING, defaultValue: "FACTURA_RECIBO" },
+    cancelamento_motivo: { type: DataTypes.TEXT },
+    cancelado_por: { type: DataTypes.STRING },
+    cancelado_em: { type: DataTypes.DATE },
+    origem_documento_id: { type: DataTypes.INTEGER },
     cliente_id: { type: DataTypes.INTEGER },
     usuario_id: { type: DataTypes.INTEGER, allowNull: false },
   });
@@ -229,6 +237,8 @@ function defineModels(db) {
     telefone: { type: DataTypes.STRING },
     email: { type: DataTypes.STRING, unique: true },
     endereco: { type: DataTypes.TEXT },
+    status: { type: DataTypes.STRING, defaultValue: "Activo" },
+    limite_credito: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
 
@@ -320,6 +330,7 @@ function defineModels(db) {
     ultimo_login_em: { type: DataTypes.DATE },
     falhas_login: { type: DataTypes.INTEGER, defaultValue: 0 },
     bloqueado_ate: { type: DataTypes.DATE },
+    pin_hash: { type: DataTypes.STRING, allowNull: true },
     data_cadastro: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
   });
 
@@ -589,6 +600,11 @@ async function ensureSqliteVendasColumns(db) {
     ["imposto", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 }],
     ["valor_pago", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 }],
     ["troco", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0.0 }],
+    ["tipo_documento", { type: DataTypes.STRING, defaultValue: "FACTURA_RECIBO" }],
+    ["cancelamento_motivo", { type: DataTypes.TEXT }],
+    ["cancelado_por", { type: DataTypes.STRING }],
+    ["cancelado_em", { type: DataTypes.DATE }],
+    ["origem_documento_id", { type: DataTypes.INTEGER }],
   ];
 
   for (const [name, definition] of vendasColumns) {
@@ -817,6 +833,7 @@ async function ensureSqliteUsuarioSecurityColumns(db) {
     ["ultimo_login_em", { type: DataTypes.DATE }],
     ["falhas_login", { type: DataTypes.INTEGER, defaultValue: 0 }],
     ["bloqueado_ate", { type: DataTypes.DATE }],
+    ["pin_hash", { type: DataTypes.STRING, allowNull: true }],
   ];
 
   for (const [name, definition] of userColumns) {
@@ -1305,11 +1322,65 @@ async function ensureSqliteOperationalColumns(db) {
   }
 }
 
+async function ensureSqliteClienteColumns(db) {
+  if (db.getDialect() !== "sqlite") return;
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+  if (!hasTable(tables, "Clientes")) return;
+  const columns = await queryInterface.describeTable("Clientes");
+  const clienteColumns = [
+    ["status", { type: DataTypes.STRING, defaultValue: "Activo" }],
+    ["limite_credito", { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }],
+  ];
+  for (const [name, definition] of clienteColumns) {
+    if (!columns[name]) {
+      await queryInterface.addColumn("Clientes", name, definition);
+    }
+  }
+}
+
+async function ensureSqliteCategoriaColumns(db) {
+  if (db.getDialect() !== "sqlite") return;
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+  if (!hasTable(tables, "Categorias")) return;
+  const columns = await queryInterface.describeTable("Categorias");
+  if (!columns["imagem"]) {
+    await queryInterface.addColumn("Categorias", "imagem", { type: DataTypes.TEXT });
+  }
+}
+
+async function ensureSqliteSubcategoriaColumns(db) {
+  if (db.getDialect() !== "sqlite") return;
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+  if (!hasTable(tables, "Subcategorias")) return;
+  const columns = await queryInterface.describeTable("Subcategorias");
+  if (!columns["imagem"]) {
+    await queryInterface.addColumn("Subcategorias", "imagem", { type: DataTypes.TEXT });
+  }
+}
+
+async function ensureSqliteProdutoColumns(db) {
+  if (db.getDialect() !== "sqlite") return;
+  const queryInterface = db.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+  if (!hasTable(tables, "Produtos")) return;
+  const columns = await queryInterface.describeTable("Produtos");
+  if (!columns["imagem"]) {
+    await queryInterface.addColumn("Produtos", "imagem", { type: DataTypes.TEXT });
+  }
+}
+
 async function syncDatabaseSchema(db) {
   await ensureSqliteVendasColumns(db);
   await ensureSqliteFinanceColumns(db);
   await ensureSqliteUsuarioSecurityColumns(db);
   await ensureSqliteOperationalColumns(db);
+  await ensureSqliteClienteColumns(db);
+  await ensureSqliteCategoriaColumns(db);
+  await ensureSqliteSubcategoriaColumns(db);
+  await ensureSqliteProdutoColumns(db);
   await syncModels(db);
   await ensureVendasInvoiceIndex(db);
   await ensureSqliteOperationalOpenIndexes(db);

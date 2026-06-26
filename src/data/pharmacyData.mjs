@@ -258,7 +258,7 @@ export function buildDashboardPeriodChart(
   options = {},
 ) {
   const period = options.period ?? 'month';
-  const referenceDate = options.referenceDate ?? '2026-06-15';
+  const referenceDate = options.referenceDate ?? new Date().toISOString().slice(0, 10);
   const buckets = resolveDashboardChartBuckets(period, referenceDate);
   const paidExpenses = (data.expenses ?? []).filter((expense) => expense.status === 'Paga');
   const points = buckets.map((bucket) => ({
@@ -410,7 +410,7 @@ export function buildFinancialOverview(
   options = {},
 ) {
   const period = options.period ?? 'month';
-  const referenceDate = options.referenceDate ?? '2026-06-15';
+  const referenceDate = options.referenceDate ?? new Date().toISOString().slice(0, 10);
   const selectedShift = options.shift ?? 'Todos';
   const periodRange = resolveFinancialPeriod(period, referenceDate);
   const matchesPeriod = (row) => isDateInRange(row.date, periodRange.start, periodRange.end);
@@ -457,7 +457,7 @@ export function buildFinancialOverview(
   };
 }
 
-export function buildClientMetrics(clientRows = clients, referenceDate = '2026-06-15') {
+export function buildClientMetrics(clientRows = clients, referenceDate = new Date().toISOString().slice(0, 10)) {
   const referenceMonth = referenceDate.slice(0, 7);
 
   return {
@@ -497,9 +497,9 @@ export function buildReportsOverview(
     losses: data.losses ?? financeLosses,
     expenses: data.expenses ?? financeExpenses,
     otherRevenues: data.otherRevenues ?? financeOtherRevenues,
-  }, { period: 'month', referenceDate: options.referenceDate ?? '2026-06-15' });
+  }, { period: 'month', referenceDate: options.referenceDate ?? new Date().toISOString().slice(0, 10) });
   const stock = buildStockMetrics(data.stockRows ?? stockItems);
-  const clientMetrics = buildClientMetrics(data.clients ?? clients, options.referenceDate ?? '2026-06-15');
+  const clientMetrics = buildClientMetrics(data.clients ?? clients, options.referenceDate ?? new Date().toISOString().slice(0, 10));
 
   return {
     sales: {
@@ -534,7 +534,7 @@ export function buildStockMetrics(stockRows = stockItems) {
     ([name, count]) => ({
       name,
       count,
-      icon: name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 3).toLowerCase(),
+      icon: name.split(/\s+/).map((w) => w.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '')[0] || '').join('').toUpperCase().slice(0, 3) || '?',
     }),
   );
 
@@ -580,17 +580,36 @@ export function buildStockImportReference(stockRows = stockItems) {
   return { categories, subcategories };
 }
 
+// Positional column order for headerless product CSVs:
+// id ; name ; category ; subcategory ; price ; expiry ; location [ ; quantity ]
+const PRODUCT_POSITIONAL_FIELDS = ['id', 'name', 'category', 'subcategory', 'price', 'expiry', 'location', 'quantity'];
+
 export function parseStockImportCsv(content) {
-  const lines = String(content ?? '')
+  const lines = String(content ?? '').replace(/^﻿/, '') // strip UTF-8 BOM
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
 
-  if (lines.length < 2) return [];
+  if (lines.length < 1) return [];
 
   const delimiter = lines[0].includes(';') ? ';' : ',';
-  const headers = splitDelimitedLine(lines[0], delimiter).map(normalizeImportHeader);
+  const firstCells = splitDelimitedLine(lines[0], delimiter).map(normalizeImportHeader);
+  const mappedCount = firstCells.filter((h) => STOCK_IMPORT_HEADER_MAP[h]).length;
 
+  // No headers recognized → positional mode (data starts at line 0)
+  if (mappedCount === 0) {
+    return lines.map((line) => {
+      const values = splitDelimitedLine(line, delimiter);
+      return PRODUCT_POSITIONAL_FIELDS.reduce((row, field, index) => {
+        if (values[index] !== undefined) row[field] = normalizeImportValue(values[index]);
+        return row;
+      }, {});
+    }).filter((row) => Object.values(row).some(Boolean));
+  }
+
+  // Header mode (original behavior)
+  if (lines.length < 2) return [];
+  const headers = firstCells;
   return lines.slice(1).map((line) => {
     const values = splitDelimitedLine(line, delimiter);
     return headers.reduce((row, header, index) => {
@@ -603,69 +622,78 @@ export function parseStockImportCsv(content) {
   }).filter((row) => Object.values(row).some(Boolean));
 }
 
-export function validateStockProductImportRows(importRows, stockRows = stockItems) {
-  const reference = buildStockImportReference(stockRows);
-  const categoryLookup = buildLookupMap(reference.categories);
-  const subcategoryLookup = buildSubcategoryLookup(reference.subcategories);
-  const missingCategories = new Map();
-  const missingSubcategories = new Map();
-  const requiredFields = ['id', 'name', 'category', 'subcategory', 'price', 'expiry', 'location'];
+const CATEGORY_HEADER_KEYS = new Set(['nome', 'categoria', 'category', 'name', 'nomedacategoria', 'designacao']);
+const SUBCATEGORY_HEADER_KEYS = new Set(['subcategoria', 'subcategory', 'nomedasubcategoria']);
+const CATEGORY_COL_HEADER_KEYS = new Set(['categoria', 'category', 'categoriaprincipal']);
 
+export function parseStockCategoryImportCsv(content) {
+  const lines = String(content ?? '').replace(/^﻿/, '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+  const firstKey = normalizeLookupKey(lines[0]);
+  const startIndex = CATEGORY_HEADER_KEYS.has(firstKey) ? 1 : 0;
+  return lines.slice(startIndex).map((line) => {
+    const delimiter = line.includes(';') ? ';' : line.includes(',') ? ',' : null;
+    if (delimiter) {
+      const [col1, col2] = splitDelimitedLine(line, delimiter).map((v) => v.trim());
+      return { name: col2 || col1 };
+    }
+    return { name: line };
+  }).filter((r) => r.name);
+}
+
+export function parseStockSubcategoryImportCsv(content) {
+  const lines = String(content ?? '').replace(/^﻿/, '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+  const firstKey = normalizeLookupKey(lines[0]);
+  const isHeader = SUBCATEGORY_HEADER_KEYS.has(firstKey) || CATEGORY_COL_HEADER_KEYS.has(firstKey);
+  const startIndex = isHeader ? 1 : 0;
+  return lines.slice(startIndex).map((line) => {
+    const delimiter = line.includes(';') ? ';' : line.includes(',') ? ',' : null;
+    if (delimiter) {
+      const [col1, col2] = splitDelimitedLine(line, delimiter).map((v) => v.trim());
+      const catKey = col1 ? normalizeLookupKey(col1) : '';
+      if (CATEGORY_COL_HEADER_KEYS.has(catKey)) return null;
+      return { category: col1, name: col2 || col1 };
+    }
+    return { name: line, category: '' };
+  }).filter(Boolean).filter((r) => r.name);
+}
+
+// Normalizes a combined "Categoria/Subcategoria" import key.
+// Strips accents, lowercases, collapses spaces around slashes, removes invisible chars.
+// "Material Clínico / Material de Penso" → "material clinico/material de penso"
+export function normalizeImportKey(value) {
+  return String(value ?? '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s*\/+\s*/g, '/')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Frontend product validation — only checks that name is present.
+// Category/subcategory existence is validated by the backend (DB is the source of truth).
+// This avoids stale-closure issues where subcategoryRows may not be current.
+export function validateStockProductImportRows(importRows) {
   const rejectedRows = [];
   const acceptedRows = [];
 
   importRows.forEach((row, index) => {
     const normalizedRow = normalizeStockProductImportRow(row);
-    const missingField = requiredFields.find((field) => !normalizedRow[field]);
-    if (missingField) {
-      rejectedRows.push({
-        rowNumber: index + 2,
-        row: normalizedRow,
-        reason: 'Campos obrigatorios em falta.',
-      });
+    if (!normalizedRow.name) {
+      rejectedRows.push({ rowNumber: index + 2, row: normalizedRow, reason: 'Nome do produto e obrigatorio.' });
       return;
     }
-
-    const category = categoryLookup.get(normalizeLookupKey(normalizedRow.category));
-    if (!category) {
-      missingCategories.set(normalizeLookupKey(normalizedRow.category), normalizedRow.category);
-      rejectedRows.push({
-        rowNumber: index + 2,
-        row: normalizedRow,
-        reason: 'Categoria nao encontrada.',
-      });
-      return;
-    }
-
-    const subcategoryKey = `${normalizeLookupKey(category)}::${normalizeLookupKey(normalizedRow.subcategory)}`;
-    const subcategory = subcategoryLookup.get(subcategoryKey);
-    if (!subcategory) {
-      missingSubcategories.set(subcategoryKey, { category, name: normalizedRow.subcategory });
-      rejectedRows.push({
-        rowNumber: index + 2,
-        row: normalizedRow,
-        reason: 'Subcategoria nao encontrada nesta categoria.',
-      });
-      return;
-    }
-
-    acceptedRows.push({
-      ...normalizedRow,
-      category,
-      subcategory: subcategory.name,
-      quantity: 0,
-      status: 'Sem estoque',
-    });
+    acceptedRows.push(normalizedRow);
   });
 
-  return {
-    acceptedRows,
-    rejectedRows,
-    missingCategories: Array.from(missingCategories.values()).sort((first, second) => first.localeCompare(second, 'pt-AO')),
-    missingSubcategories: Array.from(missingSubcategories.values()).sort((first, second) =>
-      first.category.localeCompare(second.category, 'pt-AO') || first.name.localeCompare(second.name, 'pt-AO'),
-    ),
-  };
+  return { acceptedRows, rejectedRows, missingSubcategories: [] };
 }
 
 export function validateStockCategoryImportRows(importRows, existingCategories = []) {
@@ -695,36 +723,24 @@ export function validateStockCategoryImportRows(importRows, existingCategories =
   return { acceptedRows, rejectedRows };
 }
 
-export function validateStockSubcategoryImportRows(importRows, stockRows = stockItems) {
-  const reference = buildStockImportReference(stockRows);
-  const categoryLookup = buildLookupMap(reference.categories);
-  const existingSubcategories = new Set(
-    reference.subcategories.map((item) => `${normalizeLookupKey(item.category)}::${normalizeLookupKey(item.name)}`),
-  );
+export function validateStockSubcategoryImportRows(importRows) {
   const acceptedLookup = new Set();
-  const missingCategories = new Map();
   const acceptedRows = [];
   const rejectedRows = [];
 
   importRows.forEach((row, index) => {
-    const categoryValue = normalizeImportValue(row.category ?? row.categoria);
+    const category = normalizeImportValue(row.category ?? row.categoria);
     const name = normalizeImportValue(row.subcategory ?? row.subcategoria ?? row.name ?? row.nome);
-    const category = categoryLookup.get(normalizeLookupKey(categoryValue));
 
-    if (!categoryValue || !name) {
+    if (!category || !name) {
       rejectedRows.push({ rowNumber: index + 2, row, reason: 'Informe categoria e subcategoria.' });
       return;
     }
 
-    if (!category) {
-      missingCategories.set(normalizeLookupKey(categoryValue), categoryValue);
-      rejectedRows.push({ rowNumber: index + 2, row: { category: categoryValue, name }, reason: 'Categoria nao encontrada.' });
-      return;
-    }
-
+    // Deduplicate within this batch
     const key = `${normalizeLookupKey(category)}::${normalizeLookupKey(name)}`;
-    if (existingSubcategories.has(key) || acceptedLookup.has(key)) {
-      rejectedRows.push({ rowNumber: index + 2, row: { category, name }, reason: 'Subcategoria ja existe nesta categoria.' });
+    if (acceptedLookup.has(key)) {
+      rejectedRows.push({ rowNumber: index + 2, row: { category, name }, reason: 'Duplicado neste ficheiro.' });
       return;
     }
 
@@ -732,11 +748,7 @@ export function validateStockSubcategoryImportRows(importRows, stockRows = stock
     acceptedRows.push({ category, name });
   });
 
-  return {
-    acceptedRows,
-    rejectedRows,
-    missingCategories: Array.from(missingCategories.values()).sort((first, second) => first.localeCompare(second, 'pt-AO')),
-  };
+  return { acceptedRows, rejectedRows };
 }
 
 export function buildStockListPage(stockRows, page = 1, itemsPerPage = 10) {
@@ -1044,7 +1056,8 @@ function groupSalesByPaymentMethod(salesRows) {
   const grouped = new Map(PAYMENT_METHODS.map((method) => [method, { method, value: 0, count: 0 }]));
 
   salesRows.forEach((item) => {
-    const method = PAYMENT_METHODS.includes(item.paymentMethod) ? item.paymentMethod : 'Dinheiro';
+    const raw = (item.paymentMethod || '').trim().toLowerCase();
+    const method = PAYMENT_METHODS.find((m) => m.toLowerCase() === raw) || 'Dinheiro';
     const current = grouped.get(method);
     current.value = roundMoney(current.value + Number(item.revenue ?? 0));
     current.count += 1;
@@ -1137,6 +1150,11 @@ const STOCK_IMPORT_HEADER_MAP = {
   localizacaodoestoque: 'location',
   local: 'location',
   location: 'location',
+  quantidade: 'quantity',
+  qty: 'quantity',
+  quantity: 'quantity',
+  estoque: 'quantity',
+  stock: 'quantity',
 };
 
 function normalizeStockProductImportRow(row) {
@@ -1148,6 +1166,7 @@ function normalizeStockProductImportRow(row) {
     price: Number(normalizeImportValue(row.price ?? row.preco).replace(/\./g, '').replace(',', '.')),
     expiry: normalizeImportValue(row.expiry ?? row.validade ?? row.dataExpiracao),
     location: normalizeImportValue(row.location ?? row.localizacao ?? row.local),
+    quantity: Number(normalizeImportValue(row.quantity ?? row.quantidade ?? row.qty ?? row.estoque ?? row.stock)) || 0,
   };
 }
 

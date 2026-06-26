@@ -17,6 +17,10 @@ const CONFIGURATION_ERROR_CODES = Object.freeze({
 const DATABASE_MUTATION_QUEUES = new WeakMap();
 const MAX_RESERVATION_ATTEMPTS = 5;
 const RESERVATION_RETRY = Symbol('RESERVATION_RETRY');
+const PROTECTED_FISCAL_FIELDS = Object.freeze(['validationNumber', 'softwareName']);
+
+const defaultProtectedFiscalEditAllowed = () =>
+  process.env.KILSYSTEM_ALLOW_FISCAL_EDIT === 'true' || process.env.NODE_ENV === 'development';
 
 class ConfigurationError extends Error {
   constructor(code, message, options = {}) {
@@ -184,6 +188,22 @@ const validateMutationShape = (request) => {
   return keys;
 };
 
+const assertProtectedFiscalFieldsUnchanged = (key, currentValue, nextValue, allowProtectedFiscalEdit) => {
+  if (allowProtectedFiscalEdit || key !== 'documents.fiscal') return;
+  if (!nextValue || typeof nextValue !== 'object' || Array.isArray(nextValue)) return;
+
+  const changed = PROTECTED_FISCAL_FIELDS.some((field) =>
+    Object.prototype.hasOwnProperty.call(nextValue, field)
+    && String(nextValue[field] ?? '') !== String(currentValue?.[field] ?? ''));
+
+  if (changed) {
+    throw codedError(
+      CONFIGURATION_ERROR_CODES.PROTECTED,
+      'Nome do software e número de validação AGT são protegidos.',
+    );
+  }
+};
+
 const validateSeries = (documentType, series) => {
   if (!series || typeof series !== 'object' || Array.isArray(series)
     || typeof series.prefix !== 'string' || !/^[A-Z0-9]{1,12}$/.test(series.prefix)
@@ -232,6 +252,7 @@ function createConfigurationService({
   models,
   now = () => new Date(),
   discoverCatalogValues = async () => ({}),
+  allowProtectedFiscalEdit = defaultProtectedFiscalEditAllowed(),
 }) {
   if (!db || !models) throw new TypeError('db e models são obrigatórios.');
   if (typeof now !== 'function') throw new TypeError('now deve ser uma função.');
@@ -774,6 +795,13 @@ function createConfigurationService({
         }
         if (row.versao !== request.expectedVersions[key]) throw conflictError();
         rows.set(key, row);
+        const currentValue = parseSettingJson(key, row.valor_json).value;
+        assertProtectedFiscalFieldsUnchanged(
+          key,
+          currentValue,
+          request.values[key],
+          allowProtectedFiscalEdit,
+        );
         try {
           validated[key] = await validatePersistedSettingValue(
             key, request.values[key], transaction,

@@ -43,6 +43,9 @@ test('buildRouteMap exposes auth, user, profile, operation, and configuration IP
     'configuration.catalog.reorder',
     'configuration.catalog.activate',
     'configuration.catalog.deactivate',
+    'heldSales.load',
+    'heldSales.save',
+    'heldSales.clear',
   ];
 
   for (const action of expectedActions) {
@@ -120,6 +123,20 @@ function createRouteDependencies(calls = []) {
         return payload;
       },
     },
+    heldSalesService: {
+      load: async () => {
+        calls.push(['loadHeldSales']);
+        return [];
+      },
+      save: async (sales) => {
+        calls.push(['saveHeldSales', sales]);
+        return { ok: true };
+      },
+      clear: async () => {
+        calls.push(['clearHeldSales']);
+        return { ok: true };
+      },
+    },
   };
 }
 
@@ -156,6 +173,42 @@ test('auth.loginUsers returns login choices without requiring a session permissi
 
   assert.deepEqual(result, [{ id: 1, nome_usuario: 'admin', nome_completo: 'Administrador' }]);
   assert.deepEqual(calls, [['listLoginUsers']]);
+});
+
+test('auth logout and expired sessions clear held sales', async () => {
+  const calls = [];
+  const dependencies = createRouteDependencies(calls);
+  dependencies.authService.logout = async () => {
+    calls.push(['logout']);
+  };
+  const routes = buildRouteMap(dependencies);
+
+  await routes['auth.logout']();
+
+  assert.deepEqual(calls, [['clearHeldSales'], ['logout']]);
+
+  calls.length = 0;
+  dependencies.authService.getCurrentSession = async () => null;
+
+  const session = await routes['auth.currentSession']();
+
+  assert.equal(session, null);
+  assert.deepEqual(calls, [['clearHeldSales']]);
+});
+
+test('held sales IPC routes delegate to the held sales service', async () => {
+  const calls = [];
+  const routes = buildRouteMap(createRouteDependencies(calls));
+
+  await routes['heldSales.load']();
+  await routes['heldSales.save']({ sales: [{ number: 'ESP-1' }] });
+  await routes['heldSales.clear']();
+
+  assert.deepEqual(calls, [
+    ['loadHeldSales'],
+    ['saveHeldSales', [{ number: 'ESP-1' }]],
+    ['clearHeldSales'],
+  ]);
 });
 
 test('profile routes split user-form summaries from permission-bearing administration', async () => {
@@ -418,6 +471,20 @@ test('handleAppRequest redacts unsafe messages even with operation error code', 
 
 test('init replaces existing app request handlers and legacy listeners', async () => {
   const calls = [];
+  const printChannels = [
+    'print:window:listPrinters',
+    'print:window:print',
+    'print:window:exportPdf',
+    'print:window:close',
+  ];
+  const expectedCycle = [
+    ['removeHandler', 'app:request'],
+    ['handle', 'app:request', 'function'],
+    ...printChannels.map((channel) => ['removeHandler', channel]),
+    ...printChannels.map((channel) => ['handle', channel, 'function']),
+    ['removeAllListeners', 'toMain'],
+    ['on', 'toMain', 'function'],
+  ];
   const fakeIpcMain = {
     removeHandler(channel) {
       calls.push(['removeHandler', channel]);
@@ -442,14 +509,5 @@ test('init replaces existing app request handlers and legacy listeners', async (
   await init(models, { ipcMain: fakeIpcMain, configurationService });
   await init(models, { ipcMain: fakeIpcMain, configurationService });
 
-  assert.deepEqual(calls, [
-    ['removeHandler', 'app:request'],
-    ['handle', 'app:request', 'function'],
-    ['removeAllListeners', 'toMain'],
-    ['on', 'toMain', 'function'],
-    ['removeHandler', 'app:request'],
-    ['handle', 'app:request', 'function'],
-    ['removeAllListeners', 'toMain'],
-    ['on', 'toMain', 'function'],
-  ]);
+  assert.deepEqual(calls, [...expectedCycle, ...expectedCycle]);
 });

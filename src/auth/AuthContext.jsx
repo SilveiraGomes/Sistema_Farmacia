@@ -84,6 +84,12 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // Apply a session already established by the backend (e.g. PIN login)
+  const applySession = useCallback((nextSession) => {
+    setError('');
+    setSession(normalizeSession(nextSession));
+  }, []);
+
   const logout = useCallback(async () => {
     setError('');
 
@@ -165,6 +171,7 @@ export function AuthProvider({ children }) {
     error,
     setError,
     login,
+    applySession,
     logout,
     changeOwnPassword,
     hasPermission,
@@ -175,6 +182,7 @@ export function AuthProvider({ children }) {
     isLoading,
     error,
     login,
+    applySession,
     logout,
     changeOwnPassword,
     hasPermission,

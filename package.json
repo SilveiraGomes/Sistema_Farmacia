@@ -38,6 +38,7 @@
     ],
     "win": {
       "icon": "resources/icon.ico",
+      "artifactName": "KILSYSTEM-PHARMACY-Setup-${version}.${ext}",
       "target": "nsis"
     },
     "nsis": {
@@ -75,5 +76,10 @@
     "sequelize": "^6.37.8",
     "sqlite3": "^5.1.7",
     "xlsx": "^0.18.5"
+  },
+  "overrides": {
+    "app-builder-lib@26.15.3": {
+      "@noble/hashes": "1.8.0"
+    }
   }
 }

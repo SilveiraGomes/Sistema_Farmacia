@@ -1,5 +1,12 @@
 const { app, BrowserWindow, Menu, globalShortcut } = require("electron");
 const path = require("path");
+
+// Must run before app.ready() so userData path uses the correct app name.
+// In dev, app.getName() = "kilsystem-pharmacy" (from package.json name).
+// In production (packaged), force productName so userData is separate.
+if (app.isPackaged) {
+  app.setName("KILSYSTEM PHARMACY");
+}
 const ipcHandlers = require("./src/backend/ipcHandlers");
 const {
   connectDB,
@@ -9,16 +16,18 @@ const {
 const reportSyncService = require("./src/backend/services/reportSyncService");
 const backupService = require("./src/backend/services/backupService");
 const authService = require("./src/backend/services/authService");
+const heldSalesService = require("./src/backend/services/heldSalesService");
 
 let db = null;
 let models = null;
 let mainWindow = null;
 
 async function initializeDatabase(electronApp) {
-  db = await connectDB(electronApp, process.env.NODE_ENV || "development");
+  db = await connectDB(electronApp, electronApp.isPackaged ? "production" : "development");
   models = getModels();
   // Sincronizar modelos com o banco de dados
   await syncDatabaseSchema(db); // Use { force: true } para recriar tabelas em desenvolvimento
+  await heldSalesService.clear();
   console.log("Modelos sincronizados com o banco de dados.");
 }
 
@@ -140,5 +149,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  heldSalesService.clear().catch((error) => {
+    console.error("Erro ao limpar clientes em espera:", error);
+  });
   globalShortcut.unregisterAll();
 });

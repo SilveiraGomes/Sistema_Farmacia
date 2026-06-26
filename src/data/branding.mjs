@@ -1,7 +1,7 @@
 export const BRANDING_STORAGE_KEY = 'pharmacy.branding';
 
 export const DEFAULT_BRANDING = Object.freeze({
-  pharmacyName: 'Sistema de Farmacia',
+  pharmacyName: 'KILSYSTEM PHARMACY',
   logoDataUrl: '',
 });
 

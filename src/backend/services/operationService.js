@@ -224,24 +224,30 @@ async function findOpenShift(dayId = null, options = {}) {
 
 async function calculateShiftTotals(shiftRecord) {
   const { Venda, TransacaoFinanceira } = getModels();
-  const sinceTime = shiftRecord.aberto_em;
+  const sinceTime = typeof shiftRecord.get === 'function'
+    ? shiftRecord.get('aberto_em')
+    : shiftRecord.aberto_em;
 
   const [totalVendas, totalDespesas, totalPerdas] = await Promise.all([
     Venda.sum('total', {
       where: {
         data_venda: { [Op.gte]: sinceTime },
-        status: { [Op.ne]: 'Cancelada' },
+        status: { [Op.notIn]: ['ANULADO', 'Cancelada', 'Anulada'] },
+        tipo_documento: { [Op.ne]: 'NOTA_CREDITO' },
       },
     }).then((v) => roundToCents(Number(v) || 0)),
     TransacaoFinanceira.sum('valor', {
       where: {
-        tipo: 'expense',
+        tipo: { [Op.in]: ['expense', 'Despesa'] },
         data_transacao: { [Op.gte]: sinceTime },
       },
     }).then((v) => roundToCents(Number(v) || 0)),
     TransacaoFinanceira.sum('valor', {
       where: {
-        tipo: 'loss',
+        [Op.or]: [
+          { tipo: { [Op.in]: ['loss', 'Perda'] } },
+          { motivo_perda: { [Op.ne]: null } },
+        ],
         data_transacao: { [Op.gte]: sinceTime },
       },
     }).then((v) => roundToCents(Number(v) || 0)),
@@ -252,24 +258,30 @@ async function calculateShiftTotals(shiftRecord) {
 
 async function calculateDayTotals(dayRecord) {
   const { Venda, TransacaoFinanceira } = getModels();
-  const sinceTime = dayRecord.aberto_em;
+  const sinceTime = typeof dayRecord.get === 'function'
+    ? dayRecord.get('aberto_em')
+    : dayRecord.aberto_em;
 
   const [totalVendas, totalDespesas, totalPerdas] = await Promise.all([
     Venda.sum('total', {
       where: {
         data_venda: { [Op.gte]: sinceTime },
-        status: { [Op.ne]: 'Cancelada' },
+        status: { [Op.notIn]: ['ANULADO', 'Cancelada', 'Anulada'] },
+        tipo_documento: { [Op.ne]: 'NOTA_CREDITO' },
       },
     }).then((v) => roundToCents(Number(v) || 0)),
     TransacaoFinanceira.sum('valor', {
       where: {
-        tipo: 'expense',
+        tipo: { [Op.in]: ['expense', 'Despesa'] },
         data_transacao: { [Op.gte]: sinceTime },
       },
     }).then((v) => roundToCents(Number(v) || 0)),
     TransacaoFinanceira.sum('valor', {
       where: {
-        tipo: 'loss',
+        [Op.or]: [
+          { tipo: { [Op.in]: ['loss', 'Perda'] } },
+          { motivo_perda: { [Op.ne]: null } },
+        ],
         data_transacao: { [Op.gte]: sinceTime },
       },
     }).then((v) => roundToCents(Number(v) || 0)),
@@ -462,9 +474,16 @@ async function getOperationalState() {
     };
   }
 
+  // Inject real-time totals — stored totals are only written on close
+  const { totalVendas, totalDespesas, totalPerdas } = await calculateShiftTotals(shift);
+  const serializedShift = serializeShift(shift);
+  serializedShift.total_vendas = totalVendas;
+  serializedShift.total_despesas = totalDespesas;
+  serializedShift.total_perdas = totalPerdas;
+
   return {
     day: serializeDay(day),
-    shift: serializeShift(shift),
+    shift: serializedShift,
     canOperate: true,
     message: '',
   };

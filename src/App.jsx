@@ -20,13 +20,7 @@ import Fornecedores from "./components/Fornecedores";
 import Encomendas from "./components/Encomendas";
 import BrandMark from "./components/BrandMark";
 import { confirmLogout } from "./utils/confirmations.mjs";
-import {
-  buildDashboardNotifications,
-  buildExpiryAlerts,
-  financeExpenses,
-  invoices,
-  stockItems,
-} from "./data/pharmacyData.mjs";
+import { request } from "./services/ipcClient.js";
 
 const viewTitles = {
   dashboard: "Dashboard",
@@ -89,9 +83,8 @@ function App() {
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [readNotificationIds, setReadNotificationIds] = useState(
-    () => new Set(),
-  );
+  const [readNotificationIds, setReadNotificationIds] = useState(() => new Set());
+  const [systemAlerts, setSystemAlerts] = useState([]);
   const previousUserId = useRef(user?.id);
   const profileMenuRef = useRef(null);
   const notificationsRef = useRef(null);
@@ -109,19 +102,24 @@ function App() {
   const title = rawTitle === "Operacao" ? "Operação" : rawTitle;
   const displayName = user?.nome_completo || user?.nome_usuario || "Usuario";
   const initials = getInitials(user);
-  const notifications = useMemo(
-    () =>
-      buildDashboardNotifications({
-        invoiceRows: invoices,
-        stockRows: stockItems,
-        expenseRows: financeExpenses,
-      }),
-    [],
-  );
+  const notifications = systemAlerts;
   const unreadNotifications = notifications.filter(
     (notification) => !readNotificationIds.has(notification.id),
   );
   const navBadges = {};
+
+  useEffect(() => {
+    if (!user) return;
+    async function fetchAlerts() {
+      try {
+        const alerts = await request("alerts.getSystemAlerts", { alertConfig: {} });
+        setSystemAlerts(alerts || []);
+      } catch { /* non-critical */ }
+    }
+    fetchAlerts();
+    const timer = setInterval(fetchAlerts, 60_000);
+    return () => clearInterval(timer);
+  }, [user]);
 
   useEffect(() => {
     const fallbackView = firstAllowedView ?? "dashboard";

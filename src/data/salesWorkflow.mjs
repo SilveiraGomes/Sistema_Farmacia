@@ -142,13 +142,33 @@ export function filterProductsForSale(products, activeCategory, query = '') {
   return products.filter((product) => {
     const isInCategory = !activeCategory || normalizedQuery ? true : product.category === activeCategory;
     const matchesQuery = !normalizedQuery ||
-      [product.name, product.category, String(product.price), String(product.stock)]
+      [
+        product.name,
+        product.category,
+        product.barcode,
+        product.codigo_barras,
+        String(product.price),
+        String(product.stock),
+      ]
         .join(' ')
         .toLowerCase()
         .includes(normalizedQuery);
 
     return isInCategory && matchesQuery;
   });
+}
+
+export function findProductByExactBarcode(products, query = '') {
+  const normalizedQuery = String(query).trim();
+
+  if (!/^\d{13}$/.test(normalizedQuery)) {
+    return null;
+  }
+
+  return products.find((product) => {
+    const barcode = String(product.barcode || product.codigo_barras || '').trim();
+    return barcode === normalizedQuery;
+  }) ?? null;
 }
 
 export function filterClientsForPicker(clientRows, query = '') {
