@@ -34,7 +34,7 @@ const SETTING_DEFINITIONS = deepFreeze({
     group: 'company',
     type: 'object',
     defaultValue: {
-      pharmacyName: 'Sistema de Farmacia',
+      pharmacyName: 'KILSYSTEM PHARMACY',
       taxId: '',
       address: '',
       phone: '',
@@ -81,10 +81,30 @@ const SETTING_DEFINITIONS = deepFreeze({
   'alerts.dashboardEnabled': { group: 'alerts', type: 'boolean', defaultValue: true },
   'alerts.defaultMessage': { group: 'alerts', type: 'text', defaultValue: '' },
   'alerts.sessionTimeoutMinutes': { group: 'alerts', type: 'number', min: 0, defaultValue: 30 },
+  'alerts.operationalAlerts': {
+    group: 'alerts',
+    type: 'object',
+    defaultValue: { cashDiffShift: true, cashDiffDay: true, longShift: true, longDay: true },
+  },
+  'alerts.systemAlerts': {
+    group: 'alerts',
+    type: 'object',
+    defaultValue: { backupFail: true, restoreFail: true, sheetsSyncFail: true, dbCorrupt: true, integrity: true, diskSpace: true },
+  },
+  'alerts.securityAlerts': {
+    group: 'alerts',
+    type: 'object',
+    defaultValue: { loginAttempts: true, criticalOps: true, dataDelete: true, systemReset: true },
+  },
   'backup.options': {
     group: 'backup',
     type: 'object',
-    defaultValue: { frequency: 'manual', folderPath: '', retentionCount: 7 },
+    defaultValue: { retentionCount: 7, folderPath: '' },
+  },
+  'backup.auto': {
+    group: 'backup',
+    type: 'object',
+    defaultValue: { enabled: true, frequency: '24h', time: '23:00', onClose: true, onRestore: true, onReset: true },
   },
   'migration.legacyLocalStorageVersion': {
     group: 'migration', type: 'number', min: 0, defaultValue: 0,
@@ -104,7 +124,12 @@ const SETTING_DEFINITIONS = deepFreeze({
   'documents.printOptions': {
     group: 'documents',
     type: 'object',
-    defaultValue: { previewBeforePrint: true, copies: 1 },
+    defaultValue: {
+      previewBeforePrint: true,
+      copies: 1,
+      printerName: '',       // printer.name from getPrintersAsync()
+      showDialog: false,     // show Windows print dialog even in preview mode
+    },
   },
   'appearance.startFullscreen': {
     group: 'appearance',

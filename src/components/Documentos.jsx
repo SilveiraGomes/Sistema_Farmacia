@@ -20,7 +20,6 @@ import {
   documentStatusLabels,
   documentTypeLabels,
   filterDocuments,
-  prepareSecondCopy,
 } from '../data/documents.mjs';
 import CancellationModal from './CancellationModal';
 import { buildDocumentSettingsFromSnapshot, buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
@@ -106,9 +105,27 @@ function Documentos() {
     setSelectedDocument(document);
   }
 
-  function printSecondCopy(document) {
-    setSelectedDocument({ ...document, copyLabel: '2a VIA' });
-    setMessage(`2a VIA preparada para ${document.number}.`);
+  const [reprintBusy, setReprintBusy] = useState(false);
+
+  async function printSecondCopy(document) {
+    if (reprintBusy) return;
+    setReprintBusy(true);
+    setMessage(`A reimprimir ${document.number}...`);
+    try {
+      const secondCopy = { ...document, copyLabel: '2a VIA' };
+      const documentSettings = buildDocumentSettingsFromSnapshot(snapshot);
+      const viewModel = buildInvoiceA4ViewModel({
+        document: secondCopy,
+        ...documentSettings,
+        printedBy: document.userName || user?.name || 'Usuario',
+      });
+      await request('invoice.print', { viewModel });
+      setMessage(`Reimpressão de ${document.number} enviada.`);
+    } catch (err) {
+      setMessage(err?.message || `Erro ao reimprimir ${document.number}.`);
+    } finally {
+      setReprintBusy(false);
+    }
   }
 
   function exportDocument(document) {
@@ -240,7 +257,7 @@ function Documentos() {
                     <Eye size={16} />
                   </button>
                   {canPrint ? (
-                    <button className="icon-button" type="button" aria-label="Imprimir segunda via" onClick={() => printSecondCopy(document)}>
+                    <button className="icon-button" type="button" aria-label="Reimprimir" title="Reimprimir" disabled={reprintBusy} onClick={() => printSecondCopy(document)}>
                       <Printer size={16} />
                     </button>
                   ) : null}

@@ -687,31 +687,74 @@ function buildRouteMap(overrides = {}) {
       }),
 
     "invoice.savePDF": async (data = {}) => {
-      const docNumber = data.viewModel?.document?.number || 'documento';
-      const pdfBuffer = await invoicePrintService.generateInvoicePDF(data.viewModel || {});
-      return invoicePrintService.saveAndOpen(pdfBuffer, `${docNumber}.pdf`);
+      const vm = data.viewModel || {};
+      const docNumber = (vm.document?.number || 'documento').replace(/\//g, '-');
+      const issueDate = (vm.document?.issueDate || '').split('-').reverse().join('-');
+      const filename = `${docNumber}${issueDate ? '_' + issueDate : ''}.pdf`;
+      return invoicePrintService.generateInvoicePDF(vm, filename);
+    },
+
+    "printing.listPrinters": async () => {
+      const win = dependencies.getMainWindow?.();
+      if (!win) return [];
+      try {
+        if (typeof win.webContents.getPrintersAsync === 'function') {
+          return await win.webContents.getPrintersAsync();
+        }
+        return win.webContents.getPrinters?.() ?? [];
+      } catch { return []; }
     },
 
     "invoice.print": async (data = {}) => {
-      const docNumber = data.viewModel?.document?.number || 'documento';
-      const pdfBuffer = await invoicePrintService.generateInvoicePDF(data.viewModel || {});
-      return invoicePrintService.openForPrint(pdfBuffer, `${docNumber}.pdf`);
+      let printOptions = { previewBeforePrint: true, copies: 1, printerName: '', showDialog: false };
+      try {
+        const snap = await dependencies.configurationService.getSnapshot();
+        printOptions = { ...printOptions, ...(snap.settings.documents?.printOptions?.value ?? {}) };
+      } catch {}
+
+      const vm = data.viewModel || {};
+      const docTitle = vm.document?.title || 'Factura';
+      const docNumber = vm.document?.number || '';
+      const windowTitle = docNumber ? `${docTitle} ${docNumber}` : docTitle;
+      const safeNumber = docNumber.replace(/\//g, '-');
+      const issueDate = (vm.document?.issueDate || '').split('-').reverse().join('-');
+      const pdfFilename = `${safeNumber}${issueDate ? '_' + issueDate : ''}.pdf`;
+
+      if (!printOptions.previewBeforePrint) {
+        return invoicePrintService.printDirect(vm, printOptions);
+      }
+      return invoicePrintService.printInvoice(vm, windowTitle, pdfFilename, printOptions);
     },
 
     "report.savePDF": async (data = {}) => {
-      const pdfBuffer = await invoicePrintService.generateReportPDF(
-        data.report || {}, data.branding || {}, data.settings || {}, data.printedBy || '',
-      );
       const title = (data.report?.title || 'relatorio').replace(/\s+/g, '-').toLowerCase();
-      return invoicePrintService.saveAndOpen(pdfBuffer, `${title}.pdf`);
+      const today = new Date().toISOString().slice(0, 10).split('-').reverse().join('-');
+      const filename = `${title}_${today}.pdf`;
+      return invoicePrintService.generateReportPDF(
+        data.report || {}, data.branding || {}, data.settings || {}, data.printedBy || '', filename,
+      );
     },
 
     "report.print": async (data = {}) => {
-      const pdfBuffer = await invoicePrintService.generateReportPDF(
+      let printOptions = { previewBeforePrint: true, copies: 1, printerName: '', showDialog: false };
+      try {
+        const snap = await dependencies.configurationService.getSnapshot();
+        printOptions = { ...printOptions, ...(snap.settings.documents?.printOptions?.value ?? {}) };
+      } catch {}
+
+      const title = data.report?.title || 'Relatorio';
+      const today = new Date().toISOString().slice(0, 10).split('-').reverse().join('-');
+      const pdfFilename = `${title.replace(/\s+/g, '-').toLowerCase()}_${today}.pdf`;
+
+      if (!printOptions.previewBeforePrint) {
+        return invoicePrintService.printReportDirect(
+          data.report || {}, data.branding || {}, data.settings || {}, data.printedBy || '', printOptions,
+        );
+      }
+      return invoicePrintService.printReport(
         data.report || {}, data.branding || {}, data.settings || {}, data.printedBy || '',
+        title, pdfFilename, printOptions,
       );
-      const title = (data.report?.title || 'relatorio').replace(/\s+/g, '-').toLowerCase();
-      return invoicePrintService.openForPrint(pdfBuffer, `${title}.pdf`);
     },
 
     "window.setFullscreen": (data = {}) => {
@@ -878,6 +921,169 @@ async function init(models, options = {}) {
   ipc.handle("app:request", (_event, request) =>
     handleAppRequest(routes, request),
   );
+
+  // Print-window dedicated channels (used by printWindowPreload.js)
+  const PRINT_CHANNELS = [
+    'print:window:listPrinters',
+    'print:window:print',
+    'print:window:exportPdf',
+    'print:window:close',
+  ];
+  PRINT_CHANNELS.forEach(ch => {
+    if (typeof ipc.removeHandler === 'function') ipc.removeHandler(ch);
+  });
+
+  ipc.handle('print:window:listPrinters', async (event) => {
+    try {
+      if (typeof event.sender.getPrintersAsync === 'function') {
+        return await event.sender.getPrintersAsync();
+      }
+      return event.sender.getPrinters ? event.sender.getPrinters() : [];
+    } catch { return []; }
+  });
+
+  // Electron 32+ removed the callback from webContents.print() — it is now Promise-based.
+  // Root cause of "content/page/printable area is empty": marginType:'none' without explicit
+  // pageSize leaves Chromium unable to compute page dimensions for physical printers.
+  ipc.handle('print:window:print', async (event, opts = {}) => {
+    const { BrowserWindow } = require('electron');
+    console.log('[print] Impressora:', opts.printerName || '(padrao)');
+    console.log('[print] Copias:', opts.copies || 1);
+    console.log('[print] silent:', opts.silent === true);
+
+    const win = BrowserWindow?.fromWebContents?.(event.sender);
+    if (!win || win.isDestroyed()) {
+      console.log('[print] Janela nao encontrada');
+      return { success: false, error: 'Janela de impressao nao encontrada.' };
+    }
+
+    win.focus();
+
+    // Ensure fonts and CSS layout are fully rendered before measuring
+    try {
+      await win.webContents.executeJavaScript(
+        'document.fonts ? document.fonts.ready.then(function(){return true;}) : Promise.resolve(true)'
+      );
+    } catch {}
+    await new Promise(r => setTimeout(r, 400));
+
+    // Verify the document has measurable content
+    let contentInfo = { bodyHeight: 1, bodyWidth: 1, bodyTextLength: 1 };
+    try {
+      contentInfo = await win.webContents.executeJavaScript(`
+        ({
+          bodyTextLength: document.body ? document.body.innerText.length : 0,
+          bodyHeight: document.body ? document.body.scrollHeight : 0,
+          bodyWidth: document.body ? document.body.scrollWidth : 0
+        })
+      `);
+      console.log('[print] contentInfo:', JSON.stringify(contentInfo));
+    } catch {}
+
+    if (!contentInfo.bodyHeight || !contentInfo.bodyWidth) {
+      return { success: false, error: 'Conteudo do documento nao carregado. Aguarde e tente novamente.' };
+    }
+
+    const copies = Math.max(1, Math.min(10, parseInt(opts.copies) || 1));
+    const deviceName = opts.printerName || '';
+
+    // Attempt 1 — printableArea margins (most printer-compatible)
+    console.log('[print] pageSize: A4, margins: printableArea, deviceName:', deviceName);
+    try {
+      await invoicePrintService.printWebContents(win.webContents, {
+        silent: opts.silent === true,
+        printBackground: true,
+        deviceName,
+        copies,
+        pageSize: 'A4',
+        landscape: false,
+        margins: { marginType: 'printableArea' },
+      });
+      console.log('[print] success: true');
+      return { success: true };
+    } catch (err) {
+      const msg = err?.message || String(err);
+      console.log('[print] error:', msg);
+
+      if (/cancel/i.test(msg)) {
+        return { success: false, error: 'Print Cancelled' };
+      }
+
+      // Attempt 2 — default margins, silent (no second dialog)
+      if (/invalid|empty|size|settings/i.test(msg)) {
+        console.log('[print] Tentando fallback: default margins, silent...');
+        try {
+          await invoicePrintService.printWebContents(win.webContents, {
+            silent: true,
+            printBackground: true,
+            deviceName,
+            copies,
+            pageSize: 'A4',
+            landscape: false,
+            margins: { marginType: 'default' },
+          });
+          console.log('[print] success: true (default margins)');
+          return { success: true };
+        } catch (err2) {
+          console.log('[print] fallback default error:', err2?.message || String(err2));
+        }
+
+        // Attempt 3 — PDF fallback: generate PDF → open in system viewer
+        console.log('[print] Fallback PDF: gerando PDF temporario...');
+        try {
+          const pdfBuffer = await win.webContents.printToPDF({
+            printBackground: true,
+            pageSize: 'A4',
+            margins: { marginType: 'none' },
+          });
+          const tmpPdf = path.join(require('os').tmpdir(), `kil-fallback-${Date.now()}.pdf`);
+          fs.writeFileSync(tmpPdf, Buffer.from(pdfBuffer));
+          const { shell } = require('electron');
+          await shell.openPath(tmpPdf);
+          setTimeout(() => { try { fs.unlinkSync(tmpPdf); } catch {} }, 60000);
+          console.log('[print] PDF fallback aberto:', tmpPdf);
+          return {
+            success: true,
+            method: 'pdf_fallback',
+            message: 'PDF aberto no visualizador. Imprima a partir do visualizador.',
+          };
+        } catch (err3) {
+          console.log('[print] PDF fallback error:', err3?.message || String(err3));
+          return {
+            success: false,
+            error: 'A impressora recusou as definicoes de pagina. Exporte o PDF e imprima manualmente.',
+          };
+        }
+      }
+
+      return { success: false, error: msg };
+    }
+  });
+
+  ipc.handle('print:window:exportPdf', async (event, opts = {}) => {
+    const pdfBuffer = await event.sender.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { marginType: 'none' },
+    });
+    const { dialog, shell } = require('electron');
+    const result = await dialog.showSaveDialog({
+      title: 'Guardar documento em PDF',
+      defaultPath: opts.filename || 'documento.pdf',
+      filters: [{ name: 'Documento PDF', extensions: ['pdf'] }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    fs.writeFileSync(result.filePath, Buffer.from(pdfBuffer));
+    await shell.openPath(result.filePath);
+    return { saved: true };
+  });
+
+  ipc.handle('print:window:close', (event) => {
+    const { BrowserWindow } = require('electron');
+    const win = BrowserWindow?.fromWebContents?.(event.sender);
+    if (win && !win.isDestroyed()) win.close();
+  });
+
   registerLegacyRoutes(ipc, models, dependencies);
 }
 

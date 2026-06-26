@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BellRing,
   Boxes,
@@ -67,6 +67,9 @@ const CATALOG_LABELS = {
   document_statuses: "Estados de Documento",
 };
 
+const canEditProtectedFiscalIdentity =
+  Boolean(import.meta.env?.DEV) || import.meta.env?.VITE_KILSYSTEM_ALLOW_FISCAL_EDIT === 'true';
+
 function snapshotValues(snapshot, section) {
   if (section === "company")
     return {
@@ -74,7 +77,7 @@ function snapshotValues(snapshot, section) {
       'documents.headerText': snapshot.settings.documents.headerText.value,
       "documents.currency": snapshot.settings.documents.currency.value,
       'documents.fiscal': snapshot.settings.documents.fiscal.value,
-      'documents.printOptions': snapshot.settings.documents.printOptions?.value ?? { previewBeforePrint: true, copies: 1 },
+      'documents.printOptions': snapshot.settings.documents.printOptions?.value ?? { previewBeforePrint: true, copies: 1, printerName: '', showDialog: false },
     };
   if (section === "sales")
     return Object.fromEntries(
@@ -93,13 +96,22 @@ function snapshotValues(snapshot, section) {
   if (section === "alerts")
     return {
       ...Object.fromEntries(
-        Object.values(snapshot.settings.alerts).map((item) => [
-          item.key,
-          item.value,
-        ]),
+        Object.values(snapshot.settings.alerts).map((item) => [item.key, item.value]),
       ),
       "backup.options": snapshot.settings.backup.options.value,
+      "backup.auto": snapshot.settings.backup.auto?.value ?? {
+        enabled: true, frequency: "24h", time: "23:00", onClose: true, onRestore: true, onReset: true,
+      },
       "alerts.sessionTimeoutMinutes": snapshot.settings.alerts.sessionTimeoutMinutes?.value ?? 30,
+      "alerts.operationalAlerts": snapshot.settings.alerts.operationalAlerts?.value ?? {
+        cashDiffShift: true, cashDiffDay: true, longShift: true, longDay: true,
+      },
+      "alerts.systemAlerts": snapshot.settings.alerts.systemAlerts?.value ?? {
+        backupFail: true, restoreFail: true, sheetsSyncFail: true, dbCorrupt: true, integrity: true, diskSpace: true,
+      },
+      "alerts.securityAlerts": snapshot.settings.alerts.securityAlerts?.value ?? {
+        loginAttempts: true, criticalOps: true, dataDelete: true, systemReset: true,
+      },
     };
   if (section === "integracoes")
     return {
@@ -116,9 +128,39 @@ function settingVersions(snapshot, values) {
   const versions = {};
   for (const key of Object.keys(values)) {
     const [group, name] = key.split(".");
-    versions[key] = snapshot.settings[group][name].version;
+    versions[key] = snapshot.settings[group]?.[name]?.version ?? 0;
   }
   return versions;
+}
+
+function PrinterSelector({ value, onChange, disabled }) {
+  const [printers, setPrinters] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const fetched = useRef(false);
+
+  useEffect(() => {
+    if (fetched.current) return;
+    fetched.current = true;
+    setLoading(true);
+    request('printing.listPrinters')
+      .then(list => setPrinters(Array.isArray(list) ? list : []))
+      .catch(() => setPrinters([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <select
+      disabled={disabled || loading}
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+    >
+      <option value="">Impressora padrão do sistema</option>
+      {loading && <option disabled>A carregar impressoras...</option>}
+      {printers.map(p => (
+        <option key={p.name} value={p.name}>{p.displayName || p.name}</option>
+      ))}
+    </select>
+  );
 }
 
 export default function Configuracoes() {
@@ -268,7 +310,7 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
   if (section === "company") {
     const identity = draft["company.identity"] || {};
     const fiscal = draft["documents.fiscal"] || {};
-    const printOptions = draft["documents.printOptions"] || { previewBeforePrint: true, copies: 1 };
+    const printOptions = draft["documents.printOptions"] || { previewBeforePrint: true, copies: 1, printerName: '', showDialog: false };
     return (
       <div className="settings-form-grid">
         <SettingField
@@ -322,9 +364,12 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
             onChange={(e) => update("documents.currency", e.target.value)}
           />
         </SettingField>
-        <SettingField label="Número de validação AGT">
+        <SettingField
+          label="Número de validação AGT"
+          help={canEditProtectedFiscalIdentity ? "" : "Campo protegido; alterável apenas em fase de desenvolvimento."}
+        >
           <input
-            disabled={disabled}
+            disabled={disabled || !canEditProtectedFiscalIdentity}
             value={fiscal.validationNumber || ""}
             onChange={(e) =>
               update("documents.fiscal", {
@@ -334,9 +379,12 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
             }
           />
         </SettingField>
-        <SettingField label="Nome do software">
+        <SettingField
+          label="Nome do software"
+          help={canEditProtectedFiscalIdentity ? "" : "Campo protegido; alterável apenas em fase de desenvolvimento."}
+        >
           <input
-            disabled={disabled}
+            disabled={disabled || !canEditProtectedFiscalIdentity}
             value={fiscal.softwareName || ""}
             onChange={(e) =>
               update("documents.fiscal", {
@@ -409,6 +457,29 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
             }
           />
         </SettingField>
+        <SettingField
+          label="Impressora padrão"
+          help="Impressora usada para facturas e relatórios. Deixe vazio para usar a padrão do sistema."
+        >
+          <PrinterSelector
+            value={printOptions.printerName || ''}
+            onChange={(name) => update("documents.printOptions", { ...printOptions, printerName: name })}
+            disabled={disabled}
+          />
+        </SettingField>
+        <SettingField
+          label="Mostrar diálogo do Windows"
+          help="Quando activo, o diálogo de impressão do Windows abre antes de imprimir"
+        >
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={printOptions.showDialog === true}
+            onChange={(e) =>
+              update("documents.printOptions", { ...printOptions, showDialog: e.target.checked })
+            }
+          />
+        </SettingField>
       </div>
     );
   }
@@ -468,59 +539,169 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
     );
   if (section === "alerts") {
     const backup = draft["backup.options"] || {};
+    const autoConfig = draft["backup.auto"] || {};
+    const opAlerts = draft["alerts.operationalAlerts"] || {};
+    const sysAlerts = draft["alerts.systemAlerts"] || {};
+    const secAlerts = draft["alerts.securityAlerts"] || {};
+
+    function setAuto(key, val) {
+      update("backup.auto", { ...autoConfig, [key]: val });
+    }
+    function setOpAlert(key, val) {
+      update("alerts.operationalAlerts", { ...opAlerts, [key]: val });
+    }
+    function setSysAlert(key, val) {
+      update("alerts.systemAlerts", { ...sysAlerts, [key]: val });
+    }
+    function setSecAlert(key, val) {
+      update("alerts.securityAlerts", { ...secAlerts, [key]: val });
+    }
+
     return (
-      <div className="settings-form-grid">
-        <SettingField label="Alertas no Dashboard">
-          <input
-            type="checkbox"
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+
+        {/* ── 1. Alertas do Sistema ── */}
+        <div>
+          <h3 className="settings-section-title">Alertas do Sistema</h3>
+          <div className="settings-form-grid">
+            <SettingField label="Alertas no Dashboard" help="Exibe alertas administrativos e operacionais no painel.">
+              <input type="checkbox" disabled={disabled}
+                checked={Boolean(draft["alerts.dashboardEnabled"])}
+                onChange={(e) => update("alerts.dashboardEnabled", e.target.checked)} />
+            </SettingField>
+            <SettingField label="Mensagem padrão" help="Aviso institucional exibido no Dashboard.">
+              <textarea disabled={disabled}
+                value={draft["alerts.defaultMessage"] || ""}
+                onChange={(e) => update("alerts.defaultMessage", e.target.value)} />
+            </SettingField>
+            <SettingField label="Timeout de sessão (minutos)" help="0 = sem timeout.">
+              <input type="number" min="0" max="480" step="5" disabled={disabled}
+                value={draft["alerts.sessionTimeoutMinutes"] ?? 30}
+                onChange={(e) => update("alerts.sessionTimeoutMinutes", Number(e.target.value))} />
+            </SettingField>
+          </div>
+
+          <div style={{ marginTop: '16px' }}>
+            <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '8px', color: 'var(--muted)' }}>Operação</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px' }}>
+              {[
+                ['cashDiffShift', 'Diferença de caixa ao fechar turno', setOpAlert, opAlerts],
+                ['cashDiffDay',   'Diferença de caixa ao fechar dia operacional', setOpAlert, opAlerts],
+                ['longShift',     'Turno operacional aberto há mais de 12 horas', setOpAlert, opAlerts],
+                ['longDay',       'Dia operacional aberto há mais de 24 horas', setOpAlert, opAlerts],
+              ].map(([key, label, setter, obj]) => (
+                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.84rem', cursor: disabled ? 'default' : 'pointer' }}>
+                  <input type="checkbox" disabled={disabled} checked={Boolean(obj[key])} onChange={(e) => setter(key, e.target.checked)} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginTop: '14px' }}>
+            <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '8px', color: 'var(--muted)' }}>Sistema</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px' }}>
+              {[
+                ['backupFail',     'Falha na criação de backup', setSysAlert, sysAlerts],
+                ['restoreFail',    'Falha na restauração de backup', setSysAlert, sysAlerts],
+                ['sheetsSyncFail', 'Falha na sincronização com Google Sheets', setSysAlert, sysAlerts],
+                ['dbCorrupt',      'Banco de dados corrompido', setSysAlert, sysAlerts],
+                ['integrity',      'Falha de integridade do banco', setSysAlert, sysAlerts],
+                ['diskSpace',      'Espaço insuficiente em disco', setSysAlert, sysAlerts],
+              ].map(([key, label, setter, obj]) => (
+                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.84rem', cursor: disabled ? 'default' : 'pointer' }}>
+                  <input type="checkbox" disabled={disabled} checked={Boolean(obj[key])} onChange={(e) => setter(key, e.target.checked)} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginTop: '14px' }}>
+            <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '8px', color: 'var(--muted)' }}>Segurança</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px' }}>
+              {[
+                ['loginAttempts', 'Tentativas repetidas de login inválido', setSecAlert, secAlerts],
+                ['criticalOps',   'Operações críticas executadas', setSecAlert, secAlerts],
+                ['dataDelete',    'Exclusão de dados importantes', setSecAlert, secAlerts],
+                ['systemReset',   'Reset do sistema executado', setSecAlert, secAlerts],
+              ].map(([key, label, setter, obj]) => (
+                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.84rem', cursor: disabled ? 'default' : 'pointer' }}>
+                  <input type="checkbox" disabled={disabled} checked={Boolean(obj[key])} onChange={(e) => setter(key, e.target.checked)} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── 2. Backup Automático ── */}
+        <div>
+          <h3 className="settings-section-title">Backup Automático</h3>
+          <div className="settings-form-grid">
+            <SettingField label="Ativar backup automático">
+              <input type="checkbox" disabled={disabled}
+                checked={Boolean(autoConfig.enabled)}
+                onChange={(e) => setAuto("enabled", e.target.checked)} />
+            </SettingField>
+            <SettingField label="Frequência">
+              <select disabled={disabled || !autoConfig.enabled}
+                value={autoConfig.frequency || "24h"}
+                onChange={(e) => setAuto("frequency", e.target.value)}>
+                <option value="24h">A cada 24 horas</option>
+                <option value="weekly">Semanal</option>
+                <option value="fortnightly">Quinzenal</option>
+                <option value="monthly">Mensal</option>
+              </select>
+            </SettingField>
+            <SettingField label="Hora de execução" help="Formato HH:mm">
+              <input type="time" disabled={disabled || !autoConfig.enabled}
+                value={autoConfig.time || "23:00"}
+                onChange={(e) => setAuto("time", e.target.value)} />
+            </SettingField>
+            <SettingField label="Criar backup ao encerrar o sistema">
+              <input type="checkbox" disabled={disabled}
+                checked={Boolean(autoConfig.onClose)}
+                onChange={(e) => setAuto("onClose", e.target.checked)} />
+            </SettingField>
+            <SettingField label="Criar backup antes da restauração">
+              <input type="checkbox" disabled={disabled}
+                checked={Boolean(autoConfig.onRestore)}
+                onChange={(e) => setAuto("onRestore", e.target.checked)} />
+            </SettingField>
+            <SettingField label="Criar backup antes do reset do sistema">
+              <input type="checkbox" disabled={disabled}
+                checked={Boolean(autoConfig.onReset)}
+                onChange={(e) => setAuto("onReset", e.target.checked)} />
+            </SettingField>
+          </div>
+        </div>
+
+        {/* ── 3. Retenção de Backups ── */}
+        <div>
+          <h3 className="settings-section-title">Retenção de Backups</h3>
+          <div className="settings-form-grid">
+            <NumberField label="Backups a reter"
+              help="Backups mais antigos são removidos automaticamente."
+              settingKey="backup.options"
+              value={backup.retentionCount}
+              onValue={(value) => update("backup.options", { ...backup, retentionCount: value })}
+              {...{ draft, update, disabled }} />
+          </div>
+        </div>
+
+        {/* ── 4. Backup Manual, Histórico e Estado ── */}
+        <div>
+          <h3 className="settings-section-title">Backup e Histórico</h3>
+          <ManualBackupButton
+            retentionCount={Number(backup.retentionCount) || 10}
+            autoConfig={autoConfig}
+            folderPath={backup.folderPath || ""}
+            onFolderChange={(fp) => update("backup.options", { ...backup, folderPath: fp })}
             disabled={disabled}
-            checked={Boolean(draft["alerts.dashboardEnabled"])}
-            onChange={(e) =>
-              update("alerts.dashboardEnabled", e.target.checked)
-            }
           />
-        </SettingField>
-        <SettingField label="Mensagem padrao">
-          <textarea
-            disabled={disabled}
-            value={draft["alerts.defaultMessage"] || ""}
-            onChange={(e) => update("alerts.defaultMessage", e.target.value)}
-          />
-        </SettingField>
-        <SettingField label="Frequência do backup">
-          <select
-            disabled={disabled}
-            value={backup.frequency || "manual"}
-            onChange={(e) =>
-              update("backup.options", { ...backup, frequency: e.target.value })
-            }
-          >
-            <option value="manual">Manual</option>
-            <option value="daily">Diário</option>
-            <option value="weekly">Semanal</option>
-          </select>
-        </SettingField>
-        <NumberField
-          label="Backups a reter"
-          settingKey="backup.options"
-          value={backup.retentionCount}
-          onValue={(value) =>
-            update("backup.options", { ...backup, retentionCount: value })
-          }
-          {...{ draft, update, disabled }}
-        />
-        <SettingField label="Timeout de sessão (minutos)" help="0 = sem timeout. Após inactividade a sessão fecha automaticamente.">
-          <input
-            type="number"
-            min="0"
-            max="480"
-            step="5"
-            disabled={disabled}
-            value={draft["alerts.sessionTimeoutMinutes"] ?? 30}
-            onChange={(e) => update("alerts.sessionTimeoutMinutes", Number(e.target.value))}
-          />
-        </SettingField>
-        <ManualBackupButton />
+        </div>
+
       </div>
     );
   }
@@ -700,13 +881,17 @@ function NumberField({
   );
 }
 
-function ManualBackupButton() {
+function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath = '', onFolderChange, disabled: formDisabled = false }) {
   const [status, setStatus] = React.useState(null);
   const [message, setMessage] = React.useState('');
   const [backups, setBackups] = React.useState([]);
   const [loadingList, setLoadingList] = React.useState(false);
-  const [restoring, setRestoring] = React.useState(null);
-  const [confirmName, setConfirmName] = React.useState(null);
+  const [serviceStatus, setServiceStatus] = React.useState(null);
+  const [integrityResult, setIntegrityResult] = React.useState(null);
+  const [checkingIntegrity, setCheckingIntegrity] = React.useState(false);
+  const [busy, setBusy] = React.useState(null); // name of backup being processed
+  const [confirmAction, setConfirmAction] = React.useState(null); // { type, name }
+  const [restoreConfirmText, setRestoreConfirmText] = React.useState('');
 
   function formatBytes(bytes) {
     if (bytes < 1024) return `${bytes} B`;
@@ -714,108 +899,298 @@ function ManualBackupButton() {
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 
+  function formatDate(d) {
+    if (!d) return '—';
+    try { return new Date(d).toLocaleString('pt-AO'); } catch { return String(d); }
+  }
+
   async function loadList() {
     setLoadingList(true);
     try {
-      const list = await request('backup.list');
+      const list = await request('backup.list', { folderPath });
       setBackups(list || []);
     } catch { /* silent */ } finally {
       setLoadingList(false);
     }
   }
 
+  async function loadServiceStatus() {
+    try {
+      const s = await request('backup.serviceStatus', { autoConfig, folderPath });
+      setServiceStatus(s);
+    } catch { /* silent */ }
+  }
+
   async function doBackup() {
     setStatus('loading');
     setMessage('');
     try {
-      const result = await request('backup.manual');
+      const result = await request('backup.manual', { folderPath });
       setStatus('success');
       setMessage(`Backup criado: ${result.name} (${formatBytes(result.size)})`);
       loadList();
+      loadServiceStatus();
     } catch (err) {
       setStatus('error');
       setMessage(err?.message || 'Erro ao criar backup.');
     }
   }
 
-  async function confirmRestore() {
-    const name = confirmName;
-    setConfirmName(null);
-    setRestoring(name);
+  async function doIntegrityCheck() {
+    setCheckingIntegrity(true);
+    setIntegrityResult(null);
     try {
-      await request('backup.restore', { name });
+      const res = await request('backup.integrityCheck');
+      setIntegrityResult(res);
+    } catch (err) {
+      setIntegrityResult({ ok: false, results: [err?.message || 'Erro ao verificar.'] });
+    } finally {
+      setCheckingIntegrity(false);
+    }
+  }
+
+  async function doChooseLocation() {
+    try {
+      const res = await request('backup.chooseLocation');
+      if (!res.canceled && res.folderPath) {
+        onFolderChange?.(res.folderPath);
+        loadList();
+      }
+    } catch { /* silent */ }
+  }
+
+  async function doOpenFolder() {
+    try { await request('backup.openFolder', { folderPath }); } catch { /* silent */ }
+  }
+
+  function startRestore(name) {
+    setConfirmAction({ type: 'restore', name });
+    setRestoreConfirmText('');
+  }
+
+  async function confirmRestore() {
+    const name = confirmAction.name;
+    setConfirmAction(null);
+    setRestoreConfirmText('');
+    setBusy(name);
+    try {
+      await request('backup.restore', { name, folderPath });
       setStatus('success');
       setMessage('Backup restaurado. Reinicie a aplicação para aplicar as alterações.');
+      loadList();
     } catch (err) {
       setStatus('error');
       setMessage(err?.message || 'Erro ao restaurar backup.');
     } finally {
-      setRestoring(null);
+      setBusy(null);
     }
   }
 
-  React.useEffect(() => { loadList(); }, []);
+  async function confirmDelete() {
+    const name = confirmAction.name;
+    setConfirmAction(null);
+    setBusy(name);
+    try {
+      await request('backup.delete', { name, folderPath });
+      setStatus('success');
+      setMessage(`Backup eliminado: ${name}`);
+      loadList();
+    } catch (err) {
+      setStatus('error');
+      setMessage(err?.message || 'Erro ao eliminar backup.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  React.useEffect(() => {
+    loadList();
+    loadServiceStatus();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderPath]);
+
+  const visibleBackups = backups.slice(0, retentionCount);
+  const isRestoreAction = confirmAction?.type === 'restore';
+  const canConfirmRestore = restoreConfirmText.trim().toUpperCase() === 'RESTAURAR';
 
   return (
     <>
-    {confirmName && (
+    {/* ── Confirmation modal ── */}
+    {confirmAction && (
       <div className="modal-backdrop" role="dialog" aria-modal="true">
-        <div className="modal-card" style={{ maxWidth: 440 }}>
+        <div className="modal-card" style={{ maxWidth: 460 }}>
           <div className="modal-title-row">
-            <h3 style={{ margin: 0 }}>Restaurar backup</h3>
+            <h3 style={{ margin: 0 }}>{isRestoreAction ? 'Restaurar backup' : 'Eliminar backup'}</h3>
           </div>
           <p style={{ margin: '0 0 6px' }}>
-            Vai restaurar o ficheiro <strong>{confirmName}</strong>.
+            {isRestoreAction ? 'Vai restaurar o ficheiro' : 'Vai eliminar definitivamente'}{' '}
+            <strong>{confirmAction.name}</strong>.
           </p>
-          <p style={{ margin: '0 0 16px', color: 'var(--danger)', fontSize: '0.88rem' }}>
-            A base de dados actual será substituída. Esta acção não pode ser desfeita.
+          <p style={{ margin: '0 0 12px', color: 'var(--danger)', fontSize: '0.88rem' }}>
+            {isRestoreAction
+              ? 'Os dados actuais serão substituídos pelo conteúdo do backup. Esta acção não pode ser desfeita.'
+              : 'O ficheiro de backup será apagado permanentemente.'}
           </p>
+          {isRestoreAction && (
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '0.83rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                Digite <strong>RESTAURAR</strong> para confirmar:
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={restoreConfirmText}
+                onChange={(e) => setRestoreConfirmText(e.target.value)}
+                placeholder="RESTAURAR"
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            </div>
+          )}
           <div className="modal-actions" style={{ justifyContent: 'flex-end' }}>
-            <button type="button" className="soft-button" onClick={() => setConfirmName(null)}>Cancelar</button>
-            <button type="button" className="danger-button" onClick={confirmRestore}>Sim, restaurar</button>
+            <button type="button" className="soft-button" onClick={() => { setConfirmAction(null); setRestoreConfirmText(''); }}>Cancelar</button>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={isRestoreAction && !canConfirmRestore}
+              onClick={isRestoreAction ? confirmRestore : confirmDelete}
+            >
+              {isRestoreAction ? 'Restaurar' : 'Eliminar'}
+            </button>
           </div>
         </div>
       </div>
     )}
-    <div style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-        <strong>Backup manual e histórico</strong>
+
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+      {/* ── Localização dos backups ── */}
+      <div>
+        <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '6px', color: 'var(--muted)' }}>Localização dos Backups</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <code style={{ fontSize: '0.79rem', padding: '4px 8px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {folderPath || '%APPDATA%\\kilsystem-pharmacy\\backups'}
+          </code>
+          <button type="button" className="soft-button" style={{ whiteSpace: 'nowrap' }} onClick={doChooseLocation} disabled={formDisabled}>Alterar Localização</button>
+          <button type="button" className="soft-button" style={{ whiteSpace: 'nowrap' }} onClick={doOpenFolder}>Abrir Pasta</button>
+        </div>
+      </div>
+
+      {/* ── Estado do Serviço ── */}
+      {serviceStatus && (
+        <div>
+          <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '8px', color: 'var(--muted)' }}>Estado do Serviço</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+            {[
+              ['Último backup', serviceStatus.lastBackup ? formatDate(serviceStatus.lastBackup) : 'Nunca realizado'],
+              ['Próximo backup', serviceStatus.nextBackup ? formatDate(serviceStatus.nextBackup) : 'Não agendado'],
+              ['Estado', serviceStatus.state || 'Desconhecido'],
+            ].map(([label, val]) => (
+              <div key={label} style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface)' }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--muted)', margin: '0 0 2px' }}>{label}</p>
+                <p style={{ fontSize: '0.84rem', fontWeight: 600, margin: 0 }}>{val}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Acções principais ── */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
         <button type="button" className="soft-button" onClick={doBackup} disabled={status === 'loading'}>
-          {status === 'loading' ? 'A criar...' : '+ Fazer backup agora'}
+          {status === 'loading' ? 'A criar…' : '+ Fazer backup agora'}
+        </button>
+        <button type="button" className="soft-button" onClick={doIntegrityCheck} disabled={checkingIntegrity}>
+          {checkingIntegrity ? 'A verificar…' : 'Verificar banco de dados'}
         </button>
       </div>
 
-      {status === 'success' && <p style={{ color: 'var(--success)', fontSize: '0.82rem', marginBottom: '6px' }}>{message}</p>}
-      {status === 'error' && <p style={{ color: 'var(--danger)', fontSize: '0.82rem', marginBottom: '6px' }}>{message}</p>}
+      {/* ── Resultado de integridade ── */}
+      {integrityResult && (
+        <div style={{
+          padding: '10px 14px',
+          borderRadius: '8px',
+          border: `1px solid ${integrityResult.ok ? 'var(--success)' : 'var(--danger)'}`,
+          background: integrityResult.ok ? 'var(--success-light, #edfbee)' : 'var(--danger-light, #fef2f2)',
+          fontSize: '0.83rem',
+        }}>
+          <strong>{integrityResult.ok ? 'Integridade OK' : 'Problemas detectados'}</strong>
+          {!integrityResult.ok && (
+            <ul style={{ margin: '4px 0 0', paddingLeft: '16px' }}>
+              {integrityResult.results?.map((r, i) => <li key={i}>{r}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
-      {loadingList ? <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>A carregar lista…</p> : (
-        backups.length ? (
+      {/* ── Mensagens de status ── */}
+      {status === 'success' && <p style={{ color: 'var(--success)', fontSize: '0.82rem', margin: 0 }}>{message}</p>}
+      {status === 'error' && <p style={{ color: 'var(--danger)', fontSize: '0.82rem', margin: 0 }}>{message}</p>}
+
+      {/* ── Histórico de backups ── */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <p style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--muted)', margin: 0 }}>
+            Histórico ({visibleBackups.length} de {backups.length})
+          </p>
+          <button type="button" className="soft-button" style={{ fontSize: '11px', padding: '3px 10px' }} onClick={loadList} disabled={loadingList}>
+            {loadingList ? '…' : 'Actualizar'}
+          </button>
+        </div>
+        {loadingList ? (
+          <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>A carregar…</p>
+        ) : visibleBackups.length ? (
           <table className="backup-history-table">
             <thead>
               <tr>
                 <th>Ficheiro</th>
+                <th>Tipo</th>
                 <th>Tamanho</th>
                 <th>Data</th>
+                <th>Utilizador</th>
+                <th>Estado</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {backups.map((b) => (
+              {visibleBackups.map((b) => (
                 <tr key={b.name}>
-                  <td style={{ fontFamily: 'monospace' }}>{b.name}</td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '0.78rem', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={b.name}>{b.name}</td>
+                  <td style={{ color: 'var(--muted)' }}>{b.type || 'Manual'}</td>
                   <td style={{ textAlign: 'right', color: 'var(--muted)' }}>{formatBytes(b.size)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--muted)' }}>{new Date(b.createdAt).toLocaleString('pt-AO')}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button type="button" className="soft-button" style={{ fontSize: '11px', padding: '3px 8px' }} disabled={!!restoring} onClick={() => setConfirmName(b.name)}>
-                      {restoring === b.name ? '…' : 'Restaurar'}
-                    </button>
+                  <td style={{ color: 'var(--muted)' }}>{formatDate(b.createdAt)}</td>
+                  <td style={{ color: 'var(--muted)' }}>{b.createdBy || 'Sistema'}</td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '1px 7px',
+                      borderRadius: '10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      background: b.state === 'OK' ? '#e4f6e8' : '#fef2f2',
+                      color: b.state === 'OK' ? '#064818' : '#7f1d1d',
+                    }}>{b.state || 'OK'}</span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                      <button type="button" className="soft-button" style={{ fontSize: '11px', padding: '3px 8px' }}
+                        disabled={!!busy} onClick={() => startRestore(b.name)}>
+                        {busy === b.name ? '…' : 'Restaurar'}
+                      </button>
+                      <button type="button" className="danger-button" style={{ fontSize: '11px', padding: '3px 8px' }}
+                        disabled={!!busy} onClick={() => setConfirmAction({ type: 'delete', name: b.name })}>
+                        {busy === b.name ? '…' : 'Eliminar'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        ) : <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Nenhum backup encontrado.</p>
-      )}
+        ) : (
+          <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Nenhum backup encontrado.</p>
+        )}
+      </div>
+
     </div>
     </>
   );
