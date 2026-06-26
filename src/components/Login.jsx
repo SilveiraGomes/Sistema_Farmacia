@@ -156,10 +156,12 @@ function Login() {
                 <button type="button" className="pin-icon-btn" title="Outro utilizador"
                   onClick={() => { setSelectedPinUser(null); setPin(""); setPinError(""); }}>
                   <Users size={20} />
+                  <span>Outro utilizador</span>
                 </button>
                 <button type="button" className="pin-icon-btn" title="Entrar com senha"
                   onClick={() => switchMode("password")}>
                   <LockKeyhole size={20} />
+                  <span>Entrar com senha</span>
                 </button>
               </div>
             </div>
@@ -189,6 +191,7 @@ function Login() {
               <button type="button" className="pin-icon-btn" title="Entrar com senha"
                 onClick={() => switchMode("password")}>
                 <LockKeyhole size={20} />
+                <span>Entrar com senha</span>
               </button>
             </div>
           )}
@@ -250,6 +253,7 @@ function Login() {
           <button type="button" className="pin-icon-btn" title="Entrar com PIN"
             onClick={() => switchMode("pin")}>
             <Binary size={22} />
+            <span>Entrar com PIN</span>
           </button>
         )}
       </section>
