@@ -14,8 +14,8 @@ export function useDashboardData({ shiftOpenAt = null, lowStockThreshold = 25 } 
       const result = await request('dashboard.metrics', { shiftOpenAt, lowStockThreshold });
       setData(result);
       setLastUpdated(new Date());
-    } catch {
-      // IPC unavailable (browser dev) — null data triggers fallback to mock in Dashboard
+    } catch (err) {
+      console.error('[dashboard] metrics load failed:', err?.message || err);
     } finally {
       setLoading(false);
     }
@@ -27,6 +27,12 @@ export function useDashboardData({ shiftOpenAt = null, lowStockThreshold = 25 } 
     clearInterval(timerRef.current);
     timerRef.current = setInterval(load, POLL_MS);
     return () => clearInterval(timerRef.current);
+  }, [load]);
+
+  // Refresh immediately when the held-sales queue changes
+  useEffect(() => {
+    window.addEventListener('held-sales-changed', load);
+    return () => window.removeEventListener('held-sales-changed', load);
   }, [load]);
 
   return { data, loading, lastUpdated, refresh: load };

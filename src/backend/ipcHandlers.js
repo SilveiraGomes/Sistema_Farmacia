@@ -23,6 +23,7 @@ const {
   createConfigurationService,
 } = require("./services/configurationService");
 const invoicePrintService = require("./services/invoicePrintService");
+const heldSalesService = require("./services/heldSalesService");
 
 const CONFIGURATION_SAFE_ERROR_MESSAGES = Object.freeze({
   [CONFIGURATION_ERROR_CODES.VALIDATION]: "Dados de configuracao invalidos.",
@@ -115,6 +116,7 @@ function throwPasswordChangeRequired() {
 async function getCurrentSession(dependencies) {
   const session = await dependencies.authService.getCurrentSession();
   if (!session || !session.user || !session.user.id) {
+    await dependencies.heldSalesService.clear();
     const error = new Error("Sessao expirada.");
     error.code = "SESSION_EXPIRED";
     throw error;
@@ -175,6 +177,7 @@ function buildRouteMap(overrides = {}) {
     backupService,
     alertService,
     configurationService: null,
+    heldSalesService,
     assertPermission,
     electronApp: null,
     getMainWindow: null,
@@ -187,8 +190,17 @@ function buildRouteMap(overrides = {}) {
       dependencies.authService.loginWithPin({ userId: data.userId, pin: data.pin }),
     "auth.loginUsers": () => dependencies.userService.listLoginUsers(),
     "auth.usersWithPin": () => dependencies.userService.listUsersWithPin(),
-    "auth.logout": () => dependencies.authService.logout(),
-    "auth.currentSession": () => dependencies.authService.getCurrentSession(),
+    "auth.logout": async () => {
+      await dependencies.heldSalesService.clear();
+      return dependencies.authService.logout();
+    },
+    "auth.currentSession": async () => {
+      const session = await dependencies.authService.getCurrentSession();
+      if (!session) {
+        await dependencies.heldSalesService.clear();
+      }
+      return session;
+    },
     "auth.changeOwnPassword": (data) =>
       dependencies.authService.changeOwnPassword(data),
     "auth.activity": () => {
@@ -693,6 +705,12 @@ function buildRouteMap(overrides = {}) {
       const filename = `${docNumber}${issueDate ? '_' + issueDate : ''}.pdf`;
       return invoicePrintService.generateInvoicePDF(vm, filename);
     },
+
+    "heldSales.load": () => dependencies.heldSalesService.load(),
+
+    "heldSales.save": (data = {}) => dependencies.heldSalesService.save(data.sales),
+
+    "heldSales.clear": () => dependencies.heldSalesService.clear(),
 
     "printing.listPrinters": async () => {
       const win = dependencies.getMainWindow?.();

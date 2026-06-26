@@ -200,6 +200,7 @@ function Operacao() {
               detail="Encerra o caixa do turno aberto"
               disabled={!shift || !hasPermission('operacao.fechar_turno') || operation.isLoading}
               onClick={() => openModal('close-shift')}
+              variant="danger"
             />
             <ActionButton
               icon={CheckCircle2}
@@ -207,6 +208,7 @@ function Operacao() {
               detail="Disponivel somente sem turno aberto"
               disabled={!day || !!shift || !hasPermission('operacao.fechar_dia') || operation.isLoading}
               onClick={() => openModal('close-day')}
+              variant="danger"
             />
           </div>
         </section>
@@ -270,9 +272,14 @@ function StatusCard({ icon: Icon, tone, title, value, detail }) {
   );
 }
 
-function ActionButton({ icon: Icon, title, detail, disabled, onClick }) {
+function ActionButton({ icon: Icon, title, detail, disabled, onClick, variant }) {
   return (
-    <button type="button" className="operation-action" disabled={disabled} onClick={onClick}>
+    <button
+      type="button"
+      className={`operation-action${variant ? ` operation-action--${variant}` : ''}`}
+      disabled={disabled}
+      onClick={onClick}
+    >
       <span><Icon size={22} /></span>
       <i>
         <b>{title}</b>

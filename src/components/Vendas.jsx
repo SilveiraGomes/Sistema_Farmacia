@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import {
   ArrowLeft,
@@ -33,6 +33,7 @@ import {
   DEFAULT_SALE_CLIENT,
   filterClientsForPicker,
   filterProductsForSale,
+  findProductByExactBarcode,
   removeCartItem,
   resumeHeldSale,
 } from '../data/salesWorkflow.mjs';
@@ -56,12 +57,20 @@ const paymentMethodIcons = { dinheiro: Banknote, tpa: CreditCard, transferencia:
 
 const cashKeypad = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'backspace'];
 
+function isPaymentMethodAllowedForDocument(docType, paymentMethod) {
+  const isCreditDocument = docType === DOCUMENT_TYPES.CREDIT;
+  const isCreditPayment = String(paymentMethod || '').toLowerCase() === 'credito';
+  return isCreditDocument ? isCreditPayment : !isCreditPayment;
+}
+
 function mapProductForSale(p) {
   return {
     id: p.id,
     name: p.nome,
     price: p.preco_venda,
     category: p.categoria || '',
+    barcode: p.codigo_barras || '',
+    codigo_barras: p.codigo_barras || '',
     stock: p.totalStock || 0,
     imagem: p.imagem || null,
     imageTone: (p.id % 2 === 0) ? 'blue' : 'orange',
@@ -97,9 +106,8 @@ function Vendas() {
   const [activeCategory, setActiveCategory] = useState(null);
   const [categoryOffset, setCategoryOffset] = useState(0);
   const [cart, setCart] = useState([]);
-  const [heldSales, setHeldSales] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('heldSales') || '[]'); } catch { return []; }
-  });
+  const [heldSales, setHeldSales] = useState([]);
+  const heldSalesReady = useRef(false);
   const [selectedClient, setSelectedClient] = useState(DEFAULT_SALE_CLIENT);
   const [showClientPopup, setShowClientPopup] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
@@ -147,10 +155,17 @@ function Vendas() {
   useEffect(() => {
     loadPdvData();
     loadRecentDocuments();
+    // Load held sales from SQLite (persists across restarts and hibernation)
+    request('heldSales.load').then(sales => {
+      setHeldSales(Array.isArray(sales) ? sales : []);
+      heldSalesReady.current = true;
+    }).catch(() => { heldSalesReady.current = true; });
   }, [loadPdvData, loadRecentDocuments]);
 
   useEffect(() => {
-    localStorage.setItem('heldSales', JSON.stringify(heldSales));
+    if (!heldSalesReady.current) return;
+    request('heldSales.save', { sales: heldSales }).catch(() => {});
+    window.dispatchEvent(new CustomEvent('held-sales-changed'));
   }, [heldSales]);
 
   const previewDocNumber = useMemo(() => {
@@ -246,6 +261,25 @@ function Vendas() {
     setShowCheckout(false);
   }
 
+  function handleProductQueryChange(value) {
+    const scannedProduct = findProductByExactBarcode(allProducts, value);
+
+    if (scannedProduct && operation.canOperate) {
+      setCart((current) => addCartItem(current, scannedProduct));
+      setProductQuery('');
+      return;
+    }
+
+    setProductQuery(value);
+  }
+
+  function handleDocTypeChange(nextDocType) {
+    setDocType(nextDocType);
+    setPendingPayment(null);
+    setShowCheckout(false);
+    setReceived('');
+  }
+
   async function handleCancelDocument(reason) {
     const document = cancelTarget;
     if (!document) return;
@@ -282,6 +316,7 @@ function Vendas() {
   function choosePaymentMethod(mode) {
     if (!operation.canOperate) return;
     if (!cart.length) return;
+    if (!isPaymentMethodAllowedForDocument(docType, mode)) return;
 
     if (mode === 'dinheiro') {
       setShowCheckout(true);
@@ -298,6 +333,12 @@ function Vendas() {
   async function finalizeSale(paymentMethod = defaultPaymentMethod, checkoutData = checkout) {
     if (!operation.canOperate) return;
     if (!cart.length || !checkoutData.canFinalize) return;
+    if (!isPaymentMethodAllowedForDocument(docType, paymentMethod)) {
+      setSaleError(docType === DOCUMENT_TYPES.CREDIT
+        ? 'Documento do tipo Crédito deve usar pagamento Crédito.'
+        : 'Crédito só é permitido quando o tipo de documento for Crédito.');
+      return;
+    }
     setSaleError('');
 
     const ipcDocTypeMap = {
@@ -415,7 +456,7 @@ function Vendas() {
               aria-label="Buscar produto"
               placeholder="Buscar produto"
               value={productQuery}
-              onChange={(event) => setProductQuery(event.target.value)}
+              onChange={(event) => handleProductQueryChange(event.target.value)}
             />
             <Search size={18} />
           </div>
@@ -475,7 +516,7 @@ function Vendas() {
             summary={summary}
             docType={docType}
             previewDocNumber={previewDocNumber}
-            onDocTypeChange={setDocType}
+            onDocTypeChange={handleDocTypeChange}
             onRemoveItem={async (item) => {
               if (await confirmDelete(`o produto ${item.name} da factura`)) {
                 setCart((current) => removeCartItem(current, item.id));
@@ -730,7 +771,7 @@ function InvoiceDetails({
               key={method.id}
               type="button"
               onClick={() => onPaymentMethod(method.id)}
-              disabled={!canOperate || !cart.length}
+              disabled={!canOperate || !cart.length || !isPaymentMethodAllowedForDocument(docType, method.id)}
               aria-label={`Pagar com ${method.label}`}
               data-tooltip={method.label}
               title={!canOperate ? operationMessage : method.label}

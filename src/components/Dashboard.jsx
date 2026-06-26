@@ -67,6 +67,8 @@ const periodOptions = [
   { id: "year", label: "Anual" },
 ];
 
+const RECENT_SALES_LIMIT = 6;
+
 function Dashboard() {
   const operation = useOperation();
   const lowStockThreshold = useSetting("stock.lowStockThreshold", 25);
@@ -88,11 +90,12 @@ function Dashboard() {
     outOfStockRows: liveData?.stock?.outOfStock ?? 0,
     lowStockLabel: 'Produtos',
     pendingInvoices: liveData?.pendingInvoicesCount ?? 0,
+    heldSalesCount: liveData?.heldSalesCount ?? 0,
   }), [liveData]);
 
   const tableRows = useMemo(() => {
     if (liveData?.recentSales?.length) {
-      return liveData.recentSales.map((sale) => ({
+      return liveData.recentSales.slice(0, RECENT_SALES_LIMIT).map((sale) => ({
         number: sale.number,
         items: sale.items,
         value: sale.total,
@@ -203,9 +206,9 @@ function Dashboard() {
           />
           <MetricCard
             icon={<BarChart3 size={34} />}
-            title="Facturas em espera"
-            value={metrics.pendingInvoices}
-            detail="por concluir"
+            title="Clientes em Espera"
+            value={metrics.heldSalesCount}
+            detail={metrics.pendingInvoices ? `${metrics.pendingInvoices} proforma(s) pendente(s)` : "vendas suspensas"}
           />
           <MetricCard
             icon={<CalendarClock size={34} />}
@@ -337,7 +340,12 @@ function Dashboard() {
           </div>
         </div>
 
-        <InvoiceTable rows={tableRows} className="dashboard-table" showClient />
+        <InvoiceTable
+          rows={tableRows}
+          className="dashboard-table dashboard-recent-sales-panel"
+          showClient
+          title="Últimos movimentos de vendas"
+        />
       </div>
 
       <aside className="dashboard-side-column">
@@ -471,6 +479,7 @@ export function InvoiceTable({
   rows,
   className = "",
   showClient = false,
+  title = "",
   onRowClick,
 }) {
   const [tableRows, setTableRows] = useState(rows);
@@ -502,96 +511,103 @@ export function InvoiceTable({
 
   return (
     <div className={`table-panel ${className}`}>
-      <table>
-        <thead>
-          <tr>
-            <th>N. Factura</th>
-            <th>Itens da Factura</th>
-            <th>Valor</th>
-            <th>Status</th>
-            {showClient && <th>Cliente</th>}
-            <th>Opcoes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tableRows.map((invoice) => (
-            <tr
-              key={invoice.number}
-              className={onRowClick ? "clickable-row" : undefined}
-              onClick={onRowClick ? () => onRowClick(invoice) : undefined}
-            >
-              <td>{invoice.number}</td>
-              <td>{invoice.items}</td>
-              <td>{formatKwanza(invoice.value).replace("KZ ", "")}</td>
-              <td>
-                <span
-                  className={
-                    invoice.status === "PAGO" ? "status paid" : "status waiting"
-                  }
-                >
-                  {invoice.status}
-                </span>
-              </td>
-              {showClient && <td>{invoice.client}</td>}
-              <td className="options-cell">
-                <div className="table-options-wrapper">
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-expanded={openMenuFor === invoice.number}
-                    aria-haspopup="menu"
-                    aria-label={`Opcoes da factura ${invoice.number}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setOpenMenuFor((current) =>
-                        current === invoice.number ? "" : invoice.number,
-                      );
-                    }}
-                  >
-                    <MoreHorizontal size={20} />
-                  </button>
-                  {openMenuFor === invoice.number ? (
-                    <div className="table-options-menu" role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setDetailInvoice(invoice);
-                          setOpenMenuFor("");
-                        }}
-                      >
-                        Ver detalhes
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={invoice.status === "PAGO"}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleMarkPaid(invoice.number);
-                        }}
-                      >
-                        Marcar como pago
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCopyNumber(invoice.number);
-                        }}
-                      >
-                        Copiar numero
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              </td>
+      {title ? (
+        <div className="table-panel-header">
+          <h2>{title}</h2>
+        </div>
+      ) : null}
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>N. Factura</th>
+              <th>Itens da Factura</th>
+              <th>Valor</th>
+              <th>Status</th>
+              {showClient && <th>Cliente</th>}
+              <th>Opcoes</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {tableRows.map((invoice) => (
+              <tr
+                key={invoice.number}
+                className={onRowClick ? "clickable-row" : undefined}
+                onClick={onRowClick ? () => onRowClick(invoice) : undefined}
+              >
+                <td>{invoice.number}</td>
+                <td>{invoice.items}</td>
+                <td>{formatKwanza(invoice.value).replace("KZ ", "")}</td>
+                <td>
+                  <span
+                    className={
+                      invoice.status === "PAGO" ? "status paid" : "status waiting"
+                    }
+                  >
+                    {invoice.status}
+                  </span>
+                </td>
+                {showClient && <td>{invoice.client}</td>}
+                <td className="options-cell">
+                  <div className="table-options-wrapper">
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-expanded={openMenuFor === invoice.number}
+                      aria-haspopup="menu"
+                      aria-label={`Opcoes da factura ${invoice.number}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setOpenMenuFor((current) =>
+                          current === invoice.number ? "" : invoice.number,
+                        );
+                      }}
+                    >
+                      <MoreHorizontal size={20} />
+                    </button>
+                    {openMenuFor === invoice.number ? (
+                      <div className="table-options-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDetailInvoice(invoice);
+                            setOpenMenuFor("");
+                          }}
+                        >
+                          Ver detalhes
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={invoice.status === "PAGO"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleMarkPaid(invoice.number);
+                          }}
+                        >
+                          Marcar como pago
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleCopyNumber(invoice.number);
+                          }}
+                        >
+                          Copiar numero
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {!tableRows.length && (
         <div className="empty-state">
           <Boxes size={30} />

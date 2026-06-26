@@ -1032,6 +1032,18 @@ button:disabled {
 .table-panel {
   overflow: auto;
 }
+.table-panel-header {
+  padding: 12px 14px 8px;
+}
+.table-panel-header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+}
+.table-scroll {
+  overflow: auto;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -2684,6 +2696,23 @@ tr:nth-child(even) td {
 .operation-action small {
   color: var(--muted);
   font-size: 13px;
+}
+.operation-action--danger {
+  border-color: #fca5a5;
+  background: #fff5f5;
+  color: #7f1d1d;
+}
+.operation-action--danger:not(:disabled):hover {
+  border-color: #ef4444;
+  background: #fee2e2;
+}
+.operation-action--danger span {
+  background: #fecaca;
+  color: #b91c1c;
+}
+.operation-action--danger small {
+  color: #b91c1c;
+  opacity: 0.75;
 }
 .operation-ledger-grid {
   display: grid;
@@ -5167,7 +5196,11 @@ button :is(strong, b) {
 .dashboard-analytics .dashboard-table {
   grid-column: auto;
 }
-.dashboard-table .table-panel {
+.dashboard-recent-sales-panel {
+  overflow: visible;
+}
+.dashboard-recent-sales-panel .table-scroll {
+  max-height: 360px;
   overflow: visible;
 }
 .table-options-wrapper {
