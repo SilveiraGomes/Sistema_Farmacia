@@ -687,28 +687,31 @@ function buildRouteMap(overrides = {}) {
       }),
 
     "invoice.savePDF": async (data = {}) => {
-      const { dialog, shell } = require('electron');
-      const viewModel = data.viewModel || {};
-      const docNumber = viewModel.document?.number || 'documento';
-      const pdfBuffer = await invoicePrintService.generatePDF(viewModel);
-      const parentWin = dependencies.getMainWindow ? dependencies.getMainWindow() : null;
-      const dialogOpts = {
-        title: 'Guardar documento em PDF',
-        defaultPath: `${docNumber}.pdf`,
-        filters: [{ name: 'Documento PDF', extensions: ['pdf'] }],
-      };
-      const result = parentWin
-        ? await dialog.showSaveDialog(parentWin, dialogOpts)
-        : await dialog.showSaveDialog(dialogOpts);
-      if (result.canceled || !result.filePath) return { canceled: true };
-      fs.writeFileSync(result.filePath, pdfBuffer);
-      shell.openPath(result.filePath);
-      return { saved: true, filePath: result.filePath };
+      const docNumber = data.viewModel?.document?.number || 'documento';
+      const pdfBuffer = await invoicePrintService.generateInvoicePDF(data.viewModel || {});
+      return invoicePrintService.saveAndOpen(pdfBuffer, `${docNumber}.pdf`);
     },
 
     "invoice.print": async (data = {}) => {
-      await invoicePrintService.printDocument(data.viewModel || {});
-      return { ok: true };
+      const docNumber = data.viewModel?.document?.number || 'documento';
+      const pdfBuffer = await invoicePrintService.generateInvoicePDF(data.viewModel || {});
+      return invoicePrintService.openForPrint(pdfBuffer, `${docNumber}.pdf`);
+    },
+
+    "report.savePDF": async (data = {}) => {
+      const pdfBuffer = await invoicePrintService.generateReportPDF(
+        data.report || {}, data.branding || {}, data.settings || {}, data.printedBy || '',
+      );
+      const title = (data.report?.title || 'relatorio').replace(/\s+/g, '-').toLowerCase();
+      return invoicePrintService.saveAndOpen(pdfBuffer, `${title}.pdf`);
+    },
+
+    "report.print": async (data = {}) => {
+      const pdfBuffer = await invoicePrintService.generateReportPDF(
+        data.report || {}, data.branding || {}, data.settings || {}, data.printedBy || '',
+      );
+      const title = (data.report?.title || 'relatorio').replace(/\s+/g, '-').toLowerCase();
+      return invoicePrintService.openForPrint(pdfBuffer, `${title}.pdf`);
     },
 
     "window.setFullscreen": (data = {}) => {

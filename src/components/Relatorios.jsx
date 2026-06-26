@@ -424,6 +424,26 @@ function Relatorios() {
     setNotice('Relatório exportado (XLSX).');
   }
 
+  async function handleReportSavePDF() {
+    if (!report || backendLoading) return;
+    await request('report.savePDF', {
+      report,
+      branding: documentSettings.branding,
+      settings: documentSettings.settings,
+      printedBy: getUserName(user),
+    });
+  }
+
+  async function handleReportPrint() {
+    if (!report || backendLoading) return;
+    await request('report.print', {
+      report,
+      branding: documentSettings.branding,
+      settings: documentSettings.settings,
+      printedBy: getUserName(user),
+    });
+  }
+
   const extraFilters = selectedDefinition?.extraFilters || [];
   const showDateRange = !isBackendReport || extraFilters.includes('dateRange');
 
@@ -481,11 +501,11 @@ function Relatorios() {
                       <Download size={19} />
                     </button>
                     <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" disabled={!report || backendLoading}
-                      onClick={() => { setPreviewOpen(true); window.setTimeout(() => window.print(), 0); }}>
+                      onClick={handleReportSavePDF}>
                       <FileDown size={19} />
                     </button>
                     <button type="button" className="icon-button" aria-label="Imprimir" title="Imprimir" disabled={!report || backendLoading}
-                      onClick={() => { setPreviewOpen(true); window.setTimeout(() => window.print(), 0); }}>
+                      onClick={handleReportPrint}>
                       <Printer size={19} />
                     </button>
                   </>
@@ -661,16 +681,32 @@ function Metric({ label, value }) {
 }
 
 function ReportPreview({ report, documentSettings, userName, onClose }) {
+  async function handleSavePDF() {
+    await request('report.savePDF', {
+      report,
+      branding: documentSettings.branding,
+      settings: documentSettings.settings,
+      printedBy: userName,
+    });
+  }
+  async function handlePrint() {
+    await request('report.print', {
+      report,
+      branding: documentSettings.branding,
+      settings: documentSettings.settings,
+      printedBy: userName,
+    });
+  }
   return (
-    <div className="modal-backdrop reports-print-scope" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal-card wide report-preview-modal">
         <div className="modal-title-row">
           <h2>{report.title}</h2>
           <div className="invoice-a4-actions">
-            <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" onClick={() => window.setTimeout(() => window.print(), 0)}>
+            <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" onClick={handleSavePDF}>
               <FileDown size={20} />
             </button>
-            <button type="button" className="icon-button" aria-label="Imprimir" title="Imprimir" onClick={() => window.setTimeout(() => window.print(), 0)}>
+            <button type="button" className="icon-button" aria-label="Imprimir" title="Imprimir" onClick={handlePrint}>
               <Printer size={20} />
             </button>
             <button type="button" className="icon-button" aria-label="Fechar" onClick={onClose}>×</button>

@@ -9,7 +9,7 @@ export function buildDocumentSettingsFromSnapshot(snapshot) {
     branding: {
       pharmacyName: identity.pharmacyName || 'Sistema de Farmacia',
       logoDataUrl: identity.logoDataUrl || '',
-      companyNif: identity.nif || '',
+      companyNif: identity.taxId || '',
     },
     settings: {
       documentHeaderText: snapshot?.settings?.documents?.headerText?.value || identity.pharmacyName || 'Sistema de Farmacia',
