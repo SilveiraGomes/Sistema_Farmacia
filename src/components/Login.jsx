@@ -1,130 +1,203 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, LockKeyhole, LogIn, UserRound } from "lucide-react";
+import { Binary, Eye, EyeOff, LockKeyhole, LogIn, UserRound, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { request } from "../services/ipcClient.js";
 import BrandMark from "./BrandMark";
+import PinPad from "./PinPad";
 
 const PASSWORD_FOCUS_DELAYS = [0, 80, 250, 600];
 
+function getInitials(name) {
+  return (name || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0].toUpperCase())
+    .join("");
+}
+
 function Login() {
-  const { login } = useAuth();
-  const [username, setUsername] = useState("admin");
+  const { login, applySession } = useAuth();
+
+  // ── Shared state ──
   const [loginUsers, setLoginUsers] = useState([]);
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [mode, setMode] = useState("password"); // "password" | "pin"
+
+  // ── Password mode ──
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const passwordInputRef = useRef(null);
+
+  // ── PIN mode ──
+  const [pinUsers, setPinUsers] = useState([]);
+  const [selectedPinUser, setSelectedPinUser] = useState(null);
+  const [pin, setPin] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinSubmitting, setPinSubmitting] = useState(false);
 
   function focusPasswordField() {
     window.focus?.();
     PASSWORD_FOCUS_DELAYS.forEach((delay) => {
-      window.setTimeout(() => {
-        passwordInputRef.current?.focus({ preventScroll: true });
-      }, delay);
+      window.setTimeout(() => passwordInputRef.current?.focus({ preventScroll: true }), delay);
     });
   }
 
   useEffect(() => {
     let isMounted = true;
-
-    async function loadLoginUsers() {
+    async function load() {
       setIsLoadingUsers(true);
-
       try {
-        const users = await request("auth.loginUsers");
-        if (!isMounted) {
-          return;
-        }
-
+        const [users, withPin] = await Promise.all([
+          request("auth.loginUsers"),
+          request("auth.usersWithPin").catch(() => []),
+        ]);
+        if (!isMounted) return;
         const nextUsers = Array.isArray(users) ? users : [];
         setLoginUsers(nextUsers);
-        setUsername((current) => current || nextUsers[0]?.nome_usuario || "");
+        setUsername((c) => c || nextUsers[0]?.nome_usuario || "");
+        setPinUsers(Array.isArray(withPin) ? withPin : []);
       } catch {
         if (isMounted) {
-          setLoginUsers([
-            {
-              id: "admin",
-              nome_usuario: "admin",
-              nome_completo: "Administrador",
-            },
-          ]);
-          setUsername((current) => current || "admin");
+          setLoginUsers([{ id: "admin", nome_usuario: "admin", nome_completo: "Administrador" }]);
+          setUsername((c) => c || "admin");
         }
       } finally {
-        if (isMounted) {
-          setIsLoadingUsers(false);
-        }
+        if (isMounted) setIsLoadingUsers(false);
       }
     }
-
-    loadLoginUsers();
-
-    return () => {
-      isMounted = false;
-    };
+    load();
+    return () => { isMounted = false; };
   }, []);
 
   useEffect(() => {
-    if (isLoadingUsers) {
-      return undefined;
-    }
-
-    function refocusPasswordField() {
-      focusPasswordField();
-    }
-
-    function refocusWhenVisible() {
-      if (!document.hidden) {
-        focusPasswordField();
-      }
-    }
-
+    if (isLoadingUsers || mode !== "password") return;
+    const focus = () => focusPasswordField();
+    const onVisible = () => { if (!document.hidden) focusPasswordField(); };
     focusPasswordField();
-    window.addEventListener('focus', refocusPasswordField);
-    document.addEventListener('visibilitychange', refocusWhenVisible);
-
+    window.addEventListener("focus", focus);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      window.removeEventListener('focus', refocusPasswordField);
-      document.removeEventListener('visibilitychange', refocusWhenVisible);
+      window.removeEventListener("focus", focus);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isLoadingUsers]);
+  }, [isLoadingUsers, mode]);
 
-  function handleUsernameChange(event) {
-    setUsername(event.target.value);
-    setPassword('');
-    setError("");
-    setIsPasswordVisible(false);
-    focusPasswordField();
-  }
-
+  // ── Password submit ──
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setIsSubmitting(true);
-
-    if (!username?.trim()) {
-      setError("Selecione um utilizador.");
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (!password.trim()) {
-      setError("A palavra-passe é obrigatória.");
-      setIsSubmitting(false);
-      return;
-    }
-
+    if (!username?.trim()) { setError("Selecione um utilizador."); setIsSubmitting(false); return; }
+    if (!password.trim()) { setError("A palavra-passe é obrigatória."); setIsSubmitting(false); return; }
     try {
       await login({ username: username.trim(), password });
-    } catch (loginError) {
-      setError(loginError.message);
+    } catch (e) {
+      setError(e.message);
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  // ── PIN submit ──
+  async function handlePinSubmit(fullPin) {
+    if (!selectedPinUser || fullPin.length !== 4) return;
+    setPinError("");
+    setPinSubmitting(true);
+    try {
+      const session = await request("auth.loginWithPin", { userId: selectedPinUser.id, pin: fullPin });
+      applySession(session);
+    } catch (e) {
+      setPinError(e.message || "PIN inválido.");
+      setPin("");
+    } finally {
+      setPinSubmitting(false);
+    }
+  }
+
+  function switchMode(next) {
+    setMode(next);
+    setError("");
+    setPinError("");
+    setPin("");
+    setSelectedPinUser(null);
+  }
+
+  // ── Render PIN mode ──
+  if (mode === "pin") {
+    return (
+      <main className="auth-screen">
+        <section className="pin-login-card" aria-labelledby="login-title">
+          <BrandMark className="auth-brand" />
+
+          {selectedPinUser ? (
+            /* ── PIN keypad ── */
+            <div className="pin-login-keypad">
+              <div className="pin-login-identity">
+                <div className="pin-login-avatar">
+                  {getInitials(selectedPinUser.nome_completo)}
+                </div>
+                <div className="pin-login-name">{selectedPinUser.nome_completo || selectedPinUser.nome_usuario}</div>
+                <div className="pin-login-hint">Introduza o seu PIN</div>
+              </div>
+
+              <PinPad
+                value={pin}
+                onChange={(v) => { setPin(v); if (pinError) setPinError(""); }}
+                onSubmit={handlePinSubmit}
+                disabled={pinSubmitting}
+                error={pinSubmitting ? "A verificar…" : pinError}
+              />
+
+              <div className="pin-footer-actions">
+                <button type="button" className="pin-icon-btn" title="Outro utilizador"
+                  onClick={() => { setSelectedPinUser(null); setPin(""); setPinError(""); }}>
+                  <Users size={20} />
+                </button>
+                <button type="button" className="pin-icon-btn" title="Entrar com senha"
+                  onClick={() => switchMode("password")}>
+                  <LockKeyhole size={20} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* ── User picker ── */
+            <div className="pin-login-picker">
+              <div className="pin-login-header">
+                <Binary size={40} />
+                <h1 id="login-title">Acesso Rápido</h1>
+                <p>Selecione o utilizador</p>
+              </div>
+
+              {pinUsers.length === 0 ? (
+                <p className="pin-login-empty">Nenhum utilizador tem PIN configurado.</p>
+              ) : (
+                <div className="pin-user-grid">
+                  {pinUsers.map((u) => (
+                    <button key={u.id} type="button" className="pin-user-card"
+                      onClick={() => { setSelectedPinUser(u); setPin(""); setPinError(""); }}>
+                      <span className="pin-user-avatar">{getInitials(u.nome_completo)}</span>
+                      <span>{u.nome_completo || u.nome_usuario}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <button type="button" className="pin-icon-btn" title="Entrar com senha"
+                onClick={() => switchMode("password")}>
+                <LockKeyhole size={20} />
+              </button>
+            </div>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  // ── Render password mode ──
   return (
     <main className="auth-screen">
       <section className="auth-card" aria-labelledby="login-title">
@@ -136,27 +209,17 @@ function Login() {
             <p>Acesse o sistema com as suas credenciais.</p>
           </div>
 
-          {error ? (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
 
           <label className="auth-field">
             <span>Usuario</span>
             <div>
               <UserRound size={20} />
-              <select
-                autoComplete="username"
-                value={username}
-                onChange={handleUsernameChange}
-                disabled={isLoadingUsers || isSubmitting}
-                required
-              >
-                {loginUsers.map((user) => (
-                  <option key={user.id} value={user.nome_usuario}>
-                    {user.nome_completo || user.nome_usuario}
-                  </option>
+              <select autoComplete="username" value={username}
+                onChange={(e) => { setUsername(e.target.value); setPassword(""); setError(""); setIsPasswordVisible(false); focusPasswordField(); }}
+                disabled={isLoadingUsers || isSubmitting} required>
+                {loginUsers.map((u) => (
+                  <option key={u.id} value={u.nome_usuario}>{u.nome_completo || u.nome_usuario}</option>
                 ))}
               </select>
             </div>
@@ -166,37 +229,29 @@ function Login() {
             <span>Senha</span>
             <div>
               <LockKeyhole size={20} />
-              <input
-                autoComplete="current-password"
-                autoFocus
-                ref={passwordInputRef}
-                type={isPasswordVisible ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-              />
-              <button
-                type="button"
-                className="auth-password-toggle"
-                aria-label={
-                  isPasswordVisible ? "Ocultar senha" : "Mostrar senha"
-                }
-                onClick={() => setIsPasswordVisible((current) => !current)}
-              >
+              <input autoComplete="current-password" autoFocus ref={passwordInputRef}
+                type={isPasswordVisible ? "text" : "password"} value={password}
+                onChange={(e) => setPassword(e.target.value)} required />
+              <button type="button" className="auth-password-toggle"
+                aria-label={isPasswordVisible ? "Ocultar senha" : "Mostrar senha"}
+                onClick={() => setIsPasswordVisible((c) => !c)}>
                 {isPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </label>
 
-          <button
-            className="primary-button auth-submit"
-            type="submit"
-            disabled={isSubmitting || isLoadingUsers}
-          >
+          <button className="primary-button auth-submit" type="submit" disabled={isSubmitting || isLoadingUsers}>
             <LogIn size={18} />
             {isSubmitting ? "A ENTRAR..." : "LOGIN"}
           </button>
         </form>
+
+        {pinUsers.length > 0 && (
+          <button type="button" className="pin-icon-btn" title="Entrar com PIN"
+            onClick={() => switchMode("pin")}>
+            <Binary size={22} />
+          </button>
+        )}
       </section>
     </main>
   );

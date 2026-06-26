@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { request } from '../services/ipcClient.js';
 import * as XLSX from 'xlsx';
 import InventarioA4 from './InventarioA4';
@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import {
   STOCK_OUT_REASONS,
-  addStockQuantity,
   buildExpiryAlerts,
   buildStockFormOptions,
   buildStockImportReference,
@@ -35,8 +34,8 @@ import {
   formatKwanza,
   getExpiryStatus,
   parseStockImportCsv,
-  removeStockQuantity,
-  stockItems,
+  parseStockCategoryImportCsv,
+  parseStockSubcategoryImportCsv,
   validateStockCategoryImportRows,
   validateStockProductImportRows,
   validateStockSubcategoryImportRows,
@@ -44,6 +43,31 @@ import {
 import { confirmDelete } from '../utils/confirmations.mjs';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog } from '../configuration/SettingsContext';
+
+function mapProductToRow(p) {
+  return {
+    id: p.id,
+    name: p.nome,
+    category: p.categoria || '',
+    subcategory: p.subcategoria_nome || '',
+    price: p.preco_venda,
+    quantity: p.totalStock,
+    expiry: p.dataValidade || '-',
+    location: p.localizacao || '-',
+    status: p.status,
+    requiresPrescription: p.receita_obrigatoria,
+    codigo_barras: p.codigo_barras,
+    fabricante: p.fabricante,
+    prateleira: p.prateleira,
+    gaveta: p.gaveta,
+    zona: p.zona,
+    observacao_localizacao: p.observacao_localizacao,
+    categoria_id: p.categoria_id,
+    subcategoria_id: p.subcategoria_id,
+    imagem: p.imagem || null,
+    lotes: p.lotes || [],
+  };
+}
 
 const modalTitles = {
   product: 'Novo Produto',
@@ -66,34 +90,59 @@ function Estoque() {
   const productLocations = useCatalog(CATALOG_KEYS.PRODUCT_LOCATIONS);
   const [activeModal, setActiveModal] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
-  const [rows, setRows] = useState(stockItems);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [activeFilters, setActiveFilters] = useState({ category: '', location: '', expiry: '' });
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [categoryOffset, setCategoryOffset] = useState(0);
+  const [subcatPage, setSubcatPage] = useState(0);
   const [openActionsId, setOpenActionsId] = useState(null);
   const [menuOpenUp, setMenuOpenUp] = useState(false);
-  const [categoryNames, setCategoryNames] = useState(() => buildStockFormOptions(stockItems).categories);
-  const [subcategoryRows, setSubcategoryRows] = useState(() => buildStockImportReference(stockItems).subcategories);
+  const [categoryRows, setCategoryRows] = useState([]);
+  const [subcategoryRows, setSubcategoryRows] = useState([]);
+  const [activeSubcategory, setActiveSubcategory] = useState(null);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [products, categories, subcategories] = await Promise.all([
+        request('estoque.listProducts', {}),
+        request('estoque.listCategories'),
+        request('estoque.listSubcategories', {}),
+      ]);
+      setRows(products.map(mapProductToRow));
+      setCategoryRows(categories);
+      setSubcategoryRows(subcategories);
+    } catch (err) {
+      console.error('Erro ao carregar estoque:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
   const referenceRows = useMemo(
     () => [
       ...rows,
-      ...categoryNames.map((category) => ({ category, subcategory: '' })),
-      ...subcategoryRows.map((subcategory) => ({ category: subcategory.category, subcategory: subcategory.name })),
+      ...categoryRows.map((c) => ({ category: c.nome, subcategory: '' })),
+      ...subcategoryRows.map((s) => ({ category: s.categoria_nome, subcategory: s.nome })),
     ],
-    [categoryNames, rows, subcategoryRows],
+    [categoryRows, rows, subcategoryRows],
   );
   const metrics = buildStockMetrics(rows);
   const categoryCards = useMemo(() => {
-    const counts = new Map(metrics.categories.map((category) => [category.name, category.count]));
-    return categoryNames.map((name) => ({
-      name,
-      count: counts.get(name) ?? 0,
-      icon: name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').slice(0, 3).toLowerCase(),
+    const counts = new Map(metrics.categories.map((c) => [c.name, c.count]));
+    return categoryRows.map((cat) => ({
+      id: cat.id,
+      name: cat.nome,
+      imagem: cat.imagem || null,
+      count: counts.get(cat.nome) ?? 0,
+      icon: cat.nome.split(/\s+/).map((w) => w.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '')[0] || '').join('').toUpperCase().slice(0, 3) || '?',
     }));
-  }, [categoryNames, metrics.categories]);
+  }, [categoryRows, metrics.categories]);
   const visibleCategories = useMemo(
     () => Array.from(
       { length: Math.min(visibleCategoryCount, categoryCards.length) },
@@ -111,6 +160,7 @@ function Estoque() {
         .includes(query.toLowerCase());
       const matchesStatus = !statusFilter || item.status === statusFilter;
       const matchesCategory = !activeFilters.category || item.category === activeFilters.category;
+      const matchesSubcat = !activeSubcategory || item.subcategory === activeSubcategory;
       const matchesLocation = !activeFilters.location || item.location === activeFilters.location;
       let matchesExpiry = true;
       if (activeFilters.expiry) {
@@ -120,15 +170,15 @@ function Estoque() {
         else if (activeFilters.expiry === '60') matchesExpiry = days !== null && days >= 0 && days <= 60;
         else if (activeFilters.expiry === '90') matchesExpiry = days !== null && days >= 0 && days <= 90;
       }
-      return matchesQuery && matchesStatus && matchesCategory && matchesLocation && matchesExpiry;
+      return matchesQuery && matchesStatus && matchesCategory && matchesSubcat && matchesLocation && matchesExpiry;
     }),
-    [query, statusFilter, activeFilters, rows],
+    [query, statusFilter, activeFilters, activeSubcategory, rows],
   );
   const listPage = useMemo(
     () => buildStockListPage(filteredItems, currentPage, itemsPerPage),
     [currentPage, filteredItems, itemsPerPage],
   );
-  const paginationPages = Array.from({ length: listPage.totalPages }, (_, index) => index + 1);
+  const paginationRange = buildPaginationRange(listPage.currentPage, listPage.totalPages);
 
   function openModal(type, item = null) {
     setOpenActionsId(null);
@@ -143,11 +193,13 @@ function Estoque() {
 
   async function deleteRow(item) {
     setOpenActionsId(null);
-    if (!(await confirmDelete(`o produto ${item.name}`))) {
-      return;
+    if (!(await confirmDelete(`o produto ${item.name}`))) return;
+    try {
+      await request('estoque.deleteProduct', { produto_id: item.id });
+      loadData();
+    } catch (err) {
+      alert(err?.message || 'Erro ao remover produto.');
     }
-
-    setRows((current) => current.filter((row) => row.id !== item.id));
   }
 
   function updateQuery(value) {
@@ -167,23 +219,64 @@ function Estoque() {
     });
   }
 
-  function handleSaveProduct(data, existingId) {
+  async function handleSaveProduct(data, existingId) {
+    const payload = {
+      nome: data.name,
+      codigo_barras: data.barcode || `AUTO-${Date.now()}`,
+      preco_venda: Number(data.price) || 0,
+      categoria: data.category || null,
+      subcategoria: data.subcategory || null,
+      unidade_medida: data.unit || 'Unidade',
+      receita_obrigatoria: Boolean(data.requiresPrescription),
+      observacao_localizacao: data.notes || null,
+      localizacao: data.localizacao || null,
+      imagem: data.imagem || null,
+    };
     if (existingId) {
-      setRows(current => current.map(r =>
-        r.id === existingId
-          ? { ...r, name: data.name, category: data.category, subcategory: data.subcategory, price: Number(data.price) || r.price, expiry: data.expiry, location: data.localizacao, requiresPrescription: data.requiresPrescription }
-          : r
-      ));
+      await request('estoque.updateProduct', { produto_id: existingId, ...payload });
     } else {
-      const newId = `P${Date.now()}`;
-      setRows(current => [...current, {
-        id: newId, name: data.name, category: data.category, subcategory: data.subcategory,
-        price: Number(data.price) || 0, quantity: 0, expiry: data.expiry || '-',
-        location: data.localizacao, status: 'Activo', requiresPrescription: data.requiresPrescription,
-        lastStockMovement: null,
-      }]);
-      if (data.category) mergeCategoryNames([data.category]);
-      if (data.subcategory && data.category) mergeSubcategoryRows([{ category: data.category, name: data.subcategory }]);
+      await request('estoque.createProduct', payload);
+    }
+    loadData();
+  }
+
+  async function handleSaveCategory(data) {
+    if (data.id) {
+      await request('estoque.updateCategory', { id: data.id, nome: data.nome, descricao: data.descricao, imagem: data.imagem || null });
+    } else {
+      await request('estoque.createCategory', { nome: data.nome, codigo: data.codigo, descricao: data.descricao, imagem: data.imagem || null });
+    }
+    loadData();
+  }
+
+  async function handleDeleteCategory(cat) {
+    const ok = await confirmDelete(`Eliminar categoria "${cat.nome}"?`);
+    if (!ok) return;
+    try {
+      await request('estoque.deleteCategory', { id: cat.id });
+      loadData();
+    } catch (e) {
+      alert(e.message || 'Erro ao eliminar categoria.');
+    }
+  }
+
+  async function handleSaveSubcategory(data) {
+    if (data.id) {
+      await request('estoque.updateSubcategory', { id: data.id, nome: data.nome, descricao: data.descricao, imagem: data.imagem || null });
+    } else {
+      await request('estoque.createSubcategory', { nome: data.nome, categoria_nome: data.categoria_nome, descricao: data.descricao, imagem: data.imagem || null });
+    }
+    loadData();
+  }
+
+  async function handleDeleteSubcategory(sub) {
+    const ok = await confirmDelete(`Eliminar subcategoria "${sub.nome}"?`);
+    if (!ok) return;
+    try {
+      await request('estoque.deleteSubcategory', { id: sub.id });
+      loadData();
+    } catch (e) {
+      alert(e.message || 'Erro ao eliminar subcategoria.');
     }
   }
 
@@ -202,7 +295,7 @@ function Estoque() {
     try {
       if (type === 'stockIn') {
         await request('estoque.addLot', {
-          produto_id: selectedItem?.dbId || null,
+          produto_id: selectedItem?.id,
           lote: movement.lote,
           quantidade: movement.quantity,
           data_validade: movement.dataValidade,
@@ -211,44 +304,16 @@ function Estoque() {
         });
       } else {
         await request('estoque.deduct', {
-          produto_id: selectedItem?.dbId || null,
+          produto_id: selectedItem?.id,
           quantidade: movement.quantity,
           motivo: movement.reason,
         });
       }
-    } catch {
-      // IPC unavailable — fall through to mock update
+      await loadData();
+      closeModal();
+    } catch (err) {
+      alert(err?.message || 'Erro ao registar movimento de estoque.');
     }
-    setRows((current) => {
-      if (type === 'stockIn') {
-        return addStockQuantity(current, selectedItem.id, movement.quantity, movement.reason);
-      }
-      return removeStockQuantity(current, selectedItem.id, movement.quantity, movement.reason);
-    });
-    closeModal();
-  }
-
-  function mergeCategoryNames(nextCategories) {
-    setCategoryNames((current) => Array.from(
-      new Set([...current, ...nextCategories.map((category) => category.name ?? category)]),
-    ).sort((first, second) => first.localeCompare(second, 'pt-AO')));
-  }
-
-  function mergeSubcategoryRows(nextSubcategories) {
-    setSubcategoryRows((current) => {
-      const merged = new Map(current.map((subcategory) => [
-        `${subcategory.category.toLowerCase()}::${subcategory.name.toLowerCase()}`,
-        subcategory,
-      ]));
-
-      nextSubcategories.forEach((subcategory) => {
-        merged.set(`${subcategory.category.toLowerCase()}::${subcategory.name.toLowerCase()}`, subcategory);
-      });
-
-      return Array.from(merged.values()).sort((first, second) =>
-        first.category.localeCompare(second.category, 'pt-AO') || first.name.localeCompare(second.name, 'pt-AO'),
-      );
-    });
   }
 
   function exportProductsExcel() {
@@ -263,22 +328,31 @@ function Estoque() {
     XLSX.writeFile(wb, `estoque-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
-  function handleImport(mode, acceptedRows) {
-    if (mode === 'products') {
-      setRows((current) => [...current, ...acceptedRows]);
-      mergeCategoryNames(acceptedRows.map((row) => row.category));
-      mergeSubcategoryRows(acceptedRows.map((row) => ({ category: row.category, name: row.subcategory })));
+  async function handleImport(mode, acceptedRows) {
+    if (!acceptedRows?.length) { closeModal(); return; }
+    try {
+      const action = mode === 'categories'
+        ? 'estoque.importCategories'
+        : mode === 'subcategories'
+          ? 'estoque.importSubcategories'
+          : 'estoque.importProducts';
+      const result = await request(action, { rows: acceptedRows });
+      const created = result?.created ?? 0;
+      const skipped = result?.skipped ?? 0;
+      const errors = result?.errors ?? [];
+      const lines = [`Importação concluída: ${created} criados, ${skipped} ignorados (já existiam).`];
+      if (errors.length) {
+        lines.push(`\n${errors.length} erro(s):`);
+        errors.slice(0, 20).forEach((e) => lines.push(`  • ${e.name}: ${e.reason}`));
+        if (errors.length > 20) lines.push(`  ... e mais ${errors.length - 20} erros.`);
+      }
+      alert(lines.join('\n'));
+    } catch (err) {
+      alert(err?.message || 'Erro ao importar.');
+    } finally {
+      loadData();
+      closeModal();
     }
-
-    if (mode === 'categories') {
-      mergeCategoryNames(acceptedRows);
-    }
-
-    if (mode === 'subcategories') {
-      mergeSubcategoryRows(acceptedRows);
-    }
-
-    closeModal();
   }
 
   const expiryAlerts = useMemo(() => buildExpiryAlerts(rows), [rows]);
@@ -286,6 +360,14 @@ function Estoque() {
   function applyExpiryQuickFilter(value) {
     setActiveFilters((prev) => ({ ...prev, expiry: prev.expiry === value ? '' : value }));
     setCurrentPage(1);
+  }
+
+  if (loading && !rows.length) {
+    return (
+      <section className="stock-screen">
+        <div className="empty-state"><PackagePlus size={32} /><strong>A carregar estoque...</strong></div>
+      </section>
+    );
   }
 
   return (
@@ -322,19 +404,86 @@ function Estoque() {
         </button>
         <div className="stock-category-grid">
           {visibleCategories.map((category) => (
-            <button type="button" className="stock-category-card" key={category.name}>
-              <span className="category-symbol">{category.icon.toUpperCase()}</span>
-              <div>
-                <h3>{category.name}</h3>
-                <strong>{category.count}</strong>
+            <div className="stock-category-card-wrap" key={category.name}>
+              <button type="button" className="stock-category-card">
+                {category.imagem
+                  ? <img src={category.imagem} alt={category.name} className="category-card-img" />
+                  : <span className="category-symbol">{category.icon}</span>}
+                <div>
+                  <h3>{category.name}</h3>
+                  <strong>{category.count}</strong>
+                </div>
+              </button>
+              <div className="cat-card-actions">
+                <button type="button" title="Editar" onClick={() => openModal('category', category)}><Pencil size={12} /></button>
+                <button type="button" title="Eliminar" onClick={() => handleDeleteCategory(category)}><Trash2 size={12} /></button>
               </div>
-            </button>
+            </div>
           ))}
         </div>
         <button className="circle-action" type="button" aria-label="Proximas categorias" onClick={() => rotateCategories(visibleCategoryCount)}>
           <ChevronRight size={20} />
         </button>
       </div>
+
+      {subcategoryRows.length > 0 && (() => {
+        const SUBCAT_PER_PAGE = 24;
+        const totalPages = Math.ceil((subcategoryRows.length + 1) / SUBCAT_PER_PAGE);
+        const safePage = Math.min(subcatPage, totalPages - 1);
+        const allChips = [null, ...subcategoryRows];
+        const pageChips = allChips.slice(safePage * SUBCAT_PER_PAGE, safePage * SUBCAT_PER_PAGE + SUBCAT_PER_PAGE);
+        return (
+          <div className="stock-subcategory-carousel">
+            <button
+              className="circle-action"
+              type="button"
+              aria-label="Subcategorias anteriores"
+              disabled={safePage === 0}
+              onClick={() => setSubcatPage((p) => Math.max(0, p - 1))}
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="stock-subcategory-grid">
+              {pageChips.map((sub) =>
+                sub === null ? (
+                  <button
+                    key="__todas"
+                    type="button"
+                    className={`subcat-chip${activeSubcategory === null ? ' active' : ''}`}
+                    onClick={() => setActiveSubcategory(null)}
+                  >
+                    Todas
+                  </button>
+                ) : (
+                  <div key={sub.id} className="subcat-chip-wrap">
+                    <button
+                      type="button"
+                      className={`subcat-chip${activeSubcategory === sub.nome ? ' active' : ''}`}
+                      onClick={() => setActiveSubcategory(activeSubcategory === sub.nome ? null : sub.nome)}
+                    >
+                      {sub.imagem ? <img src={sub.imagem} alt={sub.nome} className="subcat-chip-img" /> : null}
+                      {sub.nome}
+                    </button>
+                    <div className="subcat-chip-actions">
+                      <button type="button" title="Editar" onClick={() => openModal('subcategory', sub)}><Pencil size={11} /></button>
+                      <button type="button" title="Eliminar" onClick={() => handleDeleteSubcategory(sub)}><Trash2 size={11} /></button>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+            <button
+              className="circle-action"
+              type="button"
+              aria-label="Próximas subcategorias"
+              disabled={safePage >= totalPages - 1}
+              onClick={() => setSubcatPage((p) => Math.min(totalPages - 1, p + 1))}
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        );
+      })()}
 
       <div className="stock-table-panel panel">
         <div className="stock-toolbar">
@@ -359,7 +508,18 @@ function Estoque() {
           </div>
         </div>
 
-        <table>
+        <table className="stock-main-table">
+          <colgroup>
+            <col className="col-id" />
+            <col className="col-name" />
+            <col className="col-cat" />
+            <col className="col-qty" />
+            <col className="col-price" />
+            <col className="col-expiry" />
+            <col className="col-status" />
+            <col className="col-location" />
+            <col className="col-opts" />
+          </colgroup>
           <thead>
             <tr>
               <th>Id</th>
@@ -367,7 +527,7 @@ function Estoque() {
               <th>Categoria</th>
               <th>Quant.</th>
               <th>Preço</th>
-              <th>Data Expiração</th>
+              <th>Validade</th>
               <th>Status</th>
               <th>Localização</th>
               <th>Opções</th>
@@ -435,16 +595,22 @@ function Estoque() {
           </div>
 
           <div className="pagination">
-            {paginationPages.map((page) => (
-              <button
-                key={page}
-                className={page === listPage.currentPage ? 'active' : undefined}
-                type="button"
-                onClick={() => setCurrentPage(page)}
-              >
-                {page}
-              </button>
-            ))}
+            <button type="button" disabled={listPage.currentPage === 1} onClick={() => setCurrentPage(listPage.currentPage - 1)}>‹</button>
+            {paginationRange.map((item, i) =>
+              item === '…' ? (
+                <span key={`ellipsis-${i}`} className="pagination-ellipsis">…</span>
+              ) : (
+                <button
+                  key={item}
+                  className={item === listPage.currentPage ? 'active' : undefined}
+                  type="button"
+                  onClick={() => setCurrentPage(item)}
+                >
+                  {item}
+                </button>
+              )
+            )}
+            <button type="button" disabled={listPage.currentPage === listPage.totalPages} onClick={() => setCurrentPage(listPage.currentPage + 1)}>›</button>
           </div>
         </div>
       </div>
@@ -457,10 +623,14 @@ function Estoque() {
           stockRows={referenceRows}
           inventoryRows={rows}
           importReference={importReference}
+          categoryRows={categoryRows}
+          subcategoryRows={subcategoryRows}
           onClose={closeModal}
           onImport={handleImport}
           onStockMovement={handleStockMovement}
           onSaveProduct={handleSaveProduct}
+          onSaveCategory={handleSaveCategory}
+          onSaveSubcategory={handleSaveSubcategory}
           onApplyFilter={handleApplyFilter}
           statusFilter={statusFilter}
           onStatusChange={handleStatusChange}
@@ -483,15 +653,15 @@ function SummaryCard({ title, value, icon: Icon, tone = '', onClick, active = fa
   );
 }
 
-function StockModal({ type, item, options, stockRows, inventoryRows, importReference, onClose, onImport, onStockMovement, onSaveProduct, onApplyFilter, statusFilter, onStatusChange }) {
-  const [imagePreview, setImagePreview] = useState('');
-  const [categoryImagePreview, setCategoryImagePreview] = useState('');
+function StockModal({ type, item, options, stockRows, inventoryRows, importReference, categoryRows, subcategoryRows, onClose, onImport, onStockMovement, onSaveProduct, onSaveCategory, onSaveSubcategory, onApplyFilter, statusFilter, onStatusChange }) {
+  const [imagePreview, setImagePreview] = useState(item?.imagem || '');
   const [movementQuantity, setMovementQuantity] = useState('');
   const [movementReason, setMovementReason] = useState('');
   const [movementNote, setMovementNote] = useState('');
   const [movementLote, setMovementLote] = useState('');
   const [movementValidade, setMovementValidade] = useState('');
   const [movementCusto, setMovementCusto] = useState('');
+  const [movementPrefilled, setMovementPrefilled] = useState(false);
   const [inventoryCounts, setInventoryCounts] = useState({});
   const [inventoryResult, setInventoryResult] = useState(null);
   const [showInventoryPrint, setShowInventoryPrint] = useState(false);
@@ -502,24 +672,41 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
   const [importSummary, setImportSummary] = useState(null);
   const [importRows, setImportRows] = useState([]);
   const [importNotice, setImportNotice] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [modalError, setModalError] = useState('');
 
   const isProductForm = type === 'product' || type === 'editProduct';
   const isFilter = type === 'filter';
 
   const [productForm, setProductForm] = useState(() => ({
     name: item?.name ?? '',
-    barcode: String(item?.id ?? ''),
+    barcode: item?.codigo_barras ?? '',
     category: item?.category ?? '',
     subcategory: item?.subcategory ?? '',
     price: item?.price ?? '',
-    costPrice: '',
-    batch: '',
-    unit: '',
-    expiry: item?.expiry ?? '',
+    unit: item?.unidade_medida ?? '',
     localizacao: item?.location ?? '',
     requiresPrescription: item?.requiresPrescription ?? false,
     notes: item?.observacao_localizacao ?? '',
+    imagem: item?.imagem ?? '',
   }));
+
+  const [categoryImgPreview, setCategoryImgPreview] = useState(item?.imagem || '');
+  const [subcategoryImgPreview, setSubcategoryImgPreview] = useState(item?.imagem || '');
+  const [categoryForm, setCategoryForm] = useState({
+    id: item?.id ?? null,
+    nome: item?.name ?? item?.nome ?? '',
+    codigo: item?.codigo ?? '',
+    descricao: item?.descricao ?? '',
+    imagem: item?.imagem ?? '',
+  });
+  const [subcategoryForm, setSubcategoryForm] = useState({
+    id: item?.id ?? null,
+    nome: item?.nome ?? '',
+    categoria_nome: item?.categoria_nome ?? '',
+    descricao: item?.descricao ?? '',
+    imagem: item?.imagem ?? '',
+  });
 
   const [filterForm, setFilterForm] = useState({ category: '', location: '', expiry: '' });
   const [priceRows, setPriceRows] = useState([]);
@@ -549,14 +736,47 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
       });
       setPriceRows((rows) => rows.map((r) => r.id === updated.id ? { ...r, ...updated } : r));
       setPriceEdits((e) => { const next = { ...e }; delete next[produtoId]; return next; });
-    } catch { /* silent */ } finally {
+    } catch (err) {
+      setModalError(err?.message || 'Erro ao guardar preço.');
+    } finally {
       setPriceSaving(null);
     }
   }
 
-  function saveProduct() {
-    onSaveProduct?.(productForm, item?.id ?? null);
-    onClose();
+  async function saveProduct() {
+    setSaving(true);
+    try {
+      await onSaveProduct?.(productForm, item?.id ?? null);
+      onClose();
+    } catch (err) {
+      setModalError(err?.message || 'Erro ao guardar produto.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCategory() {
+    setSaving(true);
+    try {
+      await onSaveCategory?.(categoryForm);
+      onClose();
+    } catch (err) {
+      setModalError(err?.message || 'Erro ao guardar categoria.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveSubcategory() {
+    setSaving(true);
+    try {
+      await onSaveSubcategory?.(subcategoryForm);
+      onClose();
+    } catch (err) {
+      setModalError(err?.message || 'Erro ao guardar subcategoria.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function applyFilter() {
@@ -571,6 +791,20 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
   const isStockIn = type === 'stockIn';
   const isStockOut = type === 'stockOut';
   const isStockMovement = isStockIn || isStockOut;
+
+  useEffect(() => {
+    if (!isStockIn || !item?.id) return;
+    request('estoque.getLotes', { produto_id: item.id }).then((lots) => {
+      if (!lots?.length) return;
+      const last = lots[lots.length - 1];
+      if (last.lote || last.data_validade || last.preco_custo) {
+        setMovementLote(last.lote || '');
+        setMovementValidade(last.data_validade ? last.data_validade.slice(0, 10) : '');
+        setMovementCusto(last.preco_custo ? String(last.preco_custo) : '');
+        setMovementPrefilled(true);
+      }
+    }).catch(() => {});
+  }, [isStockIn, item?.id]);
   const sortedInventoryRows = useMemo(() => {
     const q = inventorySearch.toLowerCase();
     return [...(inventoryRows ?? [])]
@@ -588,19 +822,11 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
     }
 
     const reader = new FileReader();
-    reader.onload = () => setImagePreview(String(reader.result));
-    reader.readAsDataURL(file);
-  }
-
-  function previewCategoryImage(event) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      setCategoryImagePreview('');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => setCategoryImagePreview(String(reader.result));
+    reader.onload = () => {
+      const result = String(reader.result);
+      setImagePreview(result);
+      setPF('imagem', result);
+    };
     reader.readAsDataURL(file);
   }
 
@@ -617,7 +843,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
 
   function updateImportMode(mode) {
     setImportMode(mode);
-    setImportSummary(importRows.length ? validateImportRows(mode, importRows, stockRows, importReference) : null);
+    setImportSummary(importRows.length ? validateImportRows(mode, importRows, importReference, categoryRows) : null);
     setImportNotice('');
   }
 
@@ -638,16 +864,29 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
 
     const reader = new FileReader();
     reader.onload = () => {
-      const rows = parseStockImportCsv(String(reader.result ?? ''));
+      const raw = String(reader.result ?? '');
+      const rows = importMode === 'categories'
+        ? parseStockCategoryImportCsv(raw)
+        : importMode === 'subcategories'
+          ? parseStockSubcategoryImportCsv(raw)
+          : parseStockImportCsv(raw);
       setImportRows(rows);
-      setImportSummary(validateImportRows(importMode, rows, stockRows, importReference));
+      setImportSummary(validateImportRows(importMode, rows, importReference, categoryRows));
     };
-    reader.readAsText(file);
+    reader.readAsText(file, 'UTF-8');
   }
 
-  function submitImport() {
+  async function submitImport() {
     if (!importSummary?.acceptedRows?.length) return;
-    onImport(importMode, importSummary.acceptedRows);
+    setSaving(true);
+    try {
+      await onImport(importMode, importSummary.acceptedRows);
+      onClose();
+    } catch {
+      // handleImport shows its own alert
+    } finally {
+      setSaving(false);
+    }
   }
 
   function updateInventoryCount(id, value) {
@@ -679,13 +918,19 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
   return (
     <>
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className={isInventory ? 'modal-card inventory' : 'modal-card wide stock-modal'}>
+      <div className={isInventory ? 'modal-card inventory' : isPrices ? 'modal-card prices-modal stock-modal' : 'modal-card wide stock-modal'}>
         <div className="modal-title-row">
-          <h2>{modalTitles[type]}</h2>
+          <h2>{(isCategory && item?.id) ? 'Editar Categoria' : (isSubcategory && item?.id) ? 'Editar Subcategoria' : modalTitles[type]}</h2>
           <button type="button" onClick={onClose}>×</button>
         </div>
 
         <div className="form-grid">
+          {modalError && (
+            <div className="modal-error-banner form-span-2" role="alert">
+              <span>⚠ {modalError}</span>
+              <button type="button" onClick={() => setModalError('')}>×</button>
+            </div>
+          )}
           {isView && item && (
             <div className="product-view-card">
               <div className="image-preview empty"><ImagePlus size={34} /></div>
@@ -724,11 +969,19 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                 <OptionSelect label="Motivo da baixa" value={movementReason} options={STOCK_OUT_REASONS} onChange={setMovementReason} />
               ) : (
                 <>
+                  {movementPrefilled && (
+                    <div className="stockin-prefill-notice">
+                      <span>📋 Dados do lote anterior pré-preenchidos. Confirme ou edite antes de adicionar.</span>
+                      <button type="button" onClick={() => { setMovementLote(''); setMovementValidade(''); setMovementCusto(''); setMovementPrefilled(false); }}>
+                        Limpar
+                      </button>
+                    </div>
+                  )}
                   <label>
                     Lote (opcional — gerado auto se vazio)
                     <input
                       value={movementLote}
-                      onChange={(event) => setMovementLote(event.target.value)}
+                      onChange={(event) => { setMovementLote(event.target.value); setMovementPrefilled(false); }}
                       placeholder="Ex: LOTE-2026-01"
                     />
                   </label>
@@ -737,7 +990,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                     <input
                       type="date"
                       value={movementValidade}
-                      onChange={(event) => setMovementValidade(event.target.value)}
+                      onChange={(event) => { setMovementValidade(event.target.value); setMovementPrefilled(false); }}
                     />
                   </label>
                   <label>
@@ -747,7 +1000,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                       min="0"
                       step="0.01"
                       value={movementCusto}
-                      onChange={(event) => setMovementCusto(event.target.value)}
+                      onChange={(event) => { setMovementCusto(event.target.value); setMovementPrefilled(false); }}
                       placeholder="Actualiza preço de custo"
                     />
                   </label>
@@ -764,7 +1017,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
           )}
 
           {isPrices && (
-            <div className="prices-panel">
+            <div className="prices-panel form-span-2">
               <div className="prices-search-row">
                 <label className="compact-search">
                   <Search size={15} />
@@ -775,7 +1028,11 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                   />
                 </label>
               </div>
+              <div className="prices-table-wrap">
               <table className="prices-table">
+                <colgroup>
+                  <col /><col /><col /><col /><col />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Produto</th>
@@ -831,6 +1088,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                     })}
                 </tbody>
               </table>
+              </div>
               {!priceRows.length ? <div className="empty-state"><Tags size={22} /><strong>Nenhum produto encontrado</strong></div> : null}
             </div>
           )}
@@ -849,11 +1107,9 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
               <OptionSelect label="Categoria" value={productForm.category} options={options.categories} onChange={v => setPF('category', v)} />
               <OptionSelect label="Subcategoria" value={productForm.subcategory} options={options.subcategories} onChange={v => setPF('subcategory', v)} />
               <label><span>Preço de venda</span><input type="number" value={productForm.price} onChange={e => setPF('price', e.target.value)} /></label>
-              <label><span>Preço de custo</span><input type="number" value={productForm.costPrice} onChange={e => setPF('costPrice', e.target.value)} /></label>
-              <label><span>Lote</span><input value={productForm.batch} onChange={e => setPF('batch', e.target.value)} /></label>
               <OptionSelect label="Unidade" value={productForm.unit} options={options.units} onChange={v => setPF('unit', v)} />
-              <label><span>Data de validade</span><input type="date" value={productForm.expiry} onChange={e => setPF('expiry', e.target.value)} /></label>
               <OptionSelect label="Localização" value={productForm.localizacao} options={options.locations} onChange={v => setPF('localizacao', v)} />
+              <div className="form-info-note form-span-2">ℹ Lote, Data de Validade e Preço de Custo são definidos ao adicionar quantidade ao produto.</div>
               <label className="form-span-2"><span>Observação de localização</span><textarea value={productForm.notes} onChange={e => setPF('notes', e.target.value)} /></label>
               <label className="check-row"><input type="checkbox" checked={productForm.requiresPrescription} onChange={e => setPF('requiresPrescription', e.target.checked)} /> Receita obrigatória</label>
             </>
@@ -866,6 +1122,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                 <button type="button" className={importMode === 'categories' ? 'active' : undefined} onClick={() => updateImportMode('categories')}>Categorias</button>
                 <button type="button" className={importMode === 'subcategories' ? 'active' : undefined} onClick={() => updateImportMode('subcategories')}>Subcategorias</button>
               </div>
+              <ImportDbCounts mode={importMode} categoryRows={categoryRows} subcategoryRows={subcategoryRows} />
               <label className="import-file-picker">
                 <span><Upload size={30} /></span>
                 <input
@@ -876,7 +1133,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                 <strong>{importFileName || getImportFileLabel(importMode)}</strong>
                 <small>{getImportFieldHint(importMode)}</small>
               </label>
-              <ImportReferencePanel mode={importMode} reference={importReference} />
+              <ImportReferencePanel mode={importMode} categoryRows={categoryRows} subcategoryRows={subcategoryRows} />
               {importNotice && <div className="import-alert">{importNotice}</div>}
               {importSummary && <ImportSummary summary={importSummary} mode={importMode} />}
             </>
@@ -907,31 +1164,75 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
 
           {isCategory && (
             <>
-              <label className="image-picker">
-                <span className={categoryImagePreview ? 'image-preview' : 'image-preview empty'}>
-                  {categoryImagePreview ? <img src={categoryImagePreview} alt="Pré-visualização da categoria" /> : <ImagePlus size={34} />}
+              <label className="image-picker form-span-2">
+                <span className={categoryImgPreview ? 'image-preview' : 'image-preview empty'}>
+                  {categoryImgPreview ? <img src={categoryImgPreview} alt="Imagem da categoria" /> : <ImagePlus size={28} />}
                 </span>
-                <input type="file" accept="image/*" onChange={previewCategoryImage} />
-                <strong>Inserir imagem da categoria</strong>
+                <input type="file" accept="image/*" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => { const r = String(reader.result); setCategoryImgPreview(r); setCategoryForm((f) => ({ ...f, imagem: r })); };
+                  reader.readAsDataURL(file);
+                }} />
+                <strong>Imagem da categoria</strong>
+                {categoryImgPreview && <button type="button" className="soft-button" style={{marginTop:4}} onClick={() => { setCategoryImgPreview(''); setCategoryForm((f) => ({ ...f, imagem: '' })); }}>Remover imagem</button>}
               </label>
-              <label>Nome da categoria<input /></label>
-              <label>Código<input /></label>
-              <label>Descrição<textarea /></label>
+              <label>
+                <span>Nome da categoria *</span>
+                <input value={categoryForm.nome} onChange={(e) => setCategoryForm((f) => ({ ...f, nome: e.target.value }))} />
+              </label>
+              {!categoryForm.id && (
+                <label>
+                  <span>Código (gerado automaticamente se vazio)</span>
+                  <input value={categoryForm.codigo} onChange={(e) => setCategoryForm((f) => ({ ...f, codigo: e.target.value }))} />
+                </label>
+              )}
+              <label className="form-span-2">
+                <span>Descrição</span>
+                <textarea value={categoryForm.descricao} onChange={(e) => setCategoryForm((f) => ({ ...f, descricao: e.target.value }))} />
+              </label>
             </>
           )}
 
           {isSubcategory && (
             <>
-              <label className="image-picker">
-                <span className={categoryImagePreview ? 'image-preview' : 'image-preview empty'}>
-                  {categoryImagePreview ? <img src={categoryImagePreview} alt="Pré-visualização da subcategoria" /> : <ImagePlus size={34} />}
+              <label className="image-picker form-span-2">
+                <span className={subcategoryImgPreview ? 'image-preview' : 'image-preview empty'}>
+                  {subcategoryImgPreview ? <img src={subcategoryImgPreview} alt="Imagem da subcategoria" /> : <ImagePlus size={28} />}
                 </span>
-                <input type="file" accept="image/*" onChange={previewCategoryImage} />
-                <strong>Inserir imagem da subcategoria</strong>
+                <input type="file" accept="image/*" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => { const r = String(reader.result); setSubcategoryImgPreview(r); setSubcategoryForm((f) => ({ ...f, imagem: r })); };
+                  reader.readAsDataURL(file);
+                }} />
+                <strong>Imagem da subcategoria</strong>
+                {subcategoryImgPreview && <button type="button" className="soft-button" style={{marginTop:4}} onClick={() => { setSubcategoryImgPreview(''); setSubcategoryForm((f) => ({ ...f, imagem: '' })); }}>Remover imagem</button>}
               </label>
-              <OptionSelect label="Categoria principal" options={options.categories} />
-              <label>Nome da subcategoria<input /></label>
-              <label>Descrição<textarea /></label>
+              {!subcategoryForm.id && (
+                <OptionSelect
+                  label="Categoria principal *"
+                  value={subcategoryForm.categoria_nome}
+                  options={options.categories}
+                  onChange={(v) => setSubcategoryForm((f) => ({ ...f, categoria_nome: v }))}
+                />
+              )}
+              {subcategoryForm.id && (
+                <label>
+                  <span>Categoria</span>
+                  <input value={subcategoryForm.categoria_nome} disabled style={{opacity:0.6}} />
+                </label>
+              )}
+              <label>
+                <span>Nome da subcategoria *</span>
+                <input value={subcategoryForm.nome} onChange={(e) => setSubcategoryForm((f) => ({ ...f, nome: e.target.value }))} />
+              </label>
+              <label className="form-span-2">
+                <span>Descrição</span>
+                <textarea value={subcategoryForm.descricao} onChange={(e) => setSubcategoryForm((f) => ({ ...f, descricao: e.target.value }))} />
+              </label>
             </>
           )}
 
@@ -985,13 +1286,22 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
               type="button"
               className="primary-button"
               onClick={submitImport}
-              disabled={!importSummary?.acceptedRows?.length}
+              disabled={!importSummary?.acceptedRows?.length || saving}
             >
-              Importar
+              {saving ? 'A importar...' : 'Importar'}
             </button>
-          ) : !isView && (
-            <button type="button" className="primary-button" onClick={isFilter ? applyFilter : saveProduct}>
-              {isFilter ? 'Aplicar Filtro' : 'Guardar'}
+          ) : isCategory ? (
+            <button type="button" className="primary-button" onClick={saveCategory} disabled={saving || !categoryForm.nome}>
+              {saving ? '...' : 'Guardar'}
+            </button>
+          ) : isSubcategory ? (
+            <button type="button" className="primary-button" onClick={saveSubcategory} disabled={saving || !subcategoryForm.nome || !subcategoryForm.categoria_nome}>
+              {saving ? '...' : 'Guardar'}
+            </button>
+          ) : isPrices ? null
+          : !isView && (
+            <button type="button" className="primary-button" disabled={saving} onClick={isFilter ? applyFilter : saveProduct}>
+              {saving ? '...' : isFilter ? 'Aplicar Filtro' : 'Guardar'}
             </button>
           )}
         </div>
@@ -1007,16 +1317,30 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
   );
 }
 
-function validateImportRows(mode, rows, stockRows, importReference) {
+function buildPaginationRange(current, total) {
+  if (total <= 9) return Array.from({ length: total }, (_, i) => i + 1);
+  const delta = 2;
+  const range = new Set([1, total]);
+  for (let i = Math.max(2, current - delta); i <= Math.min(total - 1, current + delta); i++) range.add(i);
+  const sorted = Array.from(range).sort((a, b) => a - b);
+  const result = [];
+  let prev = 0;
+  for (const page of sorted) {
+    if (page - prev > 1) result.push('…');
+    result.push(page);
+    prev = page;
+  }
+  return result;
+}
+
+function validateImportRows(mode, rows, importReference, categoryRows = []) {
   if (mode === 'categories') {
-    return validateStockCategoryImportRows(rows, importReference.categories);
+    return validateStockCategoryImportRows(rows, categoryRows.map((c) => c.nome));
   }
-
   if (mode === 'subcategories') {
-    return validateStockSubcategoryImportRows(rows, stockRows);
+    return validateStockSubcategoryImportRows(rows);
   }
-
-  return validateStockProductImportRows(rows, stockRows);
+  return validateStockProductImportRows(rows);
 }
 
 function InventoryCountSheet({ rows, counts, result, onCountChange }) {
@@ -1119,14 +1443,29 @@ function getImportFieldHint(mode) {
   return 'Campos esperados: Codigo, Designacao, Categoria, Subcategoria, Preco, Data Expiracao, Localizacao';
 }
 
-function ImportReferencePanel({ mode, reference }) {
+function ImportReferencePanel({ mode, categoryRows = [], subcategoryRows = [] }) {
+  const categoryNames = categoryRows.map((c) => c.nome).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt-AO'));
+
+  // Group subcategories by category name
+  const subcatByCategory = subcategoryRows.reduce((acc, s) => {
+    const cat = s.categoria_nome || '';
+    if (!cat) return acc;
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(s.nome);
+    return acc;
+  }, {});
+
   if (mode === 'categories') {
     return (
       <div className="import-reference-panel">
         <h3>Categorias cadastradas</h3>
-        <div className="import-chip-list">
-          {reference.categories.map((category) => <span key={category}>{category}</span>)}
-        </div>
+        {categoryNames.length === 0
+          ? <p className="import-reference-empty">Nenhuma categoria cadastrada.</p>
+          : (
+            <div className="import-chip-list">
+              {categoryNames.map((name) => <span key={name}>{name}</span>)}
+            </div>
+          )}
       </div>
     );
   }
@@ -1135,21 +1474,41 @@ function ImportReferencePanel({ mode, reference }) {
     <div className="import-reference-panel">
       <div>
         <h3>Categorias</h3>
-        <div className="import-chip-list">
-          {reference.categories.map((category) => <span key={category}>{category}</span>)}
-        </div>
+        {categoryNames.length === 0
+          ? <p className="import-reference-empty">Nenhuma categoria cadastrada.</p>
+          : (
+            <div className="import-chip-list">
+              {categoryNames.map((name) => <span key={name}>{name}</span>)}
+            </div>
+          )}
       </div>
       <div>
         <h3>Subcategorias</h3>
-        <div className="import-reference-list">
-          {reference.subcategories.map((subcategory) => (
-            <span key={`${subcategory.category}-${subcategory.name}`}>
-              <strong>{subcategory.category}</strong>
-              {subcategory.name}
-            </span>
-          ))}
-        </div>
+        {Object.keys(subcatByCategory).length === 0
+          ? <p className="import-reference-empty">Nenhuma subcategoria cadastrada.</p>
+          : (
+            <ul className="import-subcat-list">
+              {Object.entries(subcatByCategory).sort(([a], [b]) => a.localeCompare(b, 'pt-AO')).map(([cat, names]) => (
+                <li key={cat}><strong>{cat}:</strong> {names.sort((a, b) => a.localeCompare(b, 'pt-AO')).join(', ')}</li>
+              ))}
+            </ul>
+          )}
       </div>
+    </div>
+  );
+}
+
+function ImportDbCounts({ mode, categoryRows = [], subcategoryRows = [] }) {
+  const catCount = categoryRows.length;
+  const subCount = subcategoryRows.length;
+  const noSubcats = mode === 'products' && catCount > 0 && subCount === 0;
+  return (
+    <div className="import-db-counts">
+      <span>Categorias no banco: <strong>{catCount}</strong></span>
+      <span>Subcategorias no banco: <strong>{subCount}</strong></span>
+      {noSubcats && (
+        <p className="import-db-warn">Importe subcategorias antes de importar produtos.</p>
+      )}
     </div>
   );
 }
@@ -1166,11 +1525,7 @@ function ImportSummary({ summary, mode }) {
         <p>Categorias nao encontradas: {summary.missingCategories.join(', ')}</p>
       )}
       {!!summary.missingSubcategories?.length && (
-        <p>
-          Subcategorias nao encontradas: {summary.missingSubcategories
-            .map((item) => `${item.category} / ${item.name}`)
-            .join(', ')}
-        </p>
+        <p>Subcategorias nao encontradas: {summary.missingSubcategories.join(', ')}</p>
       )}
       {!!rejectedCount && (
         <p>Linhas rejeitadas: {summary.rejectedRows.map((row) => `${row.rowNumber} (${row.reason})`).join(', ')}</p>

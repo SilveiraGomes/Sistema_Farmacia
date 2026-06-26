@@ -41,6 +41,13 @@ function InvoiceA4({ viewModel }) {
       </section>
 
       <table className="invoice-a4-items">
+        <colgroup>
+          <col style={{ width: '10%' }} />
+          <col style={{ width: '52%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '15%' }} />
+          <col style={{ width: '15%' }} />
+        </colgroup>
         <thead>
           <tr>
             <th>Codigo</th>

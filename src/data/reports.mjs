@@ -25,43 +25,43 @@ export const REPORT_CATALOG = Object.freeze([
     id: 'geral',
     title: 'Geral',
     reports: [
-      { id: 'resumo-executivo', title: 'Resumo executivo', mode: 'summary' },
-      { id: 'relatorio-diario', title: 'Relatorio diario', mode: 'table' },
+      { id: 'resumo-executivo', title: 'Resumo executivo', mode: 'summary', backend: true, extraFilters: ['dateRange'] },
+      { id: 'relatorio-diario', title: 'Relatorio diario', mode: 'table', backend: true, extraFilters: ['dateRange'] },
     ],
   },
   {
     id: 'vendas',
     title: 'Vendas',
     reports: [
-      { id: 'vendas-detalhadas', title: 'Vendas detalhadas', mode: 'table' },
+      { id: 'vendas-detalhadas', title: 'Vendas detalhadas', mode: 'table', backend: true, extraFilters: ['dateRange'] },
     ],
   },
   {
     id: 'financeiro',
     title: 'Financeiro',
     reports: [
-      { id: 'demonstrativo-financeiro', title: 'Demonstrativo financeiro', mode: 'summary' },
+      { id: 'demonstrativo-financeiro', title: 'Demonstrativo financeiro', mode: 'table', backend: true, extraFilters: ['dateRange'] },
     ],
   },
   {
     id: 'stock',
     title: 'Stock',
     reports: [
-      { id: 'stock-baixo', title: 'Stock baixo', mode: 'table' },
+      { id: 'stock-baixo', title: 'Stock baixo', mode: 'table', backend: true, extraFilters: [] },
     ],
   },
   {
     id: 'clientes',
     title: 'Clientes',
     reports: [
-      { id: 'clientes-credito-aberto', title: 'Clientes com credito aberto', mode: 'table' },
+      { id: 'clientes-credito-aberto', title: 'Clientes com credito aberto', mode: 'table', backend: true, extraFilters: ['dateRange'] },
     ],
   },
   {
     id: 'documentos',
     title: 'Documentos',
     reports: [
-      { id: 'documentos-emitidos', title: 'Documentos emitidos', mode: 'table' },
+      { id: 'documentos-emitidos', title: 'Documentos emitidos', mode: 'table', backend: true, extraFilters: ['dateRange'] },
     ],
   },
   {

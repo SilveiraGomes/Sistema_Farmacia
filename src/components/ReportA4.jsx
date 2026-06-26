@@ -17,9 +17,11 @@ function ReportA4({ report, branding, settings, printedBy }) {
         </section>
 
         <section className="report-a4-document-box">
-          <span>Relatorio</span>
+          <span>Relatório</span>
           <h2>{report.title}</h2>
-          <small>{report.filters.startDate} — {report.filters.endDate}</small>
+          {report.filters?.startDate ? (
+            <small>{report.filters.startDate}{report.filters.endDate ? ` — ${report.filters.endDate}` : ''}</small>
+          ) : null}
         </section>
       </header>
 

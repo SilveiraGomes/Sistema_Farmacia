@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import {
   ArrowLeft,
@@ -22,19 +22,10 @@ import {
   Wallet,
   XCircle,
 } from 'lucide-react';
-import {
-  calculateCartSummary,
-  categories,
-  clients,
-  formatKwanza,
-  invoices,
-  products,
-} from '../data/pharmacyData.mjs';
+import { calculateCartSummary, formatKwanza } from '../data/pharmacyData.mjs';
 import {
   addCartItem,
   appendReceivedDigit,
-  buildFinalizedSaleDocument,
-  buildRecentSaleDocuments,
   calculateCheckout,
   cancelHeldSale as cancelHeldSaleByNumber,
   changeCartQuantity,
@@ -46,13 +37,11 @@ import {
   resumeHeldSale,
 } from '../data/salesWorkflow.mjs';
 import {
-  buildCancellationResult,
   canCancelDocument,
   DOCUMENT_STATUSES,
   DOCUMENT_TYPES,
   documentStatusLabels,
   documentTypeLabels,
-  documents as storedDocuments,
 } from '../data/documents.mjs';
 import { buildDocumentSettingsFromSnapshot, buildInvoiceA4ViewModel } from '../data/invoiceA4.mjs';
 import { confirmDelete } from '../utils/confirmations.mjs';
@@ -67,24 +56,26 @@ const paymentMethodIcons = { dinheiro: Banknote, tpa: CreditCard, transferencia:
 
 const cashKeypad = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'backspace'];
 
-const initialCart = [
-  { ...products[0], quantity: 2 },
-  { ...products[1], quantity: 1 },
-  { ...products[10], quantity: 1 },
-];
+function mapProductForSale(p) {
+  return {
+    id: p.id,
+    name: p.nome,
+    price: p.preco_venda,
+    category: p.categoria || '',
+    stock: p.totalStock || 0,
+    imagem: p.imagem || null,
+    imageTone: (p.id % 2 === 0) ? 'blue' : 'orange',
+  };
+}
 
-const initialHeldSales = invoices
-  .filter((invoice) => invoice.status === 'EM ESPERA')
-  .map((invoice, index) => ({
-    ...invoice,
-    cartItems: index === 0
-      ? [
-          { ...products[3], quantity: 1 },
-          { ...products[6], quantity: 2 },
-          { ...products[8], quantity: 2 },
-        ]
-      : [],
-  }));
+function mapClientForSale(c) {
+  return {
+    id: c.id,
+    name: c.nome,
+    nif: c.nif || '',
+    phone: c.telefone || '',
+  };
+}
 
 function Vendas() {
   const operation = useOperation();
@@ -98,24 +89,69 @@ function Vendas() {
   }));
   const defaultPaymentMethod = useSetting('sales.defaultPaymentMethod', 'dinheiro');
   const defaultTaxRate = useSetting('sales.defaultTaxRate', 0);
-  const maximumDiscount = useSetting('sales.maxDiscount', 580.2);
+  const maximumDiscount = useSetting('sales.maxDiscount', 0);
+
+  const [allProducts, setAllProducts] = useState([]);
+  const [allClients, setAllClients] = useState([]);
+  const [allCategories, setAllCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState(null);
   const [categoryOffset, setCategoryOffset] = useState(0);
-  const [cart, setCart] = useState(initialCart);
-  const [heldSales, setHeldSales] = useState(initialHeldSales);
+  const [cart, setCart] = useState([]);
+  const [heldSales, setHeldSales] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('heldSales') || '[]'); } catch { return []; }
+  });
   const [selectedClient, setSelectedClient] = useState(DEFAULT_SALE_CLIENT);
   const [showClientPopup, setShowClientPopup] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [productQuery, setProductQuery] = useState('');
   const [clientQuery, setClientQuery] = useState('');
-  const [discount, setDiscount] = useState(maximumDiscount);
+  const [discount, setDiscount] = useState(0);
   const [received, setReceived] = useState('');
   const [finalizedDocument, setFinalizedDocument] = useState(null);
   const [saleError, setSaleError] = useState('');
-  const [recentSaleDocuments, setRecentSaleDocuments] = useState(() => buildRecentSaleDocuments(storedDocuments));
+  const [recentSaleDocuments, setRecentSaleDocuments] = useState([]);
   const [pendingPayment, setPendingPayment] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [docType, setDocType] = useState(DOCUMENT_TYPES.INVOICE_RECEIPT);
+
+  const loadPdvData = useCallback(async () => {
+    try {
+      const [products, clients, categories] = await Promise.all([
+        request('estoque.listProducts', {}),
+        request('clientes.list', {}),
+        request('estoque.listCategories'),
+      ]);
+      setAllProducts(products.map(mapProductForSale));
+      setAllClients(clients.map(mapClientForSale));
+      const categoriesWithCount = categories.map((cat) => ({
+        id: cat.id,
+        name: cat.nome,
+        imagem: cat.imagem || null,
+        count: products.filter((p) => p.categoria === cat.nome).length,
+      }));
+      setAllCategories(categoriesWithCount);
+    } catch (err) {
+      console.error('Erro ao carregar dados PDV:', err);
+    }
+  }, []);
+
+  const loadRecentDocuments = useCallback(async () => {
+    try {
+      const docs = await request('vendas.recentDocuments', { limit: 10 });
+      setRecentSaleDocuments(docs);
+    } catch (err) {
+      console.error('Erro ao carregar documentos recentes:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPdvData();
+    loadRecentDocuments();
+  }, [loadPdvData, loadRecentDocuments]);
+
+  useEffect(() => {
+    localStorage.setItem('heldSales', JSON.stringify(heldSales));
+  }, [heldSales]);
 
   const previewDocNumber = useMemo(() => {
     const prefixMap = {
@@ -132,17 +168,19 @@ function Vendas() {
   }, [docType, recentSaleDocuments]);
 
   const visibleProducts = useMemo(
-    () => filterProductsForSale(products, activeCategory, productQuery),
-    [activeCategory, productQuery],
+    () => filterProductsForSale(allProducts, activeCategory, productQuery),
+    [allProducts, activeCategory, productQuery],
   );
   const visibleCategories = useMemo(
-    () => Array.from({ length: Math.min(4, categories.length) }, (_, index) =>
-      categories[(categoryOffset + index) % categories.length]),
-    [categoryOffset],
+    () => allCategories.length
+      ? Array.from({ length: Math.min(4, allCategories.length) }, (_, i) =>
+          allCategories[(categoryOffset + i) % allCategories.length])
+      : [],
+    [allCategories, categoryOffset],
   );
   const visibleClients = useMemo(
-    () => filterClientsForPicker(clients, clientQuery),
-    [clientQuery],
+    () => filterClientsForPicker(allClients, clientQuery),
+    [allClients, clientQuery],
   );
   const summary = calculateCartSummary(cart, discount, defaultTaxRate);
   const checkout = calculateCheckout({
@@ -156,7 +194,7 @@ function Vendas() {
     if (!operation.canOperate) return;
     if (!cart.length) return;
 
-    const invoiceNumber = `FAT${String(heldSales.length + 27).padStart(3, '0')}/26`;
+    const invoiceNumber = `ESP-${Date.now()}`;
     setHeldSales((current) =>
       createHeldSale({
         cart,
@@ -166,6 +204,8 @@ function Vendas() {
       }),
     );
     setCart([]);
+    setSelectedClient(DEFAULT_SALE_CLIENT);
+    setDiscount(0);
     setShowCheckout(false);
   }
 
@@ -177,15 +217,13 @@ function Vendas() {
 
     setHeldSales(resumed.heldSales);
     setCart(resumed.cart);
-    setSelectedClient(clients.find((client) => client.name === invoice.client) ?? DEFAULT_SALE_CLIENT);
+    const matchedClient = allClients.find((c) => c.name === invoice.client);
+    setSelectedClient(matchedClient ?? DEFAULT_SALE_CLIENT);
     setShowCheckout(false);
   }
 
   async function cancelHeldSale(invoiceNumber) {
-    if (!(await confirmDelete(`a compra em espera ${invoiceNumber}`))) {
-      return;
-    }
-
+    if (!(await confirmDelete(`a compra em espera ${invoiceNumber}`))) return;
     setHeldSales((current) => cancelHeldSaleByNumber(current, invoiceNumber));
   }
 
@@ -199,41 +237,46 @@ function Vendas() {
     setShowClientPopup(false);
   }
 
-  function getNextInvoiceNumber() {
-    return `FAT${String(heldSales.length + 27).padStart(3, '0')}/26`;
-  }
-
   function closeSale() {
     if (!cart.length) return;
-
     setCart([]);
     setReceived('');
     setDiscount(0);
+    setSelectedClient(DEFAULT_SALE_CLIENT);
     setShowCheckout(false);
   }
 
-  function handleCancelDocument(reason) {
+  async function handleCancelDocument(reason) {
     const document = cancelTarget;
-    if (!document || !canCancelDocument(document)) return;
+    if (!document) return;
+    if (!document.vendaId) {
+      setSaleError('Documento nao pode ser anulado (sem referencia no banco de dados).');
+      setCancelTarget(null);
+      return;
+    }
 
-    const cancelledAt = new Date().toISOString();
-    const ncCount = recentSaleDocuments.filter((d) => d.type === DOCUMENT_TYPES.CREDIT_NOTE).length + 1;
-    const year = String(new Date().getFullYear()).slice(-2);
-    const creditNoteNumber = `NC${String(ncCount).padStart(3, '0')}/${year}`;
+    setSaleError('');
+    try {
+      const ncCount = recentSaleDocuments.filter((d) => d.type === 'NOTA_CREDITO').length + 1;
+      const year = String(new Date().getFullYear()).slice(-2);
+      const creditNoteNumber = `NC${String(ncCount).padStart(3, '0')}/${year}`;
+      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota_credito' }).catch(() => creditNoteNumber);
 
-    const { cancelledDoc, creditNote } = buildCancellationResult(document, {
-      reason,
-      cancelledBy: user?.nome_completo || 'Utilizador',
-      cancelledAt,
-      creditNoteNumber,
-    });
+      const { cancelledDoc, creditNote } = await request('vendas.cancelDocument', {
+        venda_id: document.vendaId,
+        reason,
+        creditNoteNumber: reservedNc,
+      });
 
-    setRecentSaleDocuments((current) => {
-      const updated = current.map((d) => (d.id === cancelledDoc.id ? cancelledDoc : d));
-      return buildRecentSaleDocuments([creditNote, ...updated]);
-    });
-    setCancelTarget(null);
-    setFinalizedDocument(creditNote);
+      setRecentSaleDocuments((current) =>
+        [creditNote, ...current.map((d) => (d.vendaId === cancelledDoc.vendaId ? { ...d, status: 'ANULADO', cancelledAt: cancelledDoc.cancelledAt, cancelledBy: cancelledDoc.cancelledBy, cancellationReason: cancelledDoc.cancellationReason } : d))],
+      );
+      setCancelTarget(null);
+      setFinalizedDocument(creditNote);
+    } catch (err) {
+      setSaleError(err?.message || 'Erro ao anular documento.');
+      setCancelTarget(null);
+    }
   }
 
   function choosePaymentMethod(mode) {
@@ -264,49 +307,66 @@ function Vendas() {
       [DOCUMENT_TYPES.PROFORMA]: 'proforma',
       [DOCUMENT_TYPES.CREDIT]: 'credito',
     };
-    const docStatusMap = {
-      [DOCUMENT_TYPES.INVOICE]: DOCUMENT_STATUSES.ISSUED,
-      [DOCUMENT_TYPES.INVOICE_RECEIPT]: DOCUMENT_STATUSES.PAID,
-      [DOCUMENT_TYPES.RECEIPT]: DOCUMENT_STATUSES.PAID,
-      [DOCUMENT_TYPES.PROFORMA]: DOCUMENT_STATUSES.PENDING,
-      [DOCUMENT_TYPES.CREDIT]: DOCUMENT_STATUSES.ISSUED,
-    };
 
     const isProforma = docType === DOCUMENT_TYPES.PROFORMA;
-    const ipcDocType = ipcDocTypeMap[docType] ?? 'factura';
+    const ipcDocType = ipcDocTypeMap[docType] ?? 'factura_recibo';
 
     try {
-      const reservation = await request('configuration.document.reserveNumber', { documentType: ipcDocType });
-      const document = {
-        ...buildFinalizedSaleDocument({
-          cart, client: selectedClient, checkout: checkoutData,
-          invoiceNumber: reservation, paymentMethod,
-          issueDate: new Date().toISOString().slice(0, 10),
-          userName: user?.nome_completo || 'Vendedor',
-        }),
-        type: docType,
-        status: docStatusMap[docType] ?? DOCUMENT_STATUSES.ISSUED,
-      };
+      const numero_factura = await request('configuration.document.reserveNumber', { documentType: ipcDocType });
+
+      const saleItems = cart.map((item) => ({
+        produto_id: item.id,
+        nome: item.name,
+        quantidade: Number(item.quantity) || 1,
+        preco_unitario: Number(item.price) || 0,
+      }));
+
+      const document = await request('vendas.create', {
+        numero_factura,
+        docType: ipcDocType,
+        items: saleItems,
+        cliente_id: selectedClient?.id !== 'FINAL_CONSUMER' ? selectedClient?.id : null,
+        paymentMethod,
+        subtotal: checkoutData.subtotal,
+        desconto: checkoutData.discount,
+        imposto: checkoutData.tax,
+        total: checkoutData.total,
+        valorPago: checkoutData.received,
+        troco: checkoutData.change,
+      });
+
       setFinalizedDocument(document);
       if (!isProforma) {
-        setRecentSaleDocuments((current) => buildRecentSaleDocuments([document, ...current]));
+        setRecentSaleDocuments((current) => [document, ...current].slice(0, 10));
         setCart([]);
         setReceived('');
         setDiscount(0);
+        setSelectedClient(DEFAULT_SALE_CLIENT);
         setShowCheckout(false);
+        setPendingPayment(null);
       }
     } catch (cause) {
-      setSaleError(cause?.message || 'Nao foi possivel reservar o numero da factura.');
+      setSaleError(cause?.message || 'Nao foi possivel registar a venda.');
     }
   }
 
   function rotateCategories(direction) {
-    setCategoryOffset((current) => (current + direction + categories.length) % categories.length);
+    const len = allCategories.length || 1;
+    setCategoryOffset((current) => (current + direction + len) % len);
   }
 
   return (
     <section className="sales-screen">
-      {saleError ? <p className="form-error sales-operation-block" role="alert">{saleError}</p> : null}
+      {saleError ? (
+        <div className="sale-error-backdrop" role="dialog" aria-modal="true">
+          <div className="sale-error-popup">
+            <div className="sale-error-icon">⚠️</div>
+            <h3>Não foi possível processar a venda</h3>
+            <p>{saleError}</p>
+            <button type="button" className="primary-button" onClick={() => setSaleError('')}>Fechar</button>
+          </div>
+        </div>
+      ) : null}
       <div className="sales-main">
         {!operation.canOperate ? (
           <div className="operation-blocked-banner sales-operation-block">
@@ -325,7 +385,9 @@ function Vendas() {
               onClick={() => setActiveCategory(category.name)}
               type="button"
             >
-              <ProductIllustration tone={category.id % 2 ? 'orange' : 'blue'} />
+              {category.imagem
+                ? <img src={category.imagem} alt={category.name} className="category-card-img" />
+                : <ProductIllustration tone={category.id % 2 ? 'orange' : 'blue'} />}
               <strong>{category.name}</strong>
               <small>{category.count} itens</small>
             </button>
@@ -367,7 +429,9 @@ function Vendas() {
                 disabled={!operation.canOperate}
                 onClick={() => setCart((current) => addCartItem(current, product))}
               >
-                <ProductIllustration tone={product.imageTone} />
+                {product.imagem
+                  ? <img src={product.imagem} alt={product.name} className="product-card-img" />
+                  : <ProductIllustration tone={product.imageTone} />}
                 <strong>{product.name}</strong>
                 <span>{formatKwanza(product.price).replace('KZ ', '')}</span>
               </button>

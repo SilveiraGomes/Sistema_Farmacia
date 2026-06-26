@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Binary,
   CheckCircle2,
   KeyRound,
   Pencil,
@@ -14,6 +15,7 @@ import {
 import { useAuth } from '../auth/AuthContext.jsx';
 import { request } from '../services/ipcClient.js';
 import { confirmDelete, confirmSensitiveAction } from '../utils/confirmations.mjs';
+import PinPad from './PinPad.jsx';
 
 const EMPTY_FORM = {
   nome_completo: '',
@@ -44,6 +46,11 @@ function Usuarios() {
   const [permissionsModalOpen, setPermissionsModalOpen] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [selectedPermissionKeys, setSelectedPermissionKeys] = useState([]);
+  const [pinModal, setPinModal] = useState(null); // { user } | null
+  const [pinValue, setPinValue] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [pinStep, setPinStep] = useState('enter'); // 'enter' | 'confirm'
+  const [pinError, setPinError] = useState('');
 
   const loadUsersAndSummaries = useCallback(async () => {
     setError('');
@@ -167,6 +174,65 @@ function Usuarios() {
 
   function updateForm(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function openPinModal(user) {
+    setPinModal({ user });
+    setPinValue('');
+    setPinConfirm('');
+    setPinStep('enter');
+    setPinError('');
+    setError('');
+  }
+
+  function closePinModal() {
+    setPinModal(null);
+    setPinValue('');
+    setPinConfirm('');
+    setPinStep('enter');
+    setPinError('');
+  }
+
+  // submittedPin comes from PinPad's onSubmit(next) — bypasses stale state on auto-submit
+  // Must be a string of 4 digits; anything else (e.g. DOM event) falls back to state
+  async function handlePinModalSubmit(submittedPin) {
+    const pinArg = typeof submittedPin === 'string' ? submittedPin : null;
+    if (pinStep === 'enter') {
+      const enterPin = pinArg ?? pinValue;
+      if (enterPin.length !== 4) { setPinError('Introduza 4 dígitos.'); return; }
+      setPinValue(enterPin);
+      setPinConfirm('');
+      setPinStep('confirm');
+      setPinError('');
+      return;
+    }
+    // confirm step — use submittedPin to avoid reading stale pinConfirm state
+    const confirmPin = pinArg ?? pinConfirm;
+    if (confirmPin !== pinValue) { setPinError('Os PINs não coincidem. Tente novamente.'); setPinConfirm(''); return; }
+    setIsSubmitting(true);
+    setPinError('');
+    try {
+      await request('users.setPin', { userId: pinModal.user.id, pin: pinValue });
+      setUsers((prev) => prev.map((u) => u.id === pinModal.user.id ? { ...u, has_pin: true } : u));
+      closePinModal();
+    } catch (e) {
+      setPinError(e.message || 'Erro ao definir PIN.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleClearPin(user) {
+    if (!(await confirmSensitiveAction(`Remover o PIN de ${user.nome_completo || user.nome_usuario}?`))) return;
+    setIsSubmitting(true);
+    try {
+      await request('users.clearPin', { userId: user.id });
+      setUsers((prev) => prev.map((u) => u.id === user.id ? { ...u, has_pin: false } : u));
+    } catch (e) {
+      setError(e.message || 'Erro ao remover PIN.');
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function buildUserPayload() {
@@ -416,6 +482,18 @@ function Usuarios() {
                       <KeyRound size={16} />
                     </button>
                   ) : null}
+                  {canEdit ? (
+                    <button
+                      className={`icon-button${user.has_pin ? ' danger' : ''}`}
+                      type="button"
+                      aria-label={user.has_pin ? 'Remover PIN' : 'Definir PIN'}
+                      title={user.has_pin ? 'Remover PIN' : 'Definir PIN'}
+                      onClick={() => user.has_pin ? handleClearPin(user) : openPinModal(user)}
+                      disabled={isSubmitting}
+                    >
+                      <Binary size={16} />
+                    </button>
+                  ) : null}
                   {!canEdit && !canDeactivate && !canResetPassword ? <span className="muted-cell">-</span> : null}
                 </td>
               </tr>
@@ -467,6 +545,52 @@ function Usuarios() {
           }}
           onSave={savePermissions}
         />
+      ) : null}
+
+      {pinModal ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card" style={{ maxWidth: 340 }}>
+            <div className="modal-title-row">
+              <h2>
+                {pinStep === 'enter' ? 'Definir PIN' : 'Confirmar PIN'} —{' '}
+                {pinModal.user.nome_completo || pinModal.user.nome_usuario}
+              </h2>
+              <button type="button" onClick={closePinModal}>×</button>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: '0 0 8px', textAlign: 'center' }}>
+              {pinStep === 'enter'
+                ? 'Introduza o novo PIN de 4 dígitos.'
+                : 'Repita o PIN para confirmar.'}
+            </p>
+
+            <PinPad
+              value={pinStep === 'enter' ? pinValue : pinConfirm}
+              onChange={(v) => {
+                setPinError('');
+                pinStep === 'enter' ? setPinValue(v) : setPinConfirm(v);
+              }}
+              onSubmit={(fullPin) => handlePinModalSubmit(fullPin)}
+              disabled={isSubmitting}
+              error={pinError}
+            />
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+              <button type="button" className="secondary-button" style={{ flex: 1 }} onClick={closePinModal}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                style={{ flex: 1 }}
+                disabled={isSubmitting || (pinStep === 'enter' ? pinValue.length !== 4 : pinConfirm.length !== 4)}
+                onClick={handlePinModalSubmit}
+              >
+                {pinStep === 'enter' ? 'Continuar' : isSubmitting ? 'A guardar…' : 'Guardar PIN'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );

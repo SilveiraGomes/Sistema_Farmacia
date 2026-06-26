@@ -9,22 +9,56 @@ import {
   WalletCards,
 } from "lucide-react";
 import {
-  buildDashboardMetrics,
-  buildDashboardNotifications,
   buildDashboardPeriodChart,
   buildDashboardTopSellers,
-  buildFinancialOverview,
   formatKwanza,
-  financeExpenses,
-  financeLosses,
-  financeOtherRevenues,
-  financeProductSales,
-  invoices,
-  stockItems,
 } from "../data/pharmacyData.mjs";
 import { useOperation } from "../operation/OperationContext";
 import { useSetting } from "../configuration/SettingsContext";
 import { useDashboardData } from "../hooks/useDashboardData";
+
+function buildRealNotifications(stockAlerts) {
+  const notes = [];
+  function plural(n, singular, multi) { return n === 1 ? singular : multi; }
+
+  if (stockAlerts.expired?.length) {
+    const n = stockAlerts.expired.length;
+    notes.push({
+      id: 'expired', severity: 'danger',
+      title: 'Produtos vencidos em estoque',
+      message: `${n} ${plural(n, 'produto vencido', 'produtos vencidos')} ainda em stock.`,
+      detail: stockAlerts.expired.slice(0, 3).join(', '),
+    });
+  }
+  if (stockAlerts.expiring?.length) {
+    const n = stockAlerts.expiring.length;
+    notes.push({
+      id: 'expiring', severity: 'warning',
+      title: 'Produtos a vencer em breve',
+      message: `${n} ${plural(n, 'produto vence', 'produtos vencem')} dentro de 30 dias.`,
+      detail: stockAlerts.expiring.slice(0, 3).join(', '),
+    });
+  }
+  if (stockAlerts.outOfStock?.length) {
+    const n = stockAlerts.outOfStock.length;
+    notes.push({
+      id: 'out-of-stock', severity: 'warning',
+      title: 'Produtos sem estoque',
+      message: `${n} ${plural(n, 'produto precisa', 'produtos precisam')} de reposicao imediata.`,
+      detail: stockAlerts.outOfStock.slice(0, 3).join(', '),
+    });
+  }
+  if (stockAlerts.lowStock?.length) {
+    const n = stockAlerts.lowStock.length;
+    notes.push({
+      id: 'low-stock', severity: 'info',
+      title: 'Estoque baixo',
+      message: `${n} ${plural(n, 'produto está', 'produtos estao')} abaixo do nivel recomendado.`,
+      detail: stockAlerts.lowStock.slice(0, 3).join(', '),
+    });
+  }
+  return notes;
+}
 
 const periodOptions = [
   { id: "week", label: "Semanal" },
@@ -45,27 +79,16 @@ function Dashboard() {
     lowStockThreshold,
   });
 
-  const metrics = useMemo(() => {
-    if (liveData) {
-      const mock = buildDashboardMetrics(invoices, stockItems);
-      return {
-        ...mock,
-        totalSold: liveData.day.totalVendas,
-        totalTransactions: liveData.day.totalTransacoes,
-        shiftSales: liveData.shift.totalVendas,
-        shiftTransactions: liveData.shift.totalTransacoes,
-        lowStockCount: liveData.stock.lowStock,
-        outOfStockRows: liveData.stock.outOfStock,
-      };
-    }
-    return {
-      ...buildDashboardMetrics(invoices, stockItems),
-      lowStockCount: stockItems.filter(
-        (item) =>
-          Number(item.quantity) > 0 && Number(item.quantity) <= lowStockThreshold,
-      ).length,
-    };
-  }, [liveData, lowStockThreshold]);
+  const metrics = useMemo(() => ({
+    totalSold: liveData?.day?.totalVendas ?? 0,
+    totalTransactions: liveData?.day?.totalTransacoes ?? 0,
+    shiftSales: liveData?.shift?.totalVendas ?? 0,
+    shiftTransactions: liveData?.shift?.totalTransacoes ?? 0,
+    lowStockCount: liveData?.stock?.lowStock ?? 0,
+    outOfStockRows: liveData?.stock?.outOfStock ?? 0,
+    lowStockLabel: 'Produtos',
+    pendingInvoices: liveData?.pendingInvoicesCount ?? 0,
+  }), [liveData]);
 
   const tableRows = useMemo(() => {
     if (liveData?.recentSales?.length) {
@@ -77,46 +100,39 @@ function Dashboard() {
         client: sale.cliente,
       }));
     }
-    return invoices;
+    return [];
   }, [liveData]);
 
   const chart = useMemo(
-    () =>
-      buildDashboardPeriodChart(
-        {
-          sales: financeProductSales,
-          expenses: financeExpenses,
-        },
-        { period: selectedPeriod, referenceDate: "2026-06-15" },
-      ),
-    [selectedPeriod],
+    () => buildDashboardPeriodChart(
+      {
+        sales: liveData?.chartData?.sales || [],
+        expenses: liveData?.chartData?.expenses || [],
+      },
+      { period: selectedPeriod, referenceDate: new Date().toISOString().slice(0, 10) },
+    ),
+    [selectedPeriod, liveData],
   );
+
   const topSellers = useMemo(
-    () => buildDashboardTopSellers(financeProductSales, 6),
-    [],
+    () => liveData?.topSellers?.length
+      ? liveData.topSellers
+      : buildDashboardTopSellers([], 6),
+    [liveData],
   );
+
   const notifications = useMemo(
-    () =>
-      buildDashboardNotifications({
-        invoiceRows: invoices,
-        stockRows: stockItems,
-        expenseRows: financeExpenses,
-      }),
-    [],
+    () => liveData?.stockAlerts ? buildRealNotifications(liveData.stockAlerts) : [],
+    [liveData],
   );
-  const financial = useMemo(
-    () =>
-      buildFinancialOverview(
-        {
-          sales: financeProductSales,
-          losses: financeLosses,
-          expenses: financeExpenses,
-          otherRevenues: financeOtherRevenues,
-        },
-        { period: "month", referenceDate: "2026-06-15" },
-      ),
-    [],
-  );
+
+  const financial = useMemo(() => ({
+    totals: {
+      pendingExpenses: liveData?.financialSummary?.pendingExpenses ?? 0,
+      netProfit: liveData?.financialSummary?.netProfit ?? 0,
+      netMargin: liveData?.financialSummary?.netMargin ?? '0.0',
+    },
+  }), [liveData]);
   const expensePath = buildSmoothExpensePath(chart.points);
   const activePoint = hoveredPoint;
   const activePointIndex = activePoint
