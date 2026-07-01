@@ -1,0 +1,98 @@
+{
+  "name": "kilsystem-pharmacy",
+  "version": "1.0.1",
+  "main": "main.js",
+  "scripts": {
+    "start": "npm run build && node scripts/start-electron.js",
+    "dev": "vite --host 127.0.0.1",
+    "browser": "node scripts/start-browser.js",
+    "build": "npm run build:tailwind && vite build",
+    "test": "node --test tests",
+    "test:release": "npm run test:release:preflight",
+    "test:release:preflight": "node --test tests/releaseReadiness.test.mjs && node scripts/verify-license-keypair.mjs",
+    "test:release:final": "set RELEASE_CHECK_MODE=final&& node --test tests/releaseReadiness.test.mjs && node scripts/verify-license-keypair.mjs",
+    "build:tailwind": "postcss ./src/assets/tailwind.css -o ./src/assets/output.css",
+    "dist": "npm run build && electron-builder --win nsis",
+    "postinstall": "node -e \"try{require('fs').rmSync('node_modules/app-builder-lib/node_modules/@noble/hashes',{recursive:true,force:true})}catch(e){}\""
+  },
+  "build": {
+    "appId": "com.kilsystem.pharmacy",
+    "productName": "KILSYSTEM PHARMACY",
+    "copyright": "Copyright © 2026 KILSYSTEM",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "main.js",
+      "preload.js",
+      "src/backend/**",
+      "src/services/**",
+      "src/configuration/**",
+      "resources/license-public.pem",
+      "resources/**",
+      "node_modules/**",
+      "!node_modules/.cache/**",
+      "!node_modules/electron/**",
+      "!node_modules/electron-builder/**",
+      "!node_modules/vite/**",
+      "!node_modules/@vitejs/**",
+      "!node_modules/postcss*/**",
+      "!node_modules/tailwindcss/**",
+      "!node_modules/autoprefixer/**"
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "artifactName": "KILSYSTEM-PHARMACY-Setup-${version}.${ext}",
+      "target": "nsis"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "SilveiraGomes",
+      "repo": "Sistema_Farmacia"
+    },
+    "nsis": {
+      "guid": "com.kilsystem.pharmacy",
+      "oneClick": false,
+      "deleteAppDataOnUninstall": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "KILSYSTEM PHARMACY",
+      "installerIcon": "resources/icon.ico",
+      "uninstallerIcon": "resources/icon.ico"
+    }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@noble/hashes": "^1.8.0",
+    "@tailwindcss/postcss": "^4.3.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.5.0",
+    "electron": "35.7.5",
+    "electron-builder": "^26.15.3",
+    "postcss": "^8.5.15",
+    "postcss-cli": "^11.0.1",
+    "tailwindcss": "^4.3.0",
+    "vite": "^5.4.19"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "googleapis": "^173.0.0",
+    "lucide-react": "^1.17.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "sequelize": "^6.37.8",
+    "sqlite3": "^5.1.7",
+    "xlsx": "^0.18.5"
+  },
+  "overrides": {
+    "app-builder-lib": {
+      "@noble/hashes": "1.8.0"
+    }
+  }
+}

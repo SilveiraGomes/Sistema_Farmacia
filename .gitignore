@@ -1,0 +1,28 @@
+node_modules/
+dist/
+outputs/
+
+# Release binaries — distribuídos via GitHub Releases, não no repositório
+release/*.exe
+release/*.exe.blockmap
+release/win-unpacked/
+release/builder-debug.yml
+tmp_pdf_render/
+.superpowers/
+.worktrees/
+
+*.log
+*.pid
+
+.env
+.env.*
+!.env.example
+
+# Licensing secrets and runtime state (public key belongs in resources/).
+licensing-server/config.php
+licensing-server/deploy/config.php
+licensing-server/var/*
+!licensing-server/var/.gitkeep
+!licensing-server/var/keys/
+licensing-server/var/keys/*
+!licensing-server/var/keys/.gitkeep
