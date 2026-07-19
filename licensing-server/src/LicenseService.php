@@ -106,7 +106,7 @@ final class LicenseService
 
             if ($license['starts_at'] === null) {
                 $expires = $now->add($this->duration((string) $license['plan']));
-                $this->repository->setLicensePeriod((int) $license['id'], $this->date($now), $this->date($expires));
+                $this->repository->setLicensePeriod((int) $license['id'], $this->sqlDate($now), $this->sqlDate($expires));
                 $license['status'] = 'active';
                 $license['starts_at'] = $this->date($now);
                 $license['expires_at'] = $this->date($expires);
@@ -252,7 +252,7 @@ final class LicenseService
             'product' => 'kilsystem-pharmacy',
             'customerId' => (string) $license['customer_id'],
             'issuedAt' => $this->date($now),
-            'expiresAt' => (string) $license['expires_at'],
+            'expiresAt' => $this->date(new DateTimeImmutable((string) $license['expires_at'], new DateTimeZone('UTC'))),
             'features' => [],
             'machineHash' => $activation['machine_hash'],
             'installationId' => $activation['installation_id'],
@@ -278,6 +278,11 @@ final class LicenseService
     private function date(DateTimeImmutable $date): string
     {
         return $date->format('Y-m-d\TH:i:s\Z');
+    }
+
+    private function sqlDate(DateTimeImmutable $date): string
+    {
+        return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     }
 
     private function safeContext(array $context): array

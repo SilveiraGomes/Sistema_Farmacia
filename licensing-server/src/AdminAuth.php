@@ -7,7 +7,7 @@ final class AdminAuth
     private const POLICY = [
         'viewer' => ['view'],
         'operator' => ['view', 'customer', 'issue', 'renew', 'transfer'],
-        'admin' => ['view', 'customer', 'issue', 'renew', 'transfer', 'block', 'revoke'],
+        'admin' => ['view', 'customer', 'issue', 'renew', 'transfer', 'block', 'revoke', 'correct_plan'],
     ];
 
     public static function startSession(array $config = []): void

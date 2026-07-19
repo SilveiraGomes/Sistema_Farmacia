@@ -27,19 +27,44 @@ final class AdminService {
         return $this->repo->createCustomer(['name'=>$name,'tax_id'=>$this->nullable($data['tax_id']??null),'email'=>$this->nullable($data['email']??null),'phone'=>$this->nullable($data['phone']??null),'notes'=>$this->nullable($data['notes']??null)]);
     }
     public function issue(int $customerId, string $plan, array $actor): array {
-        return $this->repo->transaction(function() use($customerId,$plan,$actor) {
-            $now=($this->clock)();
-            // Demo: starts_at/expires_at ficam null — LicenseService define-os na 1ª activação
-            // e regista o machine_claim. Para planos pagos, o período começa na emissão.
-            $startsAt = $plan==='demo' ? null : $this->sql($now);
-            $expiresAt = $plan==='demo' ? null : $this->sql($now->add($this->duration($plan)));
-            $key=strtoupper(bin2hex(($this->random)(16)));
-            $id=$this->repo->createLicense(['public_id'=>$this->uuid(),'customer_id'=>$customerId,'license_key_hash'=>hash('sha256',$key),'plan'=>$plan,'status'=>'active','starts_at'=>$startsAt,'expires_at'=>$expiresAt]);
-            $details=['plan'=>$plan];
-            if($expiresAt!==null) $details['expiresAt']=$expiresAt;
-            $this->repo->addEvent($id,null,'issued',$actor,$details);
-            return ['id'=>$id,'licenseKey'=>$key];
+        return $this->repo->transaction(fn() => $this->issueWithinTransaction($customerId,$plan,$actor));
+    }
+
+    /**
+     * Corrige um plano emitido incorrectamente: revoga a licença antiga (e liberta a
+     * máquina associada, se houver) e emite de imediato uma licença nova com o plano
+     * correcto para o mesmo cliente — tudo numa única transacção atómica, para que a
+     * aplicação da máquina nunca fique bloqueada entre os dois passos.
+     */
+    public function correctPlan(int $oldLicenseId, string $newPlan, array $actor): array {
+        LicensePolicy::assertRenewalPlan($newPlan);
+        return $this->repo->transaction(function() use($oldLicenseId,$newPlan,$actor) {
+            $old=$this->required($oldLicenseId);
+            if ($old['status']==='revoked') throw new DomainException('Esta licença já foi revogada.');
+            $now=$this->sql(($this->clock)());
+            $deactivatedActivationId=$this->repo->deactivateActiveActivation($oldLicenseId,$now);
+            $this->repo->updateLicense($oldLicenseId,['status'=>'revoked','revoked_at'=>$now]);
+            $result=$this->issueWithinTransaction((int)$old['customer_id'],$newPlan,$actor);
+            $this->repo->addEvent(
+                $oldLicenseId,$deactivatedActivationId,'corrected',$actor,
+                ['previousPlan'=>$old['plan'],'newPlan'=>$newPlan,'replacedByLicenseId'=>$result['id']]
+            );
+            return $result;
         });
+    }
+
+    private function issueWithinTransaction(int $customerId, string $plan, array $actor): array {
+        $now=($this->clock)();
+        // Demo: starts_at/expires_at ficam null — LicenseService define-os na 1ª activação
+        // e regista o machine_claim. Para planos pagos, o período começa na emissão.
+        $startsAt = $plan==='demo' ? null : $this->sql($now);
+        $expiresAt = $plan==='demo' ? null : $this->sql($now->add($this->duration($plan)));
+        $key=strtoupper(bin2hex(($this->random)(16)));
+        $id=$this->repo->createLicense(['public_id'=>$this->uuid(),'customer_id'=>$customerId,'license_key_hash'=>hash('sha256',$key),'plan'=>$plan,'status'=>'active','starts_at'=>$startsAt,'expires_at'=>$expiresAt]);
+        $details=['plan'=>$plan];
+        if($expiresAt!==null) $details['expiresAt']=$expiresAt;
+        $this->repo->addEvent($id,null,'issued',$actor,$details);
+        return ['id'=>$id,'licenseKey'=>$key];
     }
     public function renew(int $id,string $plan,array $actor): void {
         LicensePolicy::assertRenewalPlan($plan);
