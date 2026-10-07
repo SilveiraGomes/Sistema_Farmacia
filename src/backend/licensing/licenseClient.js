@@ -1,5 +1,5 @@
 const DEFAULT_BASE_URL =
-  process.env.KILSYSTEM_LICENSE_API_URL || 'https://kilsystemangola.com/api/licenses';
+  process.env.KILSYSTEM_LICENSE_API_URL || 'https://license.kilsystemangola.com';
 const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_MAX_BODY_BYTES = 16 * 1024;
 const PUBLIC_SERVER_CODES = new Set([
@@ -89,9 +89,11 @@ function createLicenseClient({
   };
 }
 
+// Compatibilidade para imports antigos: toda chamada usa o contrato central v2.
+const centralClient = require('./centralLicenseClient');
 module.exports = {
-  DEFAULT_BASE_URL,
-  DEFAULT_MAX_BODY_BYTES,
-  DEFAULT_TIMEOUT_MS,
-  createLicenseClient,
+  DEFAULT_BASE_URL: centralClient.DEFAULT_BASE_URL,
+  DEFAULT_MAX_BODY_BYTES: centralClient.DEFAULT_MAX_BODY_BYTES,
+  DEFAULT_TIMEOUT_MS: centralClient.DEFAULT_TIMEOUT_MS,
+  createLicenseClient: centralClient.createCentralLicenseClient,
 };

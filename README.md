@@ -31,7 +31,7 @@ Sistema de gestão de farmácia desktop para Windows, desenvolvido com Electron,
 | Base de dados | SQLite via Sequelize |
 | Empacotamento | electron-builder (NSIS — Windows x64) |
 | Actualizações | electron-updater → GitHub Releases |
-| Licenciamento | RSA-3072 (chave pública no cliente, privada no servidor PHP) |
+| Licenciamento | Ed25519, servidor central multi-produto (`KILFARM`) |
 
 ---
 
@@ -40,7 +40,7 @@ Sistema de gestão de farmácia desktop para Windows, desenvolvido com Electron,
 1. Descarregar `KILSYSTEM-PHARMACY-Setup-1.0.1.exe` em [Releases](https://github.com/SilveiraGomes/Sistema_Farmacia/releases/latest)
 2. Executar o instalador e seguir os passos
 3. Na primeira abertura, introduzir a chave de activação fornecida pelo suporte
-4. Futuras actualizações são instaladas automaticamente
+4. A aplicação avisa quando existir uma nova versão e pede autorização para a transferir
 
 **Requisitos:** Windows 10/11 x64 — ligação à Internet para activação e actualizações
 
@@ -48,11 +48,12 @@ Sistema de gestão de farmácia desktop para Windows, desenvolvido com Electron,
 
 ## Actualizações Automáticas
 
-O sistema verifica automaticamente novas versões ao iniciar. Quando uma actualização é detectada:
+O executável instalado verifica novas versões ao iniciar e novamente a cada seis horas. Quando uma actualização é detectada:
 
-- Transfere o instalador em segundo plano
-- Apresenta o diálogo **"Reiniciar agora / Mais tarde"** após a conclusão
-- Instala sem intervenção manual
+- Apresenta o diálogo **"Transferir actualização / Mais tarde"** antes do download
+- Transfere o instalador em segundo plano após confirmação
+- Apresenta o diálogo **"Reiniciar e instalar / Mais tarde"** quando estiver pronta
+- Se for adiada depois do download, instala automaticamente ao encerrar a aplicação
 
 As actualizações são publicadas em [GitHub Releases](https://github.com/SilveiraGomes/Sistema_Farmacia/releases).
 
@@ -60,7 +61,7 @@ As actualizações são publicadas em [GitHub Releases](https://github.com/Silve
 
 ## Licenciamento
 
-Cada instalação é activada com uma chave única emitida pelo painel de administração. A activação vincula a chave ao identificador da máquina (Windows MachineGuid). O servidor de licenciamento corre em `kilsystemangola.com`.
+Cada instalação é activada com uma chave única emitida pelo painel central. A activação vincula a licença `KILFARM` ao identificador da máquina e é validada directamente em `license.kilsystemangola.com`, com funcionamento offline controlado.
 
 Planos disponíveis: **Demo (30 dias)** e **Anual**.
 
@@ -126,7 +127,7 @@ kilsystem-pharmacy/
 │   ├── licensing/                 # LicenseContext, LicenseWriteGuard, licenseUi
 │   └── configuration/             # SettingsContext, SettingsProvider
 ├── resources/
-│   ├── license-public.pem         # Chave pública RSA para verificação de licenças
+│   ├── license-public.pem         # Chave pública Ed25519 do servidor central
 │   └── icon.ico
 └── release/                       # Artefactos de build (gerados)
 ```

@@ -68,8 +68,8 @@ export default function LicenseActivation({ mode = 'activate', onClose }) {
               id="license-key"
               autoComplete="off"
               inputMode="text"
-              maxLength={39}
-              placeholder="XXXX-XXXX-XXXX-XXXX"
+              maxLength={64}
+              placeholder="KILS-KILFARM-XXXX-XXXX-XXXX"
               value={licenseKey}
               onChange={(event) => setLicenseKey(formatLicenseKey(event.target.value))}
             />

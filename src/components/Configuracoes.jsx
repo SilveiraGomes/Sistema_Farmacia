@@ -304,6 +304,8 @@ function LicenseSettings() {
   const [licenseKey, setLicenseKey] = useState("");
   const [localMessage, setLocalMessage] = useState("");
   const labels = {
+    trial_active: "Demonstração activa", active: "Licença activa",
+    suspended: "Suspensa", machine_mismatch: "Outro dispositivo", invalid: "Inválida",
     demo_active: "Demonstração activa", paid_active: "Licença activa",
     expiring: "A expirar", offline_grace: "Validação pendente",
     expired: "Expirada", revoked: "Revogada",
@@ -328,7 +330,8 @@ function LicenseSettings() {
         <input
           id="settings-license-key"
           autoComplete="off"
-          placeholder="XXXX-XXXX-XXXX-XXXX"
+          placeholder="KILS-KILFARM-XXXX-XXXX-XXXX"
+          maxLength={64}
           value={licenseKey}
           onChange={(event) => setLicenseKey(formatLicenseKey(event.target.value))}
         />

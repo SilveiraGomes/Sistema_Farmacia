@@ -19,31 +19,35 @@ const reportSyncService = require("./src/backend/services/reportSyncService");
 const backupService = require("./src/backend/services/backupService");
 const authService = require("./src/backend/services/authService");
 const heldSalesService = require("./src/backend/services/heldSalesService");
-const { createLicenseClient } = require("./src/backend/licensing/licenseClient");
-const { createLicenseService } = require("./src/backend/licensing/licenseService");
-const { createLicenseStore } = require("./src/backend/licensing/licenseStore");
+const { setupAutoUpdateService } = require("./src/backend/services/updateService");
+const { createCentralLicenseClient } = require("./src/backend/licensing/centralLicenseClient");
+const { createCentralLicenseService } = require("./src/backend/licensing/centralLicenseService");
+const { createCentralLicenseStore } = require("./src/backend/licensing/centralLicenseStore");
 const { createMachineFingerprint } = require("./src/backend/licensing/machineFingerprint");
-const { verifyLicenseDocument } = require("./src/backend/licensing/licenseVerifier");
+const { verifyCentralLicenseBundle } = require("./src/backend/licensing/centralLicenseVerifier");
 
 let db = null;
 let models = null;
 let mainWindow = null;
 let licenseService = null;
+let stopAutoUpdateService = () => {};
 
 function initializeLicenseService(electronApp) {
   try {
     const publicKeyPath = process.env.KILSYSTEM_LICENSE_PUBLIC_KEY_PATH ||
       path.join(__dirname, "resources", "license-public.pem");
     const publicKey = fs.readFileSync(publicKeyPath, "utf8");
-    licenseService = createLicenseService({
-      client: createLicenseClient(),
-      store: createLicenseStore({
+    licenseService = createCentralLicenseService({
+      client: createCentralLicenseClient(),
+      store: createCentralLicenseStore({
         directory: path.join(electronApp.getPath("userData"), "license"),
         safeStorage,
       }),
       publicKey,
       machineFingerprint: createMachineFingerprint,
-      verifyDocument: verifyLicenseDocument,
+      verifyBundle: verifyCentralLicenseBundle,
+      appVersion: electronApp.getVersion(),
+      diagnostic: (error) => console.error("Falha de licenciamento:", error?.message),
     });
     licenseService.status();
   } catch (error) {
@@ -140,25 +144,6 @@ async function readStartFullscreen() {
   return true;
 }
 
-function setupAutoUpdater() {
-  if (!app.isPackaged) return;
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on("update-downloaded", () => {
-    dialog.showMessageBox(mainWindow, {
-      type: "info",
-      title: "Actualização disponível",
-      message: "Uma nova versão do KILSYSTEM PHARMACY foi transferida.",
-      detail: "Reinicie a aplicação para instalar a actualização.",
-      buttons: ["Reiniciar agora", "Mais tarde"],
-      defaultId: 0,
-    }).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall();
-    }).catch(() => {});
-  });
-  autoUpdater.checkForUpdates().catch(() => {});
-}
-
 function createWindow(startFullscreen = true) {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -193,7 +178,16 @@ app.whenReady().then(async () => {
 
     const startFullscreen = await readStartFullscreen();
     createWindow(startFullscreen);
-    setupAutoUpdater();
+    licenseService.onStateChanged?.((state) => {
+      mainWindow?.webContents?.send("license:state-changed", state);
+    });
+    licenseService.startScheduler?.();
+    stopAutoUpdateService = setupAutoUpdateService({
+      app,
+      autoUpdater,
+      dialog,
+      getMainWindow: () => mainWindow,
+    });
 
     globalShortcut.register("F11", () => {
       if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
@@ -217,6 +211,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopAutoUpdateService();
+  licenseService?.stopScheduler?.();
   try {
     if (licenseService?.status()?.canWrite === true) {
       heldSalesService.clear().catch((error) => {

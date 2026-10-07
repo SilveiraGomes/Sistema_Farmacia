@@ -4,6 +4,9 @@ import { useLicense } from '../licensing/LicenseContext';
 import LicenseActivation from './LicenseActivation';
 
 const content = {
+  trial_active: ['Demonstração activa', 'A licença de demonstração está activa.', Clock3],
+  suspended: ['Licença suspensa', 'O sistema está em modo somente leitura. Contacte o suporte.', LockKeyhole],
+  invalid: ['Licença inválida', 'Active novamente esta instalação.', AlertTriangle],
   demo_active: ['Demonstração activa', 'A licença de demonstração está activa por 30 dias.', Clock3],
   unactivated: ['Sistema não activado', 'Introduza uma chave para activar o sistema.', AlertTriangle],
   configuration_error: ['Licenciamento indisponível', 'Contacte o suporte para configurar o serviço de licenças.', AlertTriangle],

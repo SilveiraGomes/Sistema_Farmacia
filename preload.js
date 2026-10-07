@@ -17,3 +17,12 @@ contextBridge.exposeInMainWorld("api", {
     }
   },
 });
+
+contextBridge.exposeInMainWorld("licenseEvents", {
+  onStateChanged: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("license:state-changed", listener);
+    return () => ipcRenderer.removeListener("license:state-changed", listener);
+  },
+});

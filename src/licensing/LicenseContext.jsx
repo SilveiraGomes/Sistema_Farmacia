@@ -37,6 +37,9 @@ export function LicenseProvider({ children }) {
 
   useEffect(() => {
     refresh();
+    const unsubscribe = window.licenseEvents?.onStateChanged?.((nextStatus) => {
+      if (nextStatus && typeof nextStatus === 'object') setStatus(nextStatus);
+    });
     const online = () => setNetworkStatus('online');
     const offline = () => setNetworkStatus('offline');
     window.addEventListener('online', online);
@@ -44,6 +47,7 @@ export function LicenseProvider({ children }) {
     return () => {
       window.removeEventListener('online', online);
       window.removeEventListener('offline', offline);
+      unsubscribe?.();
     };
   }, [refresh]);
 
