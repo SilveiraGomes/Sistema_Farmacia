@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Binary, Eye, EyeOff, LockKeyhole, LogIn, UserRound, Users } from "lucide-react";
+import { ArrowLeft, Binary, Eye, EyeOff, KeyRound, LockKeyhole, LogIn, ShieldCheck, UserRound, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { request } from "../services/ipcClient.js";
 import BrandMark from "./BrandMark";
@@ -22,7 +22,7 @@ function Login() {
   // ── Shared state ──
   const [loginUsers, setLoginUsers] = useState([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
-  const [mode, setMode] = useState("password"); // "password" | "pin"
+  const [mode, setMode] = useState("password"); // "password" | "pin" | "support"
 
   // ── Password mode ──
   const [username, setUsername] = useState("admin");
@@ -38,6 +38,14 @@ function Login() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
   const [pinSubmitting, setPinSubmitting] = useState(false);
+
+  // ── Secure support recovery ──
+  const [supportCode, setSupportCode] = useState("");
+  const [supportUsers, setSupportUsers] = useState([]);
+  const [supportSession, setSupportSession] = useState(null);
+  const [supportResult, setSupportResult] = useState(null);
+  const [supportError, setSupportError] = useState("");
+  const [supportSubmitting, setSupportSubmitting] = useState(false);
 
   function focusPasswordField() {
     window.focus?.();
@@ -124,6 +132,129 @@ function Login() {
     setPinError("");
     setPin("");
     setSelectedPinUser(null);
+    setSupportError("");
+  }
+
+  async function handleSupportRedeem(event) {
+    event.preventDefault();
+    setSupportError("");
+    setSupportSubmitting(true);
+    try {
+      const result = await request("support.redeem", { code: supportCode.trim() });
+      setSupportSession(result.session);
+      setSupportUsers(Array.isArray(result.users) ? result.users : []);
+      setSupportResult(null);
+    } catch (e) {
+      setSupportError(e.message || "Não foi possível validar o código de suporte.");
+    } finally {
+      setSupportSubmitting(false);
+    }
+  }
+
+  async function handleSupportRecover(user) {
+    setSupportError("");
+    setSupportSubmitting(true);
+    try {
+      const result = await request("support.recover", { userId: user.id });
+      setSupportResult(result);
+      setSupportUsers((current) => current.map((item) => (
+        item.id === result.user.id ? result.user : item
+      )));
+    } catch (e) {
+      setSupportError(e.message || "Não foi possível recuperar este utilizador.");
+    } finally {
+      setSupportSubmitting(false);
+    }
+  }
+
+  async function closeSupportRecovery() {
+    await request("support.end").catch(() => {});
+    setSupportCode("");
+    setSupportUsers([]);
+    setSupportSession(null);
+    setSupportResult(null);
+    switchMode("password");
+  }
+
+  if (mode === "support") {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card support-recovery-card" aria-labelledby="support-title">
+          <BrandMark className="auth-brand" />
+          <div className="support-recovery-header">
+            <span className="support-recovery-icon"><ShieldCheck size={26} /></span>
+            <div>
+              <h1 id="support-title">Recuperação assistida</h1>
+              <p>Acesso temporário, autorizado e auditado pela KIL SYSTEM.</p>
+            </div>
+          </div>
+
+          {supportError ? <p className="form-error" role="alert">{supportError}</p> : null}
+
+          {!supportSession ? (
+            <form className="auth-form" onSubmit={handleSupportRedeem}>
+              <label className="auth-field">
+                <span>Código temporário de suporte</span>
+                <div>
+                  <KeyRound size={20} />
+                  <input
+                    autoFocus
+                    autoComplete="one-time-code"
+                    value={supportCode}
+                    maxLength={24}
+                    placeholder="KSR-XXXX-XXXX-XXXX-XXXX"
+                    onChange={(event) => setSupportCode(event.target.value.toUpperCase())}
+                    disabled={supportSubmitting}
+                    required
+                  />
+                </div>
+              </label>
+              <button className="primary-button auth-submit" type="submit" disabled={supportSubmitting}>
+                <ShieldCheck size={18} />
+                {supportSubmitting ? "A VALIDAR..." : "VALIDAR CÓDIGO"}
+              </button>
+            </form>
+          ) : (
+            <div className="support-recovery-users">
+              <div className="support-session-status">
+                Sessão válida até {new Date(supportSession.expiresAt).toLocaleTimeString("pt-AO", { hour: "2-digit", minute: "2-digit" })}
+              </div>
+              <p>Seleccione o utilizador que perdeu o acesso. A conta será activada e receberá uma senha temporária.</p>
+              <div className="support-user-list">
+                {supportUsers.map((user) => (
+                  <button
+                    type="button"
+                    key={user.id}
+                    className="support-user-row"
+                    disabled={supportSubmitting}
+                    onClick={() => handleSupportRecover(user)}
+                  >
+                    <span className="pin-user-avatar">{getInitials(user.nome_completo)}</span>
+                    <span>
+                      <strong>{user.nome_completo || user.nome_usuario}</strong>
+                      <small>{user.perfil?.nome || "Sem perfil"} · {user.ativo ? "Activo" : "Inactivo"}</small>
+                    </span>
+                    <KeyRound size={18} />
+                  </button>
+                ))}
+              </div>
+              {supportResult && (
+                <div className="support-password-result" role="status">
+                  <strong>Senha temporária de {supportResult.user.nome_completo}:</strong>
+                  <code>{supportResult.temporaryPassword}</code>
+                  <small>Guarde-a agora. Será obrigatório alterá-la no primeiro acesso.</small>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button type="button" className="pin-icon-btn" onClick={closeSupportRecovery}>
+            <ArrowLeft size={19} />
+            <span>Voltar ao login</span>
+          </button>
+        </section>
+      </main>
+    );
   }
 
   // ── Render PIN mode ──
@@ -256,6 +387,10 @@ function Login() {
             <span>Entrar com PIN</span>
           </button>
         )}
+        <button type="button" className="support-entry-button" onClick={() => switchMode("support")}>
+          <ShieldCheck size={18} />
+          <span>Recuperar acesso com o suporte</span>
+        </button>
       </section>
     </main>
   );

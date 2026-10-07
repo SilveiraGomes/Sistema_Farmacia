@@ -14,7 +14,7 @@ function assertLicenseWriteAllowed(status) {
 }
 
 function createCentralLicenseService({
-  client, store, publicKey, machineFingerprint, verifyBundle,
+  client, store, publicKey, machineFingerprint, verifyBundle, verifySupportBundle,
   productCode = PRODUCT_CODE,
   appVersion = 'unknown',
   now = () => Date.now(),
@@ -75,6 +75,29 @@ function createCentralLicenseService({
     if (document.product_code !== productCode || document.machine_hash !== machineHash) {
       const error = new Error('A licença não corresponde a este produto ou dispositivo.');
       error.code = document.product_code !== productCode ? 'PRODUCT_NOT_AUTHORIZED' : 'MACHINE_MISMATCH';
+      throw error;
+    }
+    return document;
+  }
+
+  function verifySupportResponse(bundle) {
+    if (typeof verifySupportBundle !== 'function') {
+      throw new Error('Support access verifier is unavailable');
+    }
+    const document = verifySupportBundle(bundle, publicKey);
+    const expectedLicenseId = state.bundle?.documento?.license_id;
+    if (!expectedLicenseId || document.license_id !== expectedLicenseId
+        || document.product_code !== productCode || document.machine_hash !== machineHash) {
+      const error = new Error('O acesso de suporte não corresponde a esta instalação.');
+      error.code = 'SUPPORT_DEVICE_MISMATCH';
+      throw error;
+    }
+    const currentTime = now();
+    const issuedAt = Date.parse(document.issued_at);
+    const expiresAt = Date.parse(document.expires_at);
+    if (issuedAt > currentTime + 5 * 60 * 1000 || expiresAt <= currentTime) {
+      const error = new Error('O código de suporte expirou.');
+      error.code = 'SUPPORT_CODE_EXPIRED';
       throw error;
     }
     return document;
@@ -149,6 +172,27 @@ function createCentralLicenseService({
       return response;
     },
     machineId: () => machineHash,
+    async redeemSupportAccess(code) {
+      const supportCode = String(code ?? '').trim().toUpperCase();
+      if (!/^KSR-[A-Z2-9]{4}(?:-[A-Z2-9]{4}){3}$/.test(supportCode)) {
+        const error = new Error('Código de suporte inválido.');
+        error.code = 'SUPPORT_CODE_INVALID';
+        throw error;
+      }
+      const licenseId = state.bundle?.documento?.license_id;
+      if (!licenseId) {
+        const error = new Error('Esta instalação ainda não possui uma licença activa.');
+        error.code = 'NOT_ACTIVATED';
+        throw error;
+      }
+      const bundle = await client.redeemSupportAccess({
+        support_code: supportCode,
+        license_id: licenseId,
+        machine_hash: machineHash,
+        product_code: productCode,
+      });
+      return verifySupportResponse(bundle);
+    },
     status,
     hasFeature: (code) => status().document?.features?.includes(code) ?? false,
     assertWriteAllowed: () => assertLicenseWriteAllowed(status()),

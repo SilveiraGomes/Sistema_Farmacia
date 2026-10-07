@@ -29,6 +29,8 @@ const ACTION_ACCESS = Object.freeze({
   "auth.login": "read", "auth.loginWithPin": "read", "auth.loginUsers": "read",
   "auth.usersWithPin": "read", "auth.logout": "read", "auth.currentSession": "read",
   "auth.changeOwnPassword": "write", "auth.activity": "read", "auth.setSessionTimeout": "write",
+  "support.redeem": "read", "support.users": "read", "support.recover": "write",
+  "support.end": "read",
   "users.list": "read", "users.create": "write", "users.update": "write",
   "users.activate": "write", "users.deactivate": "write", "users.setPin": "write",
   "users.clearPin": "write", "users.resetPassword": "write",
@@ -301,6 +303,27 @@ function buildRouteMap(overrides = {}) {
       dependencies.authService.setSessionTimeout(data.minutes ?? 30);
       return { ok: true };
     },
+
+    "support.redeem": async (data = {}) => {
+      const grant = await dependencies.licenseService.redeemSupportAccess(data.code);
+      const session = dependencies.authService.openSupportSession(grant);
+      return {
+        session,
+        users: await dependencies.userService.listSupportRecoveryUsers(),
+      };
+    },
+    "support.users": () => {
+      dependencies.authService.requireSupportSession("users.list");
+      return dependencies.userService.listSupportRecoveryUsers();
+    },
+    "support.recover": (data = {}) => {
+      const grant = dependencies.authService.requireSupportSession("users.recover_access");
+      return dependencies.userService.recoverUserAccess({
+        supportGrant: grant,
+        userId: getTargetUserId(data),
+      });
+    },
+    "support.end": () => dependencies.authService.closeSupportSession(),
 
     "users.list": () =>
       withPermission(dependencies, "usuarios.ver", () =>

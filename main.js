@@ -25,6 +25,7 @@ const { createCentralLicenseService } = require("./src/backend/licensing/central
 const { createCentralLicenseStore } = require("./src/backend/licensing/centralLicenseStore");
 const { createMachineFingerprint } = require("./src/backend/licensing/machineFingerprint");
 const { verifyCentralLicenseBundle } = require("./src/backend/licensing/centralLicenseVerifier");
+const { verifySupportAccessBundle } = require("./src/backend/licensing/supportAccessVerifier");
 
 let db = null;
 let models = null;
@@ -46,6 +47,7 @@ function initializeLicenseService(electronApp) {
       publicKey,
       machineFingerprint: createMachineFingerprint,
       verifyBundle: verifyCentralLicenseBundle,
+      verifySupportBundle: verifySupportAccessBundle,
       appVersion: electronApp.getVersion(),
       diagnostic: (error) => console.error("Falha de licenciamento:", error?.message),
     });
@@ -61,6 +63,7 @@ function initializeLicenseService(electronApp) {
       status: () => ({ state: "configuration_error", canWrite: false, readOnly: true }),
       activate: unavailable,
       validate: unavailable,
+      redeemSupportAccess: unavailable,
       machineId: () => "",
       assertWriteAllowed: unavailable,
     };

@@ -7316,6 +7316,101 @@ button :is(strong, b) {
 .license-settings-validation label { grid-column: 1 / -1; font-weight: 700; }
 .license-settings-validation input { min-width: 0; font: 700 .95rem ui-monospace, monospace; letter-spacing: .06em; }
 
+/* ── Recuperação segura de acesso pelo suporte ───────────────── */
+.support-entry-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 0;
+  color: #456055;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.support-entry-button:hover { color: #0b743a; }
+.support-recovery-card { width: min(92vw, 620px); }
+.support-recovery-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0 20px;
+}
+.support-recovery-header h1 { margin: 0 0 4px; font-size: 22px; color: #15351c; }
+.support-recovery-header p { margin: 0; color: #68776d; font-size: 13px; line-height: 1.45; }
+.support-recovery-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: #fff;
+  background: #0b743a;
+  box-shadow: 0 8px 20px rgb(11 116 58 / 20%);
+}
+.support-recovery-users { display: grid; gap: 12px; }
+.support-recovery-users > p { margin: 0; color: #5d6e63; font-size: 13px; line-height: 1.5; }
+.support-session-status {
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #14683b;
+  background: #e6f5eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+.support-user-list {
+  display: grid;
+  gap: 7px;
+  max-height: 290px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+.support-user-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dce5de;
+  border-radius: 11px;
+  color: #173821;
+  background: #fbfcfb;
+  text-align: left;
+  cursor: pointer;
+}
+.support-user-row:hover { border-color: #7eae8d; background: #f2f8f4; }
+.support-user-row:disabled { opacity: .55; cursor: wait; }
+.support-user-row strong, .support-user-row small { display: block; }
+.support-user-row small { margin-top: 2px; color: #738078; font-size: 11px; }
+.support-password-result {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #a8d5b6;
+  border-radius: 11px;
+  color: #164927;
+  background: #edf8f0;
+}
+.support-password-result code {
+  width: fit-content;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: #102f1b;
+  background: #fff;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  user-select: all;
+}
+.support-password-result small { color: #52705c; }
+
 @media (max-width: 680px) {
   .license-banner { align-items: flex-start; flex-wrap: wrap; }
   .license-banner > div { display: grid; min-width: calc(100% - 40px); }

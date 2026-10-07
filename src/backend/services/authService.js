@@ -8,6 +8,7 @@ const MAX_LOGIN_FAILURES = 5;
 const LOCK_MINUTES = 15;
 
 let currentSession = null;
+let supportSession = null;
 let sessionTimeoutMs = 30 * 60 * 1000; // 30 min default
 
 function setSessionTimeout(minutes) {
@@ -118,6 +119,39 @@ async function login({ username, password }) {
 
 function logout() {
   currentSession = null;
+  supportSession = null;
+}
+
+function openSupportSession(grant) {
+  if (!grant || typeof grant !== 'object' || !grant.grant_id || !grant.expires_at) {
+    throw new Error('Autorização de suporte inválida.');
+  }
+  if (Date.parse(grant.expires_at) <= Date.now()) {
+    throw new Error('A autorização de suporte expirou.');
+  }
+  supportSession = { ...grant };
+  currentSession = null;
+  return {
+    grantId: grant.grant_id,
+    expiresAt: grant.expires_at,
+    scope: [...grant.scope],
+  };
+}
+
+function requireSupportSession(requiredScope) {
+  if (!supportSession || Date.parse(supportSession.expires_at) <= Date.now()) {
+    supportSession = null;
+    throw new Error('A sessão de suporte expirou. Solicite um novo código.');
+  }
+  if (!supportSession.scope.includes(requiredScope)) {
+    throw new Error('A sessão de suporte não permite esta operação.');
+  }
+  return supportSession;
+}
+
+function closeSupportSession() {
+  supportSession = null;
+  return { ok: true };
 }
 
 async function refreshCurrentSession() {
@@ -210,4 +244,7 @@ module.exports = {
   setSessionTimeout,
   changeOwnPassword,
   sanitizeUser,
+  openSupportSession,
+  requireSupportSession,
+  closeSupportSession,
 };

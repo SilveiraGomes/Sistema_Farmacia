@@ -18,6 +18,8 @@ const {
   deactivateUser,
   listLoginUsers,
   listUsers,
+  listSupportRecoveryUsers,
+  recoverUserAccess,
   resetUserPassword,
   updateUser,
 } = require('../src/backend/services/userService.js');
@@ -603,5 +605,47 @@ test('updateProfilePermissions rolls back permission changes when audit fails', 
     const afterProfiles = await listProfiles();
     const afterCashier = afterProfiles.find((profile) => profile.id === cashierProfile.id);
     assert.deepEqual(afterCashier.permissoes, beforeCashier.permissoes);
+  });
+});
+
+test('support recovery reactivates, unlocks and resets a user with an audited grant', async () => {
+  await withServices(async ({ AuditoriaUsuario, Usuario }) => {
+    const user = await getAdminUser(Usuario);
+    await user.update({
+      ativo: false,
+      falhas_login: 5,
+      bloqueado_ate: new Date(Date.now() + 60_000),
+      pin_hash: 'obsolete-pin',
+      deve_trocar_senha: false,
+    });
+
+    const result = await recoverUserAccess({
+      supportGrant: {
+        grant_id: 'grant-test',
+        license_id: 'license-test',
+        product_code: 'KILFARM',
+      },
+      userId: user.id,
+    });
+
+    assert.ok(result.temporaryPassword.length >= 12);
+    const stored = await Usuario.findByPk(user.id);
+    assert.equal(stored.ativo, true);
+    assert.equal(stored.falhas_login, 0);
+    assert.equal(stored.bloqueado_ate, null);
+    assert.equal(stored.pin_hash, null);
+    assert.equal(stored.deve_trocar_senha, true);
+    assert.equal(verifyPassword(result.temporaryPassword, stored.senha_hash), true);
+
+    const recoveryUsers = await listSupportRecoveryUsers();
+    assert.equal(recoveryUsers.some((candidate) => candidate.id === user.id), true);
+    const audit = await AuditoriaUsuario.findOne({ where: { acao: 'ACESSO_RECUPERADO_SUPORTE' } });
+    assert.equal(audit.ator_usuario_id, null);
+    assert.equal(audit.usuario_afetado_id, user.id);
+    assert.deepEqual(JSON.parse(audit.detalhes), {
+      support_grant_id: 'grant-test',
+      license_id: 'license-test',
+      product_code: 'KILFARM',
+    });
   });
 });

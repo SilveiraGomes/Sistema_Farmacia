@@ -296,6 +296,45 @@ async function resetUserPassword({ actorUserId, userId }) {
   };
 }
 
+async function listSupportRecoveryUsers() {
+  const { Perfil, Usuario } = getModels();
+  const users = await Usuario.findAll({
+    include: [Perfil],
+    order: [['nome_completo', 'ASC']],
+  });
+  return users.map(sanitizeUserWithProfile);
+}
+
+async function recoverUserAccess({ supportGrant, userId }) {
+  const user = await findUserWithProfile(userId);
+  if (!user) {
+    throw new Error('Utilizador não encontrado.');
+  }
+  const temporaryPassword = createTemporaryPassword();
+  await user.update({
+    senha_hash: hashPassword(temporaryPassword),
+    ativo: true,
+    deve_trocar_senha: true,
+    falhas_login: 0,
+    bloqueado_ate: null,
+    pin_hash: null,
+  });
+  await recordUserAudit({
+    targetUserId: user.id,
+    action: 'ACESSO_RECUPERADO_SUPORTE',
+    details: {
+      support_grant_id: supportGrant.grant_id,
+      license_id: supportGrant.license_id,
+      product_code: supportGrant.product_code,
+    },
+  });
+  const updated = await findUserWithProfile(user.id);
+  return {
+    user: sanitizeUserWithProfile(updated),
+    temporaryPassword,
+  };
+}
+
 async function listUsersWithPin() {
   const { Usuario } = getModels();
   const users = await Usuario.findAll({
@@ -340,6 +379,8 @@ module.exports = {
   deactivateUser,
   activateUser,
   resetUserPassword,
+  listSupportRecoveryUsers,
+  recoverUserAccess,
   setUserPin,
   clearUserPin,
 };

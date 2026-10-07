@@ -6,6 +6,8 @@ const PUBLIC_SERVER_CODES = new Set([
   'LICENSE_NOT_FOUND', 'LICENSE_INVALID', 'LICENSE_EXPIRED', 'LICENSE_REVOKED',
   'LICENSE_SUSPENDED', 'DEVICE_LIMIT', 'TRIAL_ALREADY_USED',
   'PRODUCT_NOT_AUTHORIZED', 'DEVICE_NOT_AUTHORIZED',
+  'SUPPORT_CODE_INVALID', 'SUPPORT_CODE_EXPIRED', 'SUPPORT_CODE_USED',
+  'SUPPORT_DEVICE_MISMATCH', 'SUPPORT_LICENSE_INVALID',
 ]);
 
 function publicError(code, message) {
@@ -78,6 +80,7 @@ function createCentralLicenseClient({
     refresh: (input) => post('/api/licenses/refresh', input),
     renew: (input) => post('/api/licenses/renew', input),
     deactivate: (input) => post('/api/licenses/deactivate', input),
+    redeemSupportAccess: (input) => post('/api/support/redeem', input),
   };
 }
 
