@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { request } from '../services/ipcClient';
+import { request, SESSION_INVALID_EVENT } from '../services/ipcClient';
 
 const AuthContext = createContext(null);
 const EMPTY_PERMISSIONS = Object.freeze([]);
@@ -132,6 +132,25 @@ export function AuthProvider({ children }) {
 
     return permissions.includes(permissionKey);
   }, [permissions]);
+
+  // O backend recusou um pedido por sessão expirada ou troca de senha
+  // obrigatória: sincroniza a sessão para mostrar o login ou a troca de senha.
+  const isSyncingSession = React.useRef(false);
+  useEffect(() => {
+    async function onSessionInvalid() {
+      if (isSyncingSession.current) return;
+      isSyncingSession.current = true;
+      try {
+        const next = await request('auth.currentSession').catch(() => null);
+        setSession(normalizeSession(next));
+      } finally {
+        isSyncingSession.current = false;
+      }
+    }
+
+    window.addEventListener(SESSION_INVALID_EVENT, onSessionInvalid);
+    return () => window.removeEventListener(SESSION_INVALID_EVENT, onSessionInvalid);
+  }, []);
 
   // Idle tracker: throttled heartbeat + auto-logout on inactivity
   const lastHeartbeat = React.useRef(0);

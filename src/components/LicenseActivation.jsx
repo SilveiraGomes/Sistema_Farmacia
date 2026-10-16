@@ -4,6 +4,7 @@ import BrandMark from './BrandMark';
 import { useLicense } from '../licensing/LicenseContext';
 import { formatLicenseKey, getLicenseValidationResult } from '../licensing/licenseUi.mjs';
 import { request } from '../services/ipcClient.js';
+import { APP_VERSION } from '../utils/appVersion.js';
 
 export default function LicenseActivation({ mode = 'activate', onClose }) {
   const { activate, validate, busy, error, machineId, networkStatus, refresh, status } = useLicense();
@@ -47,7 +48,7 @@ export default function LicenseActivation({ mode = 'activate', onClose }) {
         <div className="license-activation-intro">
           <div className="license-activation-icon"><ShieldCheck aria-hidden="true" /></div>
           <div>
-            <p className="license-eyebrow">KILSYSTEM PHARMACY 1.0.1</p>
+            <p className="license-eyebrow">KILSYSTEM PHARMACY {APP_VERSION}</p>
             <h1 id="activation-title">{mode === 'renew' ? 'Renovar ou revalidar' : 'Ative esta instalação'}</h1>
           </div>
         </div>

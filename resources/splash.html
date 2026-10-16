@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  <title>KILSYSTEM PHARMACY</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      user-select: none;
+      -webkit-app-region: drag;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      color: #f7f8f5;
+      background: linear-gradient(160deg, #12651f 0%, #073f17 100%);
+      border: 1px solid rgb(255 255 255 / 12%);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .capsule {
+      display: grid;
+      place-items: center;
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      background: #f7f8f5;
+      color: #073f17;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: .5px;
+      box-shadow: 0 6px 18px rgb(0 0 0 / 25%);
+    }
+    .name {
+      display: grid;
+      line-height: 1.05;
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 700;
+      font-size: 24px;
+      letter-spacing: .5px;
+    }
+    .spinner {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 3px solid rgb(255 255 255 / 22%);
+      border-top-color: #36cf5a;
+      animation: spin .9s linear infinite;
+    }
+    .status {
+      min-height: 20px;
+      margin: 0;
+      font-size: 14px;
+      color: rgb(247 248 245 / 90%);
+    }
+    .bar {
+      width: 260px;
+      height: 4px;
+      overflow: hidden;
+      border-radius: 4px;
+      background: rgb(255 255 255 / 16%);
+    }
+    .bar span {
+      display: block;
+      width: 40%;
+      height: 100%;
+      border-radius: 4px;
+      background: #36cf5a;
+      animation: slide 1.4s ease-in-out infinite;
+    }
+    .version {
+      position: absolute;
+      bottom: 12px;
+      font-size: 12px;
+      color: rgb(247 248 245 / 65%);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes slide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(260%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .spinner, .bar span { animation-duration: 3s; }
+    }
+  </style>
+</head>
+<body>
+  <div class="brand" aria-label="KILSYSTEM PHARMACY">
+    <span class="capsule">KP</span>
+    <span class="name"><span>KILSYSTEM</span><span>PHARMACY</span></span>
+  </div>
+  <div class="spinner" role="progressbar" aria-label="A carregar"></div>
+  <p class="status" id="status" aria-live="polite">A iniciar o sistema...</p>
+  <div class="bar"><span></span></div>
+  <span class="version" id="version"></span>
+  <script>
+    (function () {
+      var version = new URLSearchParams(window.location.search).get("version");
+      document.getElementById("version").textContent = version ? "Versão " + version : "";
+      window.setStatus = function (text) {
+        document.getElementById("status").textContent = String(text || "");
+      };
+    })();
+  </script>
+</body>
+</html>

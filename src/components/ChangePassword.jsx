@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { KeyRound, Save } from 'lucide-react';
+import { ArrowLeft, KeyRound, Save } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import BrandMark from './BrandMark';
 
 function ChangePassword() {
-  const { changeOwnPassword, user } = useAuth();
+  const { changeOwnPassword, logout, user } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -91,6 +91,16 @@ function ChangePassword() {
             {isSubmitting ? 'A guardar...' : 'Guardar nova senha'}
           </button>
         </form>
+
+        <button
+          type="button"
+          className="support-entry-button"
+          onClick={() => logout().catch(() => {})}
+          disabled={isSubmitting}
+        >
+          <ArrowLeft size={18} />
+          <span>Voltar ao login</span>
+        </button>
       </section>
     </main>
   );

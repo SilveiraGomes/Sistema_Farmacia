@@ -20,6 +20,7 @@ import { getStoredBranding, saveStoredBranding, subscribeBrandingChange } from '
 import { useSettings } from "../configuration/SettingsContext";
 import { CATALOG_KEYS } from "../configuration/catalogKeys.mjs";
 import { request } from "../services/ipcClient";
+import { APP_VERSION } from "../utils/appVersion.js";
 import CatalogEditor from "./settings/CatalogEditor";
 import SettingField from "./settings/SettingField";
 import SettingsSectionNav from "./settings/SettingsSectionNav";
@@ -319,6 +320,7 @@ function LicenseSettings() {
         <p>Consulte a validade e confirme a licença junto do servidor.</p>
       </div>
       <dl>
+        <div><dt>Versão do sistema</dt><dd>{APP_VERSION || "—"}</dd></div>
         <div><dt>Plano</dt><dd>{status.plan === "demo" ? "Demo — 30 dias" : status.plan || "—"}</dd></div>
         <div><dt>Estado</dt><dd>{labels[status.state] || status.state}</dd></div>
         <div><dt>Expiração</dt><dd>{status.expiresAt ? new Date(status.expiresAt).toLocaleDateString("pt-AO") : "—"}</dd></div>
@@ -959,6 +961,7 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
   const [busy, setBusy] = React.useState(null); // name of backup being processed
   const [confirmAction, setConfirmAction] = React.useState(null); // { type, name }
   const [restoreConfirmText, setRestoreConfirmText] = React.useState('');
+  const [restartNotice, setRestartNotice] = React.useState(null);
 
   function formatBytes(bytes) {
     if (bytes < 1024) return `${bytes} B`;
@@ -1041,9 +1044,13 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
     setRestoreConfirmText('');
     setBusy(name);
     try {
-      await request('backup.restore', { name, folderPath });
+      const result = await request('backup.restore', { name, folderPath });
+      if (result?.restartRequired) {
+        setRestartNotice({ name, safetyBackup: result.safetyBackup });
+        return;
+      }
       setStatus('success');
-      setMessage('Backup restaurado. Reinicie a aplicação para aplicar as alterações.');
+      setMessage(result?.message || 'Backup restaurado.');
       loadList();
     } catch (err) {
       setStatus('error');
@@ -1076,12 +1083,29 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderPath]);
 
-  const visibleBackups = backups.slice(0, retentionCount);
+  const visibleBackups = backups;
   const isRestoreAction = confirmAction?.type === 'restore';
   const canConfirmRestore = restoreConfirmText.trim().toUpperCase() === 'RESTAURAR';
 
   return (
     <>
+    {/* ── Reinício após preparar a restauração ── */}
+    {restartNotice && (
+      <div className="modal-backdrop" role="alertdialog" aria-modal="true" aria-live="assertive">
+        <div className="modal-card" style={{ maxWidth: 460, textAlign: 'center' }}>
+          <h3 style={{ margin: '0 0 10px' }}>A concluir a restauração…</h3>
+          <p style={{ margin: '0 0 8px' }}>
+            O backup <strong>{restartNotice.name}</strong> foi validado.
+            O sistema vai reiniciar automaticamente para concluir a restauração.
+          </p>
+          <p style={{ margin: 0, color: 'var(--muted)', fontSize: '0.85rem' }}>
+            Os utilizadores e senhas actuais são mantidos.
+            {restartNotice.safetyBackup ? <> Cópia de segurança: <code>{restartNotice.safetyBackup}</code>.</> : null}
+          </p>
+        </div>
+      </div>
+    )}
+
     {/* ── Confirmation modal ── */}
     {confirmAction && (
       <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -1095,7 +1119,7 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
           </p>
           <p style={{ margin: '0 0 12px', color: 'var(--danger)', fontSize: '0.88rem' }}>
             {isRestoreAction
-              ? 'Os dados actuais serão substituídos pelo conteúdo do backup. Esta acção não pode ser desfeita.'
+              ? 'Os dados actuais (stock, vendas, clientes, configurações…) serão substituídos pelo conteúdo do backup. Os utilizadores, senhas, PINs e perfis actuais são mantidos. Antes de restaurar é criada uma cópia de segurança e o sistema reinicia automaticamente.'
               : 'O ficheiro de backup será apagado permanentemente.'}
           </p>
           {isRestoreAction && (
@@ -1135,7 +1159,7 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
         <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '6px', color: 'var(--muted)' }}>Localização dos Backups</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <code style={{ fontSize: '0.79rem', padding: '4px 8px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {folderPath || '%APPDATA%\\kilsystem-pharmacy\\backups'}
+            {folderPath || serviceStatus?.folderPath || '%APPDATA%\\KILSYSTEM PHARMACY\\backups'}
           </code>
           <button type="button" className="soft-button" style={{ whiteSpace: 'nowrap' }} onClick={doChooseLocation} disabled={formDisabled}>Alterar Localização</button>
           <button type="button" className="soft-button" style={{ whiteSpace: 'nowrap' }} onClick={doOpenFolder}>Abrir Pasta</button>
@@ -1197,7 +1221,7 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <p style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--muted)', margin: 0 }}>
-            Histórico ({visibleBackups.length} de {backups.length})
+            Histórico ({backups.length})
           </p>
           <button type="button" className="soft-button" style={{ fontSize: '11px', padding: '3px 10px' }} onClick={loadList} disabled={loadingList}>
             {loadingList ? '…' : 'Actualizar'}

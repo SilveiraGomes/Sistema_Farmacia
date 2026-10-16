@@ -7333,6 +7333,38 @@ button :is(strong, b) {
   cursor: pointer;
 }
 .support-entry-button:hover { color: #0b743a; }
+.support-entry-button:disabled { opacity: .6; cursor: default; }
+
+/* ── Botão fechar no ecrã de login ───────────────────────────── */
+.auth-screen { position: relative; }
+.auth-close-button {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid rgb(185 50 45 / 35%);
+  border-radius: 8px;
+  color: #a33a32;
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.auth-close-button:hover {
+  color: #fff;
+  border-color: #c0392b;
+  background: #c0392b;
+}
+.auth-close-button:focus-visible {
+  outline: 3px solid rgb(192 57 43 / 35%);
+  outline-offset: 2px;
+}
 .support-recovery-card { width: min(92vw, 620px); }
 .support-recovery-header {
   display: flex;

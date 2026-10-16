@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Binary, Eye, EyeOff, KeyRound, LockKeyhole, LogIn, ShieldCheck, UserRound, Users } from "lucide-react";
+import { ArrowLeft, Binary, Eye, EyeOff, KeyRound, LockKeyhole, LogIn, Power, ShieldCheck, UserRound, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { request } from "../services/ipcClient.js";
+import { confirmSensitiveAction } from "../utils/confirmations.mjs";
 import BrandMark from "./BrandMark";
 import PinPad from "./PinPad";
 
@@ -14,6 +15,25 @@ function getInitials(name) {
     .slice(0, 2)
     .map((p) => p[0].toUpperCase())
     .join("");
+}
+
+function LoginCloseButton() {
+  async function handleClose() {
+    const confirmed = await confirmSensitiveAction(
+      'Tem a certeza que deseja fechar o sistema?',
+      null,
+      { title: 'Fechar sistema', confirmLabel: 'Fechar sistema', tone: 'close' },
+    );
+    if (!confirmed) return;
+    request("window.close").catch(() => {});
+  }
+
+  return (
+    <button type="button" className="auth-close-button" onClick={handleClose} title="Fechar sistema">
+      <Power size={18} aria-hidden="true" />
+      <span>Fechar</span>
+    </button>
+  );
 }
 
 function Login() {
@@ -179,6 +199,7 @@ function Login() {
   if (mode === "support") {
     return (
       <main className="auth-screen">
+        <LoginCloseButton />
         <section className="auth-card support-recovery-card" aria-labelledby="support-title">
           <BrandMark className="auth-brand" />
           <div className="support-recovery-header">
@@ -261,6 +282,7 @@ function Login() {
   if (mode === "pin") {
     return (
       <main className="auth-screen">
+        <LoginCloseButton />
         <section className="pin-login-card" aria-labelledby="login-title">
           <BrandMark className="auth-brand" />
 
@@ -334,6 +356,7 @@ function Login() {
   // ── Render password mode ──
   return (
     <main className="auth-screen">
+      <LoginCloseButton />
       <section className="auth-card" aria-labelledby="login-title">
         <BrandMark className="auth-brand" />
 

@@ -7,6 +7,7 @@
       "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
       "Courier New", monospace;
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     --default-font-family: var(--font-sans);
     --default-mono-font-family: var(--font-mono);
   }
@@ -230,6 +231,10 @@
   }
   .filter {
     filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
+  }
+  .ease-in-out {
+    --tw-ease: var(--ease-in-out);
+    transition-timing-function: var(--ease-in-out);
   }
 }
 :root {
@@ -6905,6 +6910,41 @@ button :is(strong, b) {
 .support-entry-button:hover {
   color: #0b743a;
 }
+.support-entry-button:disabled {
+  opacity: .6;
+  cursor: default;
+}
+.auth-screen {
+  position: relative;
+}
+.auth-close-button {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid rgb(185 50 45 / 35%);
+  border-radius: 8px;
+  color: #a33a32;
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.auth-close-button:hover {
+  color: #fff;
+  border-color: #c0392b;
+  background: #c0392b;
+}
+.auth-close-button:focus-visible {
+  outline: 3px solid rgb(192 57 43 / 35%);
+  outline-offset: 2px;
+}
 .support-recovery-card {
   width: min(92vw, 620px);
 }
@@ -7116,6 +7156,10 @@ button :is(strong, b) {
   syntax: "*";
   inherits: false;
 }
+@property --tw-ease {
+  syntax: "*";
+  inherits: false;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -7143,6 +7187,7 @@ button :is(strong, b) {
       --tw-drop-shadow-color: initial;
       --tw-drop-shadow-alpha: 100%;
       --tw-drop-shadow-size: initial;
+      --tw-ease: initial;
     }
   }
 }

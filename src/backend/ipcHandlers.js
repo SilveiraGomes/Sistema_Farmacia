@@ -146,6 +146,8 @@ const SAFE_ERROR_MESSAGES = new Set([
   "Permissoes invalidas.",
   "Chaves de permissao invalidas.",
   "Nao e possivel remover permissoes essenciais do Administrador.",
+  "Nenhum ficheiro de backup especificado.",
+  "Restauracao de backup nao disponivel neste ambiente.",
   ...Object.values(CONFIGURATION_SAFE_ERROR_MESSAGES),
   ...operationService.SAFE_OPERATION_ERRORS,
 ]);
@@ -269,6 +271,7 @@ function buildRouteMap(overrides = {}) {
     electronApp: null,
     getMainWindow: null,
     licenseService: null,
+    restartApp: null,
     ...overrides,
   };
 
@@ -605,10 +608,6 @@ function buildRouteMap(overrides = {}) {
       withPermission(dependencies, "configuracoes.ver", () =>
         dependencies.backupService.listBackups({ app: dependencies.electronApp, folderPath: data.folderPath || undefined }),
       ),
-    "backup.restore": (data = {}) =>
-      withPermission(dependencies, "configuracoes.ver", () =>
-        dependencies.backupService.restoreBackup({ name: data.name, app: dependencies.electronApp }),
-      ),
     "backup.delete": (data = {}) =>
       withPermission(dependencies, "configuracoes.editar", () =>
         dependencies.backupService.deleteBackup({ name: data.name, app: dependencies.electronApp, folderPath: data.folderPath }),
@@ -798,17 +797,26 @@ function buildRouteMap(overrides = {}) {
         if (result.canceled || !result.filePaths[0]) return { canceled: true };
         return { filePath: result.filePaths[0] };
       }),
-    "backup.restore": (data) =>
-      withPermission(dependencies, "configuracoes.editar", async () => {
-        const electronApp = dependencies.electronApp;
-        if (!electronApp) throw new Error("Restauracao de backup nao disponivel neste ambiente.");
-        const dbPath = path.join(electronApp.getPath("userData"), "database.sqlite");
-        const srcPath = data?.filePath;
-        if (!srcPath) throw new Error("Nenhum ficheiro de backup especificado.");
-        if (!fs.existsSync(srcPath)) throw new Error("Ficheiro de backup nao encontrado.");
-        fs.copyFileSync(dbPath, dbPath + ".pre_restore");
-        fs.copyFileSync(srcPath, dbPath);
-        return { success: true, message: "Backup restaurado com sucesso. Reinicie o sistema para aplicar as alteracoes." };
+    "backup.restore": (data = {}) =>
+      withPermission(dependencies, "configuracoes.editar", async (actorUserId) => {
+        if (!dependencies.electronApp) throw new Error("Restauracao de backup nao disponivel neste ambiente.");
+        if (!data.name && !data.filePath) throw new Error("Nenhum ficheiro de backup especificado.");
+        const actor = await dependencies.authService.getCurrentSession().catch(() => null);
+        const result = await dependencies.backupService.restoreBackup({
+          name: data.name,
+          filePath: data.name ? undefined : data.filePath,
+          app: dependencies.electronApp,
+          folderPath: data.folderPath,
+          createdBy: actor?.user?.nome_completo || actor?.user?.nome_usuario || String(actorUserId),
+        });
+        // A troca do ficheiro e feita no proximo arranque, com a base fechada.
+        dependencies.restartApp?.({ delayMs: 3000 });
+        return {
+          success: true,
+          restartRequired: true,
+          message: "Backup validado. O sistema vai reiniciar para concluir a restauracao.",
+          ...result,
+        };
       }),
 
     "invoice.savePDF": async (data = {}) => {
@@ -1078,6 +1086,7 @@ async function init(models, options = {}) {
     ...(options.electronApp ? { electronApp: options.electronApp } : {}),
     ...(options.getMainWindow ? { getMainWindow: options.getMainWindow } : {}),
     ...(options.licenseService ? { licenseService: options.licenseService } : {}),
+    ...(options.restartApp ? { restartApp: options.restartApp } : {}),
   };
   await configurationService.seedDefaults();
   const routes = buildRouteMap(dependencies);
