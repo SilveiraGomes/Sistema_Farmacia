@@ -9,6 +9,9 @@ const path = require("path");
 if (app.isPackaged) {
   app.setName("KILSYSTEM PHARMACY");
 }
+// Registo em ficheiro desde o primeiro instante (<userData>/logs).
+const { initLogger, attachWindowLogging } = require("./src/backend/logger");
+initLogger(app.getPath("userData"), { appVersion: app.getVersion() });
 const ipcHandlers = require("./src/backend/ipcHandlers");
 const {
   connectDB,
@@ -17,6 +20,7 @@ const {
 } = require("./src/backend/database");
 const reportSyncService = require("./src/backend/services/reportSyncService");
 const backupService = require("./src/backend/services/backupService");
+const healthService = require("./src/backend/services/healthService");
 const authService = require("./src/backend/services/authService");
 const heldSalesService = require("./src/backend/services/heldSalesService");
 const { setupAutoUpdateService } = require("./src/backend/services/updateService");
@@ -37,6 +41,7 @@ let splashStatus = "A iniciar o sistema...";
 let licenseService = null;
 let restoreOutcome = null;
 let restartScheduled = false;
+let closeBackupDone = false;
 let stopAutoUpdateService = () => {};
 
 // ── Ecrã de carregamento ──────────────────────────────────────────────────────
@@ -60,6 +65,7 @@ function createSplashWindow() {
       sandbox: true,
     },
   });
+  attachWindowLogging(splashWindow, "splash");
   splashWindow.once("ready-to-show", () => splashWindow?.show());
   splashWindow.webContents.on("did-finish-load", () => setSplashStatus(splashStatus));
   splashWindow.on("closed", () => { splashWindow = null; });
@@ -199,13 +205,9 @@ async function initializeSessionTimeout() {
 
 async function initializeBackupService(electronApp) {
   try {
-    const { ConfiguracaoSistema } = getModels();
-    let config = { intervalHours: 24, keepCount: 10 };
-    try {
-      const row = await ConfiguracaoSistema.findOne({ where: { chave: "backup.auto" } });
-      if (row) config = { ...config, ...JSON.parse(row.valor_json) };
-    } catch { /* use defaults */ }
-    await backupService.initializeBackupScheduler(electronApp, config);
+    // Lê backup.auto (frequência, hora, ao encerrar) e backup.options (pasta,
+    // retenção, cópia adicional) e agenda os backups automáticos.
+    await backupService.initializeBackupScheduler(electronApp);
     console.log("Serviço de backup inicializado.");
   } catch (error) {
     console.error("Erro ao inicializar backup:", error);
@@ -298,6 +300,7 @@ function createWindow(startFullscreen = true) {
     closeSplashWindow();
     showRestoreOutcome();
   };
+  attachWindowLogging(mainWindow, "principal");
   mainWindow.once("ready-to-show", reveal);
   setTimeout(reveal, 20_000);
 
@@ -321,6 +324,8 @@ app.whenReady().then(async () => {
     initializeLicenseService(app);
     setSplashStatus("A preparar a base de dados...");
     await initializeDatabase(app);
+    setSplashStatus("A verificar a base de dados...");
+    await healthService.runStartupChecks({ sequelize: db, userDataPath: app.getPath("userData") });
     setSplashStatus("A carregar as configurações...");
     await ipcHandlers.init(
       { db, ...models },
@@ -375,7 +380,21 @@ app.on("window-all-closed", () => {
   }
 });
 
+// "Criar backup ao encerrar o sistema": adia o encerramento até o backup
+// terminar (no máximo 20 s). Não corre no reinício de um restauro.
+app.on("before-quit", (event) => {
+  if (closeBackupDone || restartScheduled || !db) return;
+  closeBackupDone = true;
+  event.preventDefault();
+  const timeout = new Promise((resolve) => setTimeout(resolve, 20_000));
+  Promise.race([
+    backupService.createBackupOnClose().catch((error) => console.error("Backup ao encerrar falhou:", error)),
+    timeout,
+  ]).finally(() => app.quit());
+});
+
 app.on("will-quit", () => {
+  backupService.stopBackupScheduler();
   stopAutoUpdateService();
   licenseService?.stopScheduler?.();
   try {

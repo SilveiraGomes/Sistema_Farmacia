@@ -113,7 +113,7 @@ const SETTING_DEFAULTS = Object.freeze({
   stock: { lowStockThreshold: 25, expiryAlertDays: 30 },
   alerts: { dashboardEnabled: true, defaultMessage: "" },
   backup: {
-    options: { frequency: "manual", folderPath: "", retentionCount: 7 },
+    options: { frequency: "manual", folderPath: "", retentionCount: 7, mirrorFolderPath: "" },
   },
   migration: { legacyLocalStorageVersion: 0 },
   reports: {

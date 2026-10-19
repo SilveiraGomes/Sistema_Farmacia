@@ -13,22 +13,41 @@ const SAFE_ERRORS = [
 const BACKUP_TYPES = {
   manual: "Manual",
   auto: "Automático",
+  close: "Encerramento",
   "pre-restore": "Pré-Restauração",
   "pre-reset": "Pré-Reset",
 };
 
-// Apenas os backups automáticos entram na rotação. Backups manuais e cópias de
-// segurança (pré-restauração / pré-reset) nunca são apagados automaticamente.
-const ROTATED_TYPES = new Set(["auto"]);
+// Apenas os backups automáticos e de encerramento entram na rotação. Backups
+// manuais e cópias de segurança (pré-restauração / pré-reset) nunca são apagados.
+const ROTATED_TYPES = new Set(["auto", "close"]);
+
+// Tabelas contadas em cada backup para detectar perdas de dados entre backups.
+const COUNTED_TABLES = [
+  "Produtos", "Categoria", "Subcategoria", "Estoques", "Vendas", "ItemVendas",
+  "Clientes", "Fornecedors", "TransacaoFinanceiras", "OrdensCompra", "Usuarios",
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const FREQUENCY_MS = { "24h": DAY_MS, weekly: 7 * DAY_MS, fortnightly: 14 * DAY_MS, monthly: 30 * DAY_MS };
+const SCHEDULER_TICK_MS = 5 * 60 * 1000;
+const SCHEDULER_FIRST_TICK_MS = 60 * 1000;
+const CLOSE_BACKUP_MIN_GAP_MS = 10 * 60 * 1000;
+
+const DEFAULT_AUTO = Object.freeze({ enabled: true, frequency: "24h", time: "23:00", onClose: true });
+const DEFAULT_OPTIONS = Object.freeze({ retentionCount: 7, folderPath: "", mirrorFolderPath: "" });
 
 const PENDING_RESTORE_DB = "restore-pending.sqlite";
 const PENDING_RESTORE_META = "restore-pending.json";
 const RESTORE_ROLLBACK_DB = "restore-rollback.sqlite";
 const SQLITE_SIDE_FILES = ["-journal", "-wal", "-shm"];
 
-let autoBackupTimer = null;
-let startupBackupTimer = null;
+let schedulerTimer = null;
+let firstTickTimer = null;
+let autoBackupRunning = false;
 let electronApp = null;
+let settings = { auto: { ...DEFAULT_AUTO }, options: { ...DEFAULT_OPTIONS } };
+const health = { lastAutoError: null, lastAutoAt: null };
 
 function getDbPath(app) {
   return path.join(app.getPath("userData"), "database.sqlite");
@@ -47,15 +66,19 @@ function ensureBackupDir(backupDir) {
 
 function pad(n) { return String(n).padStart(2, "0"); }
 
-function buildBackupName(type = "manual") {
+function buildBackupName(type = "manual", backupDir = null) {
   const now = new Date();
   const datePart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return `backup-${datePart}-${type}.sqlite`;
+  // Dois backups no mesmo segundo não se podem sobrepor: acrescenta um contador.
+  for (let counter = 1; ; counter += 1) {
+    const name = `backup-${datePart}${counter > 1 ? `-${counter}` : ""}-${type}.sqlite`;
+    if (!backupDir || !fs.existsSync(path.join(backupDir, name))) return name;
+  }
 }
 
 function parseBackupTypeKey(filename) {
   // backup-YYYY-MM-DD-HHMM[SS]-{type}.sqlite
-  const m = filename.match(/^backup-\d{4}-\d{2}-\d{2}-\d{4}(?:\d{2})?-([a-z-]+)\.sqlite$/);
+  const m = filename.match(/^backup-\d{4}-\d{2}-\d{2}-\d{4}(?:\d{2})?(?:-\d+)?-([a-z-]+)\.sqlite$/);
   if (m && BACKUP_TYPES[m[1]]) return m[1];
   // Formato antigo: backup-YYYY-MM-DD-HHMM.sqlite
   return "manual";
@@ -136,17 +159,82 @@ async function snapshotDatabase(dbPath, dest) {
   fs.copyFileSync(dbPath, dest);
 }
 
-async function createBackup({ app: appRef, keepCount = 10, type = "manual", createdBy = "Sistema", folderPath } = {}) {
+// Abre o backup só para leitura: integridade + contagem de registos por tabela.
+async function verifyBackupFile(filePath) {
+  let handle = null;
+  try {
+    handle = await openSqliteReadOnly(filePath);
+    const check = await sqliteAll(handle, "PRAGMA quick_check");
+    const ok = check.length === 1 && Object.values(check[0])[0] === "ok";
+    const tables = new Set(
+      (await sqliteAll(handle, "SELECT name FROM sqlite_master WHERE type = 'table'")).map((t) => t.name),
+    );
+    const counts = {};
+    for (const table of COUNTED_TABLES) {
+      if (!tables.has(table)) continue;
+      const [row] = await sqliteAll(handle, `SELECT COUNT(*) AS n FROM "${table}"`);
+      counts[table] = Number(row.n);
+    }
+    return { ok, counts };
+  } catch (error) {
+    return { ok: false, counts: null, error: error?.message || String(error) };
+  } finally {
+    if (handle) await sqliteClose(handle);
+  }
+}
+
+// Compara com o backup anterior: tabela que ficou vazia, ou que perdeu mais de
+// metade dos registos (a partir de 20), gera um aviso.
+function compareBackupCounts(previous, current) {
+  if (!previous || !current) return [];
+  const warnings = [];
+  for (const table of COUNTED_TABLES) {
+    const before = Number(previous[table] ?? 0);
+    const after = Number(current[table] ?? 0);
+    if ((before > 0 && after === 0) || (before >= 20 && after < before * 0.5)) {
+      warnings.push({ table, before, after });
+    }
+  }
+  return warnings;
+}
+
+function findPreviousCounts(backupDir, excludeName) {
+  if (!fs.existsSync(backupDir)) return null;
+  for (const file of listBackupFiles(backupDir)) {
+    if (file.name === excludeName) continue;
+    const meta = readSidecar(file.fullPath);
+    if (meta?.counts && meta.state !== "ERRO") return meta.counts;
+  }
+  return null;
+}
+
+function mirrorBackup(dest, mirrorFolderPath, keepCount) {
+  if (!mirrorFolderPath) return null;
+  try {
+    ensureBackupDir(mirrorFolderPath);
+    const target = path.join(mirrorFolderPath, path.basename(dest));
+    fs.copyFileSync(dest, target);
+    if (fs.existsSync(sidecarPath(dest))) fs.copyFileSync(sidecarPath(dest), sidecarPath(target));
+    pruneOldBackups(mirrorFolderPath, keepCount);
+    return { ok: true, folder: mirrorFolderPath, at: new Date().toISOString() };
+  } catch (error) {
+    console.error("Cópia adicional do backup falhou:", error?.message);
+    return { ok: false, folder: mirrorFolderPath, at: new Date().toISOString(), error: "Pasta da cópia adicional indisponível." };
+  }
+}
+
+async function createBackup({ app: appRef, keepCount, type = "manual", createdBy = "Sistema", folderPath, mirrorFolderPath } = {}) {
   const app = appRef || electronApp;
   if (!app) throw new Error("Erro ao criar backup.");
 
   const dbPath = getDbPath(app);
   if (!fs.existsSync(dbPath)) throw new Error("Erro ao criar backup.");
 
-  const backupDir = getBackupDir(app, folderPath);
+  const keep = keepCount ?? settings.options.retentionCount;
+  const backupDir = getBackupDir(app, folderPath ?? (settings.options.folderPath || undefined));
   ensureBackupDir(backupDir);
 
-  const name = buildBackupName(type);
+  const name = buildBackupName(type, backupDir);
   const dest = path.join(backupDir, name);
   try {
     await snapshotDatabase(dbPath, dest);
@@ -156,11 +244,33 @@ async function createBackup({ app: appRef, keepCount = 10, type = "manual", crea
   }
 
   const stat = fs.statSync(dest);
-  writeSidecar(dest, { type, createdBy, createdAt: stat.mtime.toISOString(), state: "OK" });
+  const verification = await verifyBackupFile(dest);
+  const warnings = verification.ok ? compareBackupCounts(findPreviousCounts(backupDir, name), verification.counts) : [];
+  if (!verification.ok) console.error("Backup criado mas falhou a verificação:", name, verification.error || "");
+  if (warnings.length) console.warn("Backup com muito menos dados que o anterior:", name, JSON.stringify(warnings));
 
-  pruneOldBackups(backupDir, keepCount);
+  const meta = {
+    type,
+    createdBy,
+    createdAt: stat.mtime.toISOString(),
+    state: verification.ok ? (warnings.length ? "AVISO" : "OK") : "ERRO",
+    verifiedAt: new Date().toISOString(),
+    counts: verification.counts,
+    warnings,
+  };
+  writeSidecar(dest, meta);
 
-  return { name, path: dest, size: stat.size, createdAt: stat.mtime };
+  const mirror = verification.ok
+    ? mirrorBackup(dest, mirrorFolderPath ?? settings.options.mirrorFolderPath, keep)
+    : null;
+  if (mirror) writeSidecar(dest, { ...meta, mirror });
+
+  pruneOldBackups(backupDir, keep);
+
+  return {
+    name, path: dest, size: stat.size, createdAt: stat.mtime,
+    state: meta.state, counts: meta.counts, warnings, mirror,
+  };
 }
 
 async function listBackups({ app: appRef, folderPath } = {}) {
@@ -183,6 +293,9 @@ async function listBackups({ app: appRef, folderPath } = {}) {
         type: meta?.type ? (BACKUP_TYPES[meta.type] || meta.type) : parseBackupType(f),
         createdBy: meta?.createdBy || "Sistema",
         state: meta?.state || "OK",
+        counts: meta?.counts || null,
+        warnings: meta?.warnings || [],
+        mirror: meta?.mirror || null,
       };
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -520,82 +633,150 @@ async function integrityCheck() {
   }
 }
 
-function getServiceStatus({ app: appRef, autoConfig = {}, folderPath } = {}) {
-  const app = appRef || electronApp;
-  const backupDir = app ? getBackupDir(app, folderPath) : null;
-
-  let lastBackup = null;
-  if (backupDir && fs.existsSync(backupDir)) {
-    const files = fs.readdirSync(backupDir)
-      .filter((f) => f.startsWith("backup-") && f.endsWith(".sqlite"))
-      .map((f) => fs.statSync(path.join(backupDir, f)).mtime)
-      .sort((a, b) => b - a);
-    lastBackup = files[0] ? files[0].toISOString() : null;
-  }
-
-  let nextBackup = null;
-  if (autoConfig.enabled && autoConfig.time) {
-    const [h, m] = (autoConfig.time || "23:00").split(":").map(Number);
-    const freq = autoConfig.frequency || "24h";
-    const candidate = new Date();
-    candidate.setHours(h, m, 0, 0);
-    if (candidate <= new Date()) {
-      if (freq === "24h") candidate.setDate(candidate.getDate() + 1);
-      else if (freq === "weekly") candidate.setDate(candidate.getDate() + 7);
-      else if (freq === "fortnightly") candidate.setDate(candidate.getDate() + 14);
-      else if (freq === "monthly") candidate.setMonth(candidate.getMonth() + 1);
-    }
-    nextBackup = candidate.toISOString();
-  }
-
-  const state = lastBackup ? "Operacional" : "Sem backups";
-  return { lastBackup, nextBackup, state, folderPath: backupDir };
+function parseTime(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || ""));
+  const hours = match ? Math.min(23, Number(match[1])) : 23;
+  const minutes = match ? Math.min(59, Number(match[2])) : 0;
+  return [hours, minutes];
 }
 
-function getBackupFolderPath(app, folderPath) {
-  return getBackupDir(app || electronApp, folderPath);
+// Próximo backup automático: na hora configurada, depois de passado o intervalo.
+// Se o último automático tem mais de um intervalo (o PC estava desligado à hora
+// marcada), o backup é feito de imediato.
+function computeNextAutoBackup({ auto = settings.auto, lastAuto = null, now = new Date() } = {}) {
+  if (!auto?.enabled) return null;
+  const interval = FREQUENCY_MS[auto.frequency] || DAY_MS;
+  if (!lastAuto || now - lastAuto >= interval) return now;
+  const earliest = new Date(Math.max(lastAuto.getTime() + interval - 60 * 60 * 1000, now.getTime()));
+  const [hours, minutes] = parseTime(auto.time);
+  const slot = new Date(earliest);
+  slot.setHours(hours, minutes, 0, 0);
+  if (slot < earliest) slot.setDate(slot.getDate() + 1);
+  return slot;
 }
 
-function getLastAutoBackupTime(backupDir) {
-  if (!fs.existsSync(backupDir)) return null;
-  const latest = listBackupFiles(backupDir).find((f) => f.typeKey === "auto");
+function getLastBackupTime(backupDir, typeKeys = null) {
+  if (!backupDir || !fs.existsSync(backupDir)) return null;
+  const latest = listBackupFiles(backupDir).find((f) => !typeKeys || typeKeys.includes(f.typeKey));
   return latest ? latest.mtime : null;
 }
 
-function scheduleAutoBackup(app, intervalHours = 24, keepCount = 10, folderPath) {
-  electronApp = app;
-  if (autoBackupTimer) clearInterval(autoBackupTimer);
-  if (startupBackupTimer) clearTimeout(startupBackupTimer);
-  if (!intervalHours || intervalHours <= 0) return;
-
-  const ms = intervalHours * 60 * 60 * 1000;
-  autoBackupTimer = setInterval(() => {
-    createBackup({ app, keepCount, type: "auto", createdBy: "Sistema", folderPath })
-      .catch((e) => console.error("Auto-backup error:", e));
-  }, ms);
-
-  // Só cria backup no arranque se o último automático for mais antigo que o
-  // intervalo configurado; reinícios repetidos não substituem backups antigos.
-  const lastAuto = getLastAutoBackupTime(getBackupDir(app, folderPath));
-  if (lastAuto && Date.now() - lastAuto.getTime() < ms) return;
-
-  startupBackupTimer = setTimeout(() => {
-    createBackup({ app, keepCount, type: "auto", createdBy: "Sistema", folderPath })
-      .catch((e) => console.error("Startup backup error:", e));
-  }, 30_000);
+function getServiceStatus({ app: appRef, autoConfig = {}, folderPath } = {}) {
+  const app = appRef || electronApp;
+  const backupDir = app ? getBackupDir(app, folderPath || settings.options.folderPath || undefined) : null;
+  const lastBackupTime = getLastBackupTime(backupDir);
+  const lastAuto = getLastBackupTime(backupDir, ["auto"]);
+  const auto = { ...settings.auto, ...autoConfig };
+  const next = computeNextAutoBackup({ auto, lastAuto });
+  const state = health.lastAutoError
+    ? "Falha no último backup automático"
+    : lastBackupTime ? "Operacional" : "Sem backups";
+  return {
+    lastBackup: lastBackupTime ? lastBackupTime.toISOString() : null,
+    nextBackup: next ? next.toISOString() : null,
+    state,
+    folderPath: backupDir,
+    mirrorFolderPath: settings.options.mirrorFolderPath || "",
+    lastAutoError: health.lastAutoError,
+  };
 }
 
-async function initializeBackupScheduler(app, config = {}) {
+function getBackupFolderPath(app, folderPath) {
+  return getBackupDir(app || electronApp, folderPath || settings.options.folderPath || undefined);
+}
+
+// Resumo para os alertas do sistema.
+function getBackupHealth() {
+  const app = electronApp;
+  if (!app) return null;
+  const backupDir = getBackupFolderPath(app);
+  const files = fs.existsSync(backupDir) ? listBackupFiles(backupDir) : [];
+  const latest = files[0] || null;
+  const latestMeta = latest ? readSidecar(latest.fullPath) : null;
+  const interval = FREQUENCY_MS[settings.auto.frequency] || DAY_MS;
+  const overdue = Boolean(settings.auto.enabled)
+    && (!latest || Date.now() - latest.mtime.getTime() > 2 * interval);
+  return {
+    folder: backupDir,
+    latest: latest ? { name: latest.name, at: latest.mtime.toISOString(), state: latestMeta?.state || "OK", warnings: latestMeta?.warnings || [], mirror: latestMeta?.mirror || null } : null,
+    lastAutoError: health.lastAutoError,
+    overdue,
+    autoEnabled: Boolean(settings.auto.enabled),
+  };
+}
+
+function parseSettingRow(row) {
+  try { return row ? JSON.parse(row.valor_json) : null; } catch { return null; }
+}
+
+async function loadBackupSettings() {
+  try {
+    const { ConfiguracaoSistema } = db.getModels();
+    const rows = await ConfiguracaoSistema.findAll({ where: { chave: ["backup.auto", "backup.options"] } });
+    const byKey = Object.fromEntries(rows.map((row) => [row.chave, parseSettingRow(row)]));
+    settings = {
+      auto: { ...DEFAULT_AUTO, ...(byKey["backup.auto"] || {}) },
+      options: { ...DEFAULT_OPTIONS, ...(byKey["backup.options"] || {}) },
+    };
+  } catch (error) {
+    console.error("Não foi possível ler as configurações de backup:", error?.message);
+  }
+  return settings;
+}
+
+async function runScheduledBackup(app) {
+  if (autoBackupRunning) return;
+  const backupDir = getBackupFolderPath(app);
+  const next = computeNextAutoBackup({ lastAuto: getLastBackupTime(backupDir, ["auto"]) });
+  if (!next || next > new Date()) return;
+  autoBackupRunning = true;
+  try {
+    await createBackup({ app, type: "auto", createdBy: "Sistema" });
+    health.lastAutoError = null;
+    health.lastAutoAt = new Date().toISOString();
+  } catch (error) {
+    health.lastAutoError = { at: new Date().toISOString(), message: error?.message || "Erro ao criar backup." };
+    console.error("Backup automático falhou:", error);
+  } finally {
+    autoBackupRunning = false;
+  }
+}
+
+function stopBackupScheduler() {
+  if (schedulerTimer) clearInterval(schedulerTimer);
+  if (firstTickTimer) clearTimeout(firstTickTimer);
+  schedulerTimer = null;
+  firstTickTimer = null;
+}
+
+// Verifica periodicamente (resiste a suspensão/hibernação, ao contrário de um
+// temporizador longo) se chegou a hora do próximo backup automático.
+async function initializeBackupScheduler(app) {
   electronApp = app;
-  const enabled = config.autoEnabled !== false;
-  const keepCount = Number(config.keepCount ?? config.retentionCount ?? 10);
-  const folderPath = config.folderPath || undefined;
+  await loadBackupSettings();
+  stopBackupScheduler();
+  if (!settings.auto.enabled) return settings;
+  const tick = () => { runScheduledBackup(app).catch(() => {}); };
+  firstTickTimer = setTimeout(tick, SCHEDULER_FIRST_TICK_MS);
+  schedulerTimer = setInterval(tick, SCHEDULER_TICK_MS);
+  schedulerTimer.unref?.();
+  firstTickTimer.unref?.();
+  return settings;
+}
 
-  if (!enabled) return;
+// Chamado quando as configurações de backup são guardadas.
+async function refreshBackupSchedule() {
+  if (!electronApp) return null;
+  return initializeBackupScheduler(electronApp);
+}
 
-  const freqToHours = { "24h": 24, weekly: 168, fortnightly: 336, monthly: 720 };
-  const intervalHours = freqToHours[config.autoFrequency] ?? 24;
-  scheduleAutoBackup(app, intervalHours, keepCount, folderPath);
+// "Criar backup ao encerrar o sistema" — ignora se houve um backup há pouco.
+async function createBackupOnClose() {
+  const app = electronApp;
+  if (!app || !settings.auto.onClose) return null;
+  const last = getLastBackupTime(getBackupFolderPath(app));
+  if (last && Date.now() - last.getTime() < CLOSE_BACKUP_MIN_GAP_MS) return null;
+  return createBackup({ app, type: "close", createdBy: "Sistema" });
 }
 
 module.exports = {
@@ -613,6 +794,15 @@ module.exports = {
   integrityCheck,
   getServiceStatus,
   getBackupFolderPath,
+  getBackupHealth,
   initializeBackupScheduler,
+  refreshBackupSchedule,
+  stopBackupScheduler,
+  loadBackupSettings,
+  createBackupOnClose,
+  runScheduledBackup,
+  computeNextAutoBackup,
+  compareBackupCounts,
+  verifyBackupFile,
   SAFE_ERRORS,
 };

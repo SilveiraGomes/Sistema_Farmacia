@@ -2,7 +2,7 @@ const { Sequelize, DataTypes } = require("sequelize");
 const crypto = require("crypto");
 const path = require("path");
 const { hashPassword } = require("./security/passwords");
-const { normalizeSubcategoryKey } = require("./services/subcategoryKeys");
+const { runMigrations, unifySubcategories } = require("./migrations");
 const {
   PERMISSIONS,
   DEFAULT_PROFILES,
@@ -1464,64 +1464,27 @@ async function ensureSqliteProdutoColumns(db) {
   }
 }
 
-// Junta subcategorias repetidas na mesma categoria (mesmo nome ignorando acentos,
-// maiúsculas e espaços): os produtos passam para a subcategoria que fica.
-async function mergeDuplicateSubcategories(db) {
-  if (db.getDialect() !== "sqlite") return 0;
-  const tables = await db.getQueryInterface().showAllTables();
-  if (!hasTable(tables, "Subcategoria")) return 0;
-
-  const rows = await db.query(
-    'SELECT id, categoria_id, nome, ativo, descricao, imagem FROM "Subcategoria" ORDER BY id',
-    { type: db.QueryTypes.SELECT },
-  );
-  const groups = new Map();
-  for (const row of rows) {
-    const key = normalizeSubcategoryKey(row.categoria_id, row.nome);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(row);
-  }
-  const duplicated = [...groups.values()].filter((group) => group.length > 1);
-  if (!duplicated.length) return 0;
-
-  let removed = 0;
-  await db.query("BEGIN IMMEDIATE");
-  try {
-    for (const group of duplicated) {
-      const keep = group.find((row) => Number(row.ativo) !== 0) || group[0];
-      for (const dup of group) {
-        if (dup.id === keep.id) continue;
-        await db.query('UPDATE "Produtos" SET subcategoria_id = ? WHERE subcategoria_id = ?', {
-          replacements: [keep.id, dup.id],
-        });
-        if (!keep.descricao && dup.descricao) {
-          keep.descricao = dup.descricao;
-          await db.query('UPDATE "Subcategoria" SET descricao = ? WHERE id = ?', { replacements: [dup.descricao, keep.id] });
-        }
-        if (!keep.imagem && dup.imagem) {
-          keep.imagem = dup.imagem;
-          await db.query('UPDATE "Subcategoria" SET imagem = ? WHERE id = ?', { replacements: [dup.imagem, keep.id] });
-        }
-        await db.query('DELETE FROM "Subcategoria" WHERE id = ?', { replacements: [dup.id] });
-        removed += 1;
-      }
-    }
-    await db.query("COMMIT");
-  } catch (error) {
-    await db.query("ROLLBACK").catch(() => {});
-    throw error;
-  }
-  console.log(`[syncDB] Subcategorias duplicadas unificadas: ${removed} removida(s) em ${duplicated.length} grupo(s).`);
-  return removed;
-}
-
 async function ensureSubcategoriaUniqueIndex(db) {
   if (db.getDialect() !== "sqlite") return;
   const tables = await db.getQueryInterface().showAllTables();
   if (!hasTable(tables, "Subcategoria")) return;
-  await db.query(
+  const createIndex = () => db.query(
     `CREATE UNIQUE INDEX IF NOT EXISTS "${SUBCATEGORIA_UNIQUE_INDEX}" ON "Subcategoria" (categoria_id, lower(trim(nome)))`,
   );
+  try {
+    await createIndex();
+  } catch {
+    // Há duplicados (ex.: dados de um backup antigo): unifica e tenta de novo.
+    await db.query("BEGIN IMMEDIATE");
+    try {
+      await unifySubcategories(db);
+      await db.query("COMMIT");
+    } catch (error) {
+      await db.query("ROLLBACK").catch(() => {});
+      throw error;
+    }
+    await createIndex();
+  }
 }
 
 async function syncDatabaseSchema(db) {
@@ -1537,7 +1500,7 @@ async function syncDatabaseSchema(db) {
   await ensureVendasInvoiceIndex(db);
   await ensureSqliteOperationalOpenIndexes(db);
   await ensurePerfilPermissaoUniqueIndex(db);
-  await mergeDuplicateSubcategories(db);
+  await runMigrations(db);
   await ensureSubcategoriaUniqueIndex(db);
   await seedPermissionsAndProfiles();
 }

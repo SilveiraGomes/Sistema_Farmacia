@@ -759,6 +759,16 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
           </div>
         </div>
 
+        {/* ── Cópia adicional fora da pasta principal ── */}
+        <div>
+          <h3 className="settings-section-title">Cópia Adicional</h3>
+          <MirrorFolderField
+            value={backup.mirrorFolderPath || ""}
+            disabled={disabled}
+            onChange={(fp) => update("backup.options", { ...backup, mirrorFolderPath: fp })}
+          />
+        </div>
+
         {/* ── 4. Backup Manual, Histórico e Estado ── */}
         <div>
           <h3 className="settings-section-title">Backup e Histórico</h3>
@@ -950,6 +960,68 @@ function NumberField({
   );
 }
 
+function MirrorFolderField({ value, disabled, onChange }) {
+  async function chooseFolder() {
+    try {
+      const res = await request('backup.chooseLocation');
+      if (!res.canceled && res.folderPath) onChange(res.folderPath);
+    } catch { /* silent */ }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <p style={{ fontSize: '0.82rem', color: 'var(--muted)', margin: 0 }}>
+        Depois de cada backup verificado, é guardada uma cópia nesta pasta (pen USB, disco externo,
+        pasta de rede ou pasta sincronizada com a nuvem). Protege os dados se o disco do computador avariar.
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <code style={{ fontSize: '0.79rem', padding: '4px 8px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {value || 'Não configurada'}
+        </code>
+        <button type="button" className="soft-button" style={{ whiteSpace: 'nowrap' }} onClick={chooseFolder} disabled={disabled}>
+          {value ? 'Alterar pasta' : 'Escolher pasta'}
+        </button>
+        {value ? (
+          <button type="button" className="soft-button" style={{ whiteSpace: 'nowrap' }} onClick={() => onChange('')} disabled={disabled}>
+            Remover
+          </button>
+        ) : null}
+      </div>
+      <small style={{ color: 'var(--muted)' }}>Clique em «Guardar secção» para aplicar.</small>
+    </div>
+  );
+}
+
+const BACKUP_TABLE_LABELS = {
+  Produtos: 'Produtos', Categoria: 'Categorias', Subcategoria: 'Subcategorias', Estoques: 'Lotes de stock',
+  Vendas: 'Vendas', ItemVendas: 'Itens de venda', Clientes: 'Clientes', Fornecedors: 'Fornecedores',
+  TransacaoFinanceiras: 'Transacções', OrdensCompra: 'Encomendas', Usuarios: 'Utilizadores',
+};
+
+function summarizeBackupCounts(counts) {
+  if (!counts) return '—';
+  return `${counts.Produtos ?? 0} prod. · ${counts.Vendas ?? 0} vendas · ${counts.Clientes ?? 0} clientes`;
+}
+
+function describeBackup(b) {
+  const lines = [];
+  if (b.counts) {
+    lines.push(Object.entries(b.counts).map(([table, n]) => `${BACKUP_TABLE_LABELS[table] || table}: ${n}`).join('\n'));
+  }
+  if (b.warnings?.length) {
+    lines.push('Menos dados que o backup anterior:\n' + b.warnings
+      .map((w) => `${BACKUP_TABLE_LABELS[w.table] || w.table}: ${w.before} → ${w.after}`).join('\n'));
+  }
+  if (b.mirror) lines.push(b.mirror.ok ? `Cópia adicional: ${b.mirror.folder}` : `Cópia adicional falhou: ${b.mirror.error}`);
+  return lines.join('\n\n');
+}
+
+const BACKUP_STATE_STYLE = {
+  OK: { background: '#e4f6e8', color: '#064818' },
+  AVISO: { background: '#fff4d6', color: '#7a4b00' },
+  ERRO: { background: '#fef2f2', color: '#7f1d1d' },
+};
+
 function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath = '', onFolderChange, disabled: formDisabled = false }) {
   const [status, setStatus] = React.useState(null);
   const [message, setMessage] = React.useState('');
@@ -962,6 +1034,7 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
   const [confirmAction, setConfirmAction] = React.useState(null); // { type, name }
   const [restoreConfirmText, setRestoreConfirmText] = React.useState('');
   const [restartNotice, setRestartNotice] = React.useState(null);
+  const [logsFolder, setLogsFolder] = React.useState('');
 
   function formatBytes(bytes) {
     if (bytes < 1024) return `${bytes} B`;
@@ -1026,6 +1099,13 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
         onFolderChange?.(res.folderPath);
         loadList();
       }
+    } catch { /* silent */ }
+  }
+
+  async function doOpenLogs() {
+    try {
+      const res = await request('logs.openFolder');
+      setLogsFolder(res?.folder || '');
     } catch { /* silent */ }
   }
 
@@ -1223,7 +1303,7 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
           <p style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--muted)', margin: 0 }}>
             Histórico ({backups.length})
           </p>
-          <button type="button" className="soft-button" style={{ fontSize: '11px', padding: '3px 10px' }} onClick={loadList} disabled={loadingList}>
+          <button type="button" className="soft-button" style={{ fontSize: '11px', padding: '3px 10px' }} onClick={() => { loadList(); loadServiceStatus(); }} disabled={loadingList}>
             {loadingList ? '…' : 'Actualizar'}
           </button>
         </div>
@@ -1238,6 +1318,7 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
                 <th>Tamanho</th>
                 <th>Data</th>
                 <th>Utilizador</th>
+                <th>Dados</th>
                 <th>Estado</th>
                 <th></th>
               </tr>
@@ -1250,16 +1331,17 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
                   <td style={{ textAlign: 'right', color: 'var(--muted)' }}>{formatBytes(b.size)}</td>
                   <td style={{ color: 'var(--muted)' }}>{formatDate(b.createdAt)}</td>
                   <td style={{ color: 'var(--muted)' }}>{b.createdBy || 'Sistema'}</td>
-                  <td>
+                  <td style={{ color: 'var(--muted)', whiteSpace: 'nowrap' }} title={describeBackup(b)}>{summarizeBackupCounts(b.counts)}</td>
+                  <td title={describeBackup(b)}>
                     <span style={{
                       display: 'inline-block',
                       padding: '1px 7px',
                       borderRadius: '10px',
                       fontSize: '0.75rem',
                       fontWeight: 600,
-                      background: b.state === 'OK' ? '#e4f6e8' : '#fef2f2',
-                      color: b.state === 'OK' ? '#064818' : '#7f1d1d',
+                      ...(BACKUP_STATE_STYLE[b.state] || BACKUP_STATE_STYLE.OK),
                     }}>{b.state || 'OK'}</span>
+                    {b.mirror?.ok ? <span style={{ marginLeft: '4px', fontSize: '0.72rem', color: 'var(--muted)' }}>+ cópia</span> : null}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
@@ -1280,6 +1362,19 @@ function ManualBackupButton({ retentionCount = 10, autoConfig = {}, folderPath =
         ) : (
           <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>Nenhum backup encontrado.</p>
         )}
+      </div>
+
+      {/* ── Diagnóstico ── */}
+      <div>
+        <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: '6px', color: 'var(--muted)' }}>Registos de diagnóstico</p>
+        <p style={{ fontSize: '0.82rem', color: 'var(--muted)', margin: '0 0 8px' }}>
+          O sistema guarda um registo diário de erros e eventos (últimos 14 dias). Em caso de problema,
+          envie estes ficheiros ao suporte KIL SYSTEM.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button type="button" className="soft-button" onClick={doOpenLogs}>Abrir pasta de registos</button>
+          {logsFolder ? <code style={{ fontSize: '0.79rem' }}>{logsFolder}</code> : null}
+        </div>
       </div>
 
     </div>

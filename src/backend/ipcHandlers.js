@@ -61,7 +61,7 @@ const ACTION_ACCESS = Object.freeze({
   "backup.manual": "read", "backup.list": "read", "backup.restore": "write",
   "backup.delete": "write", "backup.integrityCheck": "read", "backup.serviceStatus": "read",
   "backup.openFolder": "read", "backup.chooseLocation": "read", "backup.create": "read",
-  "backup.selectFile": "read",
+  "backup.selectFile": "read", "logs.openFolder": "read",
   "alerts.getSystemAlerts": "read", "dashboard.metrics": "read",
   "operation.state": "read", "operation.openDay": "write", "operation.closeDay": "write",
   "operation.openShift": "write", "operation.closeShift": "write",
@@ -639,6 +639,15 @@ function buildRouteMap(overrides = {}) {
         }
         return { opened: true };
       }),
+    "logs.openFolder": () =>
+      withPermission(dependencies, "configuracoes.ver", async () => {
+        const { getLogDirectory } = require("./logger");
+        const folder = getLogDirectory();
+        if (!folder) return { opened: false, folder: null };
+        const { shell } = require("electron");
+        await shell.openPath(folder);
+        return { opened: true, folder };
+      }),
     "backup.chooseLocation": () =>
       withPermission(dependencies, "configuracoes.editar", async () => {
         const result = await dialog.showOpenDialog({
@@ -687,12 +696,17 @@ function buildRouteMap(overrides = {}) {
         dependencies.configurationService.getSnapshot(),
       ),
     "configuration.updateSection": (data = {}) =>
-      withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
-        dependencies.configurationService.updateSection({
+      withPermission(dependencies, "configuracoes.editar", async (actorUserId) => {
+        const snapshot = await dependencies.configurationService.updateSection({
           ...data,
           actorUserId,
-        }),
-      ),
+        });
+        if (data.section === "backup") {
+          // Hora, frequência, pasta, retenção e cópia adicional entram em vigor já.
+          await dependencies.backupService.refreshBackupSchedule?.().catch(() => {});
+        }
+        return snapshot;
+      }),
     "configuration.importLegacy": (data = {}) =>
       withPermission(dependencies, "configuracoes.editar", (actorUserId) =>
         dependencies.configurationService.importLegacySettings({

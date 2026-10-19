@@ -81,7 +81,7 @@ const expectedSettings = {
   'backup.options': {
     group: 'backup',
     type: 'object',
-    defaultValue: { retentionCount: 7, folderPath: '' },
+    defaultValue: { retentionCount: 7, folderPath: '', mirrorFolderPath: '' },
   },
   'backup.auto': {
     group: 'backup',

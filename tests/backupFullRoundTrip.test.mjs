@@ -13,7 +13,7 @@ const database = require('../src/backend/database.js');
 const backupService = require('../src/backend/services/backupService.js');
 const { hashPassword, hashPin, verifyPassword } = require('../src/backend/security/passwords.js');
 
-const IGNORED_TABLES = new Set(['_kil_schema_meta']);
+const IGNORED_TABLES = new Set(['_kil_schema_meta', '_kil_migrations']);
 const ACCOUNT_TABLES = new Set(['Usuarios', 'AuditoriaUsuarios']);
 
 function quiet(fn) {
