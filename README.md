@@ -37,7 +37,7 @@ Sistema de gestão de farmácia desktop para Windows, desenvolvido com Electron,
 
 ## Instalação (utilizador final)
 
-1. Descarregar `KILSYSTEM-PHARMACY-Setup-1.0.3.exe` em [Releases](https://github.com/SilveiraGomes/Sistema_Farmacia/releases/latest)
+1. Descarregar `KILSYSTEM-PHARMACY-Setup-1.0.4.exe` em [Releases](https://github.com/SilveiraGomes/Sistema_Farmacia/releases/latest)
 2. Executar o instalador e seguir os passos
 3. Na primeira abertura, introduzir a chave de activação fornecida pelo suporte
 4. A aplicação avisa quando existir uma nova versão e pede autorização para a transferir

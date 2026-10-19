@@ -1,6 +1,6 @@
 {
   "name": "kilsystem-pharmacy",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "main.js",
   "scripts": {
     "start": "npm run build && node scripts/start-electron.js",
@@ -12,6 +12,7 @@
     "test:release:preflight": "node --test tests/releaseReadiness.test.mjs && node scripts/verify-license-keypair.mjs",
     "test:release:final": "set RELEASE_CHECK_MODE=final&& node --test tests/releaseReadiness.test.mjs && node scripts/verify-license-keypair.mjs",
     "build:tailwind": "postcss ./src/assets/tailwind.css -o ./src/assets/output.css",
+    "predist": "npm test",
     "dist": "npm run build && electron-builder --win nsis",
     "postinstall": "node -e \"try{require('fs').rmSync('node_modules/app-builder-lib/node_modules/@noble/hashes',{recursive:true,force:true})}catch(e){}\""
   },
