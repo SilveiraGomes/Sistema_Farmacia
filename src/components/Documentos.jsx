@@ -137,10 +137,8 @@ function Documentos() {
     if (!document || !canCancelDocument(document)) return;
 
     try {
-      const ncCount = rows.filter((d) => d.type === 'NOTA_CREDITO').length + 1;
-      const year = String(new Date().getFullYear()).slice(-2);
-      const fallbackNc = `NC${String(ncCount).padStart(3, '0')}/${year}`;
-      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota_credito' }).catch(() => fallbackNc);
+      // Sem número de recurso: um número inventado podia repetir a série fiscal.
+      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota-credito' });
 
       const { cancelledDoc, creditNote } = await request('vendas.cancelDocument', {
         venda_id: document.vendaId,

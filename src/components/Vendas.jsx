@@ -87,6 +87,25 @@ function mapClientForSale(c) {
   };
 }
 
+// Tipo de documento da venda -> série fiscal (catálogo document_types).
+const SALE_DOCUMENT_SERIES = Object.freeze({
+  [DOCUMENT_TYPES.INVOICE]: { key: 'factura', prefix: 'FT' },
+  [DOCUMENT_TYPES.INVOICE_RECEIPT]: { key: 'factura_recibo', prefix: 'FR' },
+  [DOCUMENT_TYPES.RECEIPT]: { key: 'recibo', prefix: 'RC' },
+  [DOCUMENT_TYPES.PROFORMA]: { key: 'proforma', prefix: 'PF' },
+  [DOCUMENT_TYPES.CREDIT]: { key: 'credito', prefix: 'CR' },
+});
+const RECENT_DOCUMENTS_LIMIT = 5;
+
+// "FR00012/26" (prefixo "FR") -> série seguinte { prefix: 'FR', nextNumber: 13, padding: 5, year: '26' }
+function seriesAfterReservedNumber(reserved, prefix) {
+  const value = String(reserved || '');
+  if (!prefix || !value.startsWith(prefix)) return null;
+  const match = /^(\d+)\/(\d{2})$/.exec(value.slice(prefix.length));
+  if (!match) return null;
+  return { prefix, nextNumber: Number(match[1]) + 1, padding: match[1].length, year: match[2] };
+}
+
 function Vendas() {
   const operation = useOperation();
   const { snapshot } = useSettings();
@@ -146,7 +165,7 @@ function Vendas() {
 
   const loadRecentDocuments = useCallback(async () => {
     try {
-      const docs = await request('vendas.recentDocuments', { limit: 10 });
+      const docs = await request('vendas.recentDocuments', { limit: RECENT_DOCUMENTS_LIMIT });
       setRecentSaleDocuments(docs);
     } catch (err) {
       console.error('Erro ao carregar documentos recentes:', err);
@@ -169,19 +188,20 @@ function Vendas() {
     window.dispatchEvent(new CustomEvent('held-sales-changed'));
   }, [heldSales]);
 
+  // Número previsto = próximo número da série fiscal (o número definitivo é
+  // reservado no backend ao finalizar). Após cada reserva, a série local avança.
+  const [reservedSeries, setReservedSeries] = useState({});
   const previewDocNumber = useMemo(() => {
-    const prefixMap = {
-      [DOCUMENT_TYPES.INVOICE]: 'FT',
-      [DOCUMENT_TYPES.INVOICE_RECEIPT]: 'FR',
-      [DOCUMENT_TYPES.RECEIPT]: 'RC',
-      [DOCUMENT_TYPES.PROFORMA]: 'PF',
-      [DOCUMENT_TYPES.CREDIT]: 'CR',
-    };
-    const prefix = prefixMap[docType] ?? 'FT';
+    const { key, prefix: defaultPrefix } = SALE_DOCUMENT_SERIES[docType] ?? SALE_DOCUMENT_SERIES[DOCUMENT_TYPES.INVOICE_RECEIPT];
     const year = String(new Date().getFullYear()).slice(-2);
-    const typeCount = recentSaleDocuments.filter((d) => d.type === docType).length + 1;
-    return `${prefix}${String(typeCount).padStart(5, '0')}/${year}`;
-  }, [docType, recentSaleDocuments]);
+    const stored = snapshot?.settings?.documents?.fiscal?.value?.series?.[key];
+    const local = reservedSeries[key];
+    const candidates = [stored, local].filter((series) => series && series.year === year);
+    const nextNumber = Math.max(1, ...candidates.map((series) => Number(series.nextNumber) || 1));
+    const prefix = local?.prefix || stored?.prefix || defaultPrefix;
+    const padding = local?.padding || stored?.padding || 5;
+    return `${prefix}${String(nextNumber).padStart(padding, '0')}/${year}`;
+  }, [docType, snapshot, reservedSeries]);
 
   const visibleProducts = useMemo(
     () => filterProductsForSale(allProducts, activeCategory, productQuery),
@@ -292,10 +312,8 @@ function Vendas() {
 
     setSaleError('');
     try {
-      const ncCount = recentSaleDocuments.filter((d) => d.type === 'NOTA_CREDITO').length + 1;
-      const year = String(new Date().getFullYear()).slice(-2);
-      const creditNoteNumber = `NC${String(ncCount).padStart(3, '0')}/${year}`;
-      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota_credito' }).catch(() => creditNoteNumber);
+      // Sem número de recurso: um número inventado podia repetir a série fiscal.
+      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota-credito' });
 
       const { cancelledDoc, creditNote } = await request('vendas.cancelDocument', {
         venda_id: document.vendaId,
@@ -304,7 +322,7 @@ function Vendas() {
       });
 
       setRecentSaleDocuments((current) =>
-        [creditNote, ...current.map((d) => (d.vendaId === cancelledDoc.vendaId ? { ...d, status: 'ANULADO', cancelledAt: cancelledDoc.cancelledAt, cancelledBy: cancelledDoc.cancelledBy, cancellationReason: cancelledDoc.cancellationReason } : d))],
+        [creditNote, ...current.map((d) => (d.vendaId === cancelledDoc.vendaId ? { ...d, status: 'ANULADO', cancelledAt: cancelledDoc.cancelledAt, cancelledBy: cancelledDoc.cancelledBy, cancellationReason: cancelledDoc.cancellationReason } : d))].slice(0, RECENT_DOCUMENTS_LIMIT),
       );
       setCancelTarget(null);
       setFinalizedDocument(creditNote);
@@ -342,19 +360,15 @@ function Vendas() {
     }
     setSaleError('');
 
-    const ipcDocTypeMap = {
-      [DOCUMENT_TYPES.INVOICE]: 'factura',
-      [DOCUMENT_TYPES.INVOICE_RECEIPT]: 'factura_recibo',
-      [DOCUMENT_TYPES.RECEIPT]: 'recibo',
-      [DOCUMENT_TYPES.PROFORMA]: 'proforma',
-      [DOCUMENT_TYPES.CREDIT]: 'credito',
-    };
-
     const isProforma = docType === DOCUMENT_TYPES.PROFORMA;
-    const ipcDocType = ipcDocTypeMap[docType] ?? 'factura_recibo';
+    const ipcDocType = SALE_DOCUMENT_SERIES[docType]?.key ?? 'factura_recibo';
 
     try {
       const numero_factura = await request('configuration.document.reserveNumber', { documentType: ipcDocType });
+      const seriesPrefix = snapshot?.settings?.documents?.fiscal?.value?.series?.[ipcDocType]?.prefix
+        || SALE_DOCUMENT_SERIES[docType]?.prefix;
+      const nextSeries = seriesAfterReservedNumber(numero_factura, seriesPrefix);
+      if (nextSeries) setReservedSeries((current) => ({ ...current, [ipcDocType]: nextSeries }));
 
       const saleItems = cart.map((item) => ({
         produto_id: item.id,
@@ -379,7 +393,7 @@ function Vendas() {
 
       setFinalizedDocument(document);
       if (!isProforma) {
-        setRecentSaleDocuments((current) => [document, ...current].slice(0, 10));
+        setRecentSaleDocuments((current) => [document, ...current].slice(0, RECENT_DOCUMENTS_LIMIT));
         setCart([]);
         setReceived('');
         setDiscount(0);
