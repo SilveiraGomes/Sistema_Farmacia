@@ -41,11 +41,11 @@ test('operation screen is routed and available in navigation', async () => {
   const operationSource = await readFile(new URL('../src/components/Operacao.jsx', import.meta.url), 'utf8');
 
   assert.match(appSource, /import Operacao from '\.\/components\/Operacao'/);
-  assert.match(appSource, /operacao:\s*'Operacao'/);
+  assert.match(appSource, /operacao:\s*'Operação'/);
   assert.match(appSource, /operacao:\s*'operacao\.ver'/);
   assert.match(appSource, /case 'operacao':\s*return <Operacao \/>;/s);
   assert.match(navSource, /CalendarClock/);
-  assert.match(navSource, /id:\s*'operacao',\s*label:\s*'Operacao',\s*icon:\s*CalendarClock,\s*permission:\s*'operacao\.ver'/);
+  assert.match(navSource, /id:\s*'operacao',\s*label:\s*'Operação',\s*icon:\s*CalendarClock,\s*permission:\s*'operacao\.ver'/);
 
   assert.match(operationSource, /function Operacao\(\)/);
   assert.match(operationSource, /const operation = useOperation\(\)/);
@@ -66,7 +66,8 @@ test('Vendas and Financeiro block critical actions without an open operation ses
   assert.match(vendasSource, /import \{ useOperation \} from '\.\.\/operation\/OperationContext'/);
   assert.match(vendasSource, /const operation = useOperation\(\)/);
   assert.match(vendasSource, /if \(!operation\.canOperate\) return;/);
-  assert.match(vendasSource, /disabled=\{!canOperate \|\| !cart\.length\}/);
+  // Pagamento bloqueado sem operação aberta ou carrinho vazio (e método não permitido).
+  assert.match(vendasSource, /disabled=\{!canOperate \|\| !cart\.length \|\|/);
   assert.match(vendasSource, /operation-blocked-banner/);
 
   assert.match(financeiroSource, /import \{ useOperation \} from '\.\.\/operation\/OperationContext'/);

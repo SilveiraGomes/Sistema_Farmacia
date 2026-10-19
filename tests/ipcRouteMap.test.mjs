@@ -53,8 +53,15 @@ test('buildRouteMap exposes auth, user, profile, operation, and configuration IP
   }
 });
 
+// Licença activa simulada: as rotas de escrita exigem o serviço de licenças.
+const activeLicenseService = Object.freeze({
+  status: () => ({ state: 'active', canWrite: true, readOnly: false }),
+  assertWriteAllowed: () => {},
+});
+
 function createRouteDependencies(calls = []) {
   return {
+    licenseService: activeLicenseService,
     authService: {
       getCurrentSession: async () => ({ user: { id: 42 } }),
       login: async (data) => ({ login: data }),
@@ -343,6 +350,7 @@ test('legacy toMain routes require inventory permissions before model actions', 
   };
 
   registerLegacyRoutes(fakeIpcMain, models, {
+    licenseService: activeLicenseService,
     authService: {
       getCurrentSession: async () => ({
         user: { id: 42, deve_trocar_senha: false },

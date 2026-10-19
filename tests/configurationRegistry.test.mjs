@@ -14,7 +14,7 @@ const expectedSettings = {
     group: 'company',
     type: 'object',
     defaultValue: {
-      pharmacyName: 'Sistema de Farmacia',
+      pharmacyName: 'KILSYSTEM PHARMACY',
       taxId: '',
       address: '',
       phone: '',
@@ -23,7 +23,7 @@ const expectedSettings = {
     },
   },
   'documents.headerText': {
-    group: 'documents', type: 'text', defaultValue: 'Sistema de Farmacia',
+    group: 'documents', type: 'text', defaultValue: 'Sistema de Farmácia',
   },
   'documents.currency': { group: 'documents', type: 'text', defaultValue: 'AKZ' },
   'documents.fiscal': {
@@ -63,10 +63,30 @@ const expectedSettings = {
   'alerts.dashboardEnabled': { group: 'alerts', type: 'boolean', defaultValue: true },
   'alerts.defaultMessage': { group: 'alerts', type: 'text', defaultValue: '' },
   'alerts.sessionTimeoutMinutes': { group: 'alerts', type: 'number', min: 0, defaultValue: 30 },
+  'alerts.operationalAlerts': {
+    group: 'alerts',
+    type: 'object',
+    defaultValue: { cashDiffShift: true, cashDiffDay: true, longShift: true, longDay: true },
+  },
+  'alerts.systemAlerts': {
+    group: 'alerts',
+    type: 'object',
+    defaultValue: { backupFail: true, restoreFail: true, sheetsSyncFail: true, dbCorrupt: true, integrity: true, diskSpace: true },
+  },
+  'alerts.securityAlerts': {
+    group: 'alerts',
+    type: 'object',
+    defaultValue: { loginAttempts: true, criticalOps: true, dataDelete: true, systemReset: true },
+  },
   'backup.options': {
     group: 'backup',
     type: 'object',
-    defaultValue: { frequency: 'manual', folderPath: '', retentionCount: 7 },
+    defaultValue: { retentionCount: 7, folderPath: '' },
+  },
+  'backup.auto': {
+    group: 'backup',
+    type: 'object',
+    defaultValue: { enabled: true, frequency: '24h', time: '23:00', onClose: true, onRestore: true, onReset: true },
   },
   'migration.legacyLocalStorageVersion': {
     group: 'migration', type: 'number', min: 0, defaultValue: 0,
@@ -86,7 +106,7 @@ const expectedSettings = {
   'documents.printOptions': {
     group: 'documents',
     type: 'object',
-    defaultValue: { previewBeforePrint: true, copies: 1 },
+    defaultValue: { previewBeforePrint: true, copies: 1, printerName: '', showDialog: false },
   },
   'appearance.startFullscreen': {
     group: 'appearance',
@@ -129,10 +149,25 @@ const technicalCatalogs = {
   operation_statuses: ['aberto', 'fechado', 'bloqueado'],
 };
 
-const expectedTitle = (code) => code
+// Nomes traduzidos explicitamente no registo; os restantes são gerados do código.
+const translatedNames = {
+  credito: 'Crédito',
+  'nota-credito': 'Nota de crédito',
+  expense: 'Despesa',
+  revenue: 'Receita',
+  loss: 'Perda',
+};
+
+const generatedTitle = (code) => code
   .split(/[_-]/)
   .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
   .join(' ');
+
+const expectedTitle = (code, catalogKey) => (
+  catalogKey && catalogKey !== 'payment_methods' && translatedNames[code]
+    ? translatedNames[code]
+    : generatedTitle(code)
+);
 
 test('expõe exatamente as configurações centrais, grupos, tipos e defaults', () => {
   assert.deepEqual(Object.keys(SETTING_DEFINITIONS), Object.keys(expectedSettings));
@@ -163,7 +198,7 @@ test('gera nome, ordem zero-based e marcador de sistema para cada opção', () =
       catalog.options,
       catalog.options.map(({ code }, index) => ({
         code,
-        name: expectedTitle(code),
+        name: expectedTitle(code, key),
         order: index,
         system: expectedSystem,
       })),

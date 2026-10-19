@@ -54,7 +54,7 @@ test('uses generic branding when no pharmacy identity is saved', () => {
   const branding = getStoredBranding(createStorage());
 
   assert.deepEqual(branding, DEFAULT_BRANDING);
-  assert.equal(branding.pharmacyName, 'Sistema de Farmacia');
+  assert.equal(branding.pharmacyName, 'KILSYSTEM PHARMACY');
   assert.equal(branding.logoDataUrl, '');
 });
 

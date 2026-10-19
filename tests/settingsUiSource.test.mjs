@@ -9,7 +9,7 @@ test('Configuracoes is inline and uses accessible settings components', async ()
   assert.match(source, /SettingField/);
   assert.match(source, /useSettings/);
   assert.match(source, /configuration\.updateSection/);
-  assert.doesNotMatch(source, /modal-backdrop/);
+  // As definições ficam inline; janelas só para confirmações (ex.: restaurar backup).
   assert.doesNotMatch(source, /SettingsModal/);
 });
 

@@ -43,7 +43,7 @@ test('safe snapshot is structurally complete and isolated per call', () => {
   const first = createSafeDefaultSnapshot();
   const second = createSafeDefaultSnapshot();
 
-  assert.equal(first.settings.company.identity.value.pharmacyName, 'Sistema de Farmacia');
+  assert.equal(first.settings.company.identity.value.pharmacyName, 'KILSYSTEM PHARMACY');
   assert.equal(first.settings.documents.currency.value, 'AKZ');
   assert.equal(first.settings.sales.defaultPaymentMethod.value, 'dinheiro');
   assert.equal(first.settings.migration.legacyLocalStorageVersion.value, 0);
@@ -53,7 +53,7 @@ test('safe snapshot is structurally complete and isolated per call', () => {
   assert.equal(first.migrations.legacyLocalStoragePending, true);
 
   first.settings.company.identity.value.pharmacyName = 'Mutated';
-  assert.equal(second.settings.company.identity.value.pharmacyName, 'Sistema de Farmacia');
+  assert.equal(second.settings.company.identity.value.pharmacyName, 'KILSYSTEM PHARMACY');
 });
 
 test('catalog filtering is deterministic and preserves only selected inactive option', () => {

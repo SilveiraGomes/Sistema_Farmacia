@@ -109,7 +109,7 @@ test('invoice A4 tax summary matches item table professional styling', async () 
 test('invoice A4 typography, meta block and bank account layout match final print rules', async () => {
   const css = await readFile('src/assets/tailwind.css', 'utf8');
 
-  assert.match(css, /--invoice-body-size:\s*12px/);
+  assert.match(css, /--invoice-body-size:\s*13px/);
   assert.match(css, /--invoice-heading-size:\s*13px/);
   assert.match(css, /--invoice-bank-size:\s*10px/);
   assert.match(css, /\.invoice-a4-page\s*\{[^}]*font-size:\s*var\(--invoice-body-size\)/s);
@@ -142,7 +142,8 @@ test('Documentos uses InvoiceA4 for printable document details', async () => {
   assert.match(source, /buildDocumentSettingsFromSnapshot/);
   assert.match(source, /useSettings/);
   assert.doesNotMatch(source, /getStoredInvoiceA4Settings|getStoredBranding/);
-  assert.match(source, /invoice-a4-print-scope/);
+  // A impressão é feita pelo backend (janela de impressão dedicada).
+  assert.match(source, /request\('invoice\.print', \{ viewModel \}\)/);
   assert.match(source, /<InvoiceA4 viewModel=\{viewModel\} \/>/);
 });
 
@@ -154,7 +155,8 @@ test('Documentos exposes PDF and print actions inside A4 preview', async () => {
   assert.match(source, /aria-label="Salvar PDF"/);
   assert.match(source, /aria-label="Imprimir factura"/);
   assert.match(source, /invoice-a4-actions/);
-  assert.match(source, /window\.print\(\)/);
+  assert.match(source, /request\('invoice\.print', \{ viewModel \}\)/);
+  assert.match(source, /request\('invoice\.savePDF', \{ viewModel \}\)/);
   assert.doesNotMatch(source, /<FileDown size=\{17\} \/>\s*Salvar PDF/);
   assert.doesNotMatch(source, /<Printer size=\{17\} \/>\s*Imprimir/);
 });

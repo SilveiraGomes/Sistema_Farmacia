@@ -6149,7 +6149,7 @@ button :is(strong, b) {
   border: 1px solid #d9d9d9;
   box-shadow: 0 16px 48px rgb(0 0 0 / 24%);
   font-family: "Segoe UI", Arial, Helvetica, sans-serif;
-  font-size: 13px !important;
+  font-size: var(--invoice-body-size) !important;
   line-height: 1.25;
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
@@ -6159,7 +6159,7 @@ button :is(strong, b) {
 .invoice-a4-page td,
 .invoice-a4-page p,
 .invoice-a4-page span:not([class]) {
-  font-size: 13px;
+  font-size: var(--invoice-body-size);
 }
 
 .invoice-a4-header {

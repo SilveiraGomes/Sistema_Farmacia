@@ -23,12 +23,13 @@ test('Relatorios uses catalog report engine and export permissions', async () =>
 
   assert.match(source, /REPORT_CATALOG/);
   assert.match(source, /buildReportData/);
-  assert.match(source, /buildReportCsv/);
+  assert.match(source, /XLSX\.write\(/); // exportação Excel (XLSX)
   assert.match(source, /ReportA4/);
   assert.match(source, /hasPermission\('relatorios\.exportar'\)/);
-  assert.match(source, /aria-label="Exportar Excel"/);
+  assert.match(source, /aria-label="Exportar XLSX"/);
   assert.match(source, /aria-label="Salvar PDF"/);
-  assert.match(source, /window\.print\(\)/);
+  assert.match(source, /request\('report\.print'/); // impressão pelo backend
+  assert.match(source, /request\('report\.savePDF'/);
   assert.match(source, /URL\.createObjectURL/);
   assert.match(source, /className="report-period-control"/);
   assert.match(source, /aria-label="Data inicial"/);

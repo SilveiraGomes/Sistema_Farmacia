@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -31,20 +32,21 @@ test('main navigation and operation labels use Portuguese accents', async () => 
 });
 
 test('technical catalog codes retain translated display names', async () => {
-  const registry = await readFile(
-    'src/backend/services/configurationRegistry.js',
-    'utf8',
+  const { CATALOG_DEFINITIONS } = createRequire(import.meta.url)(
+    '../src/backend/services/configurationRegistry.js',
   );
-  assert.match(registry, /technicalNamed\(\{\s*expense:\s*'Despesa'/s);
-  assert.match(registry, /revenue:\s*'Receita'/);
-  assert.match(registry, /loss:\s*'Perda'/);
-  assert.match(registry, /credito:\s*'Crédito'/);
-  assert.match(registry, /'nota-credito':\s*'Nota de crédito'/);
+  const nameOf = (catalog, code) =>
+    CATALOG_DEFINITIONS[catalog].options.find((option) => option.code === code)?.name;
+  assert.equal(nameOf('financial_entry_types', 'expense'), 'Despesa');
+  assert.equal(nameOf('financial_entry_types', 'revenue'), 'Receita');
+  assert.equal(nameOf('financial_entry_types', 'loss'), 'Perda');
+  assert.equal(nameOf('document_types', 'credito'), 'Crédito');
+  assert.equal(nameOf('document_types', 'nota-credito'), 'Nota de crédito');
 
   const editor = await readFile(
     'src/components/settings/CatalogEditor.jsx',
     'utf8',
   );
-  assert.match(editor, /financial_entry_types:[\s\S]*expense:\s*'Despesa'/);
-  assert.match(editor, /document_types:[\s\S]*credito:\s*'Crédito'/);
+  // O editor mostra o nome traduzido que vem do registo (verificado acima).
+  assert.match(editor, /<span>\{option\.name\}<\/span>/);
 });

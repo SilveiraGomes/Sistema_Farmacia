@@ -109,7 +109,7 @@ test('buildStockMetrics counts stock states and categories', () => {
   assert.equal(metrics.lowStock, stockItems.filter((item) => item.status === 'Baixo estoque').length);
   assert.equal(metrics.outOfStock, stockItems.filter((item) => item.status === 'Sem estoque').length);
   assert.equal(antibiotics.name, 'Antibioticos');
-  assert.equal(antibiotics.icon, 'ant');
+  assert.equal(antibiotics.icon, 'A'); // iniciais da categoria
   assert.equal(antibiotics.count, stockItems.filter((item) => item.category === 'Antibioticos').length);
 });
 
@@ -210,7 +210,9 @@ test('parseStockImportCsv maps common spreadsheet headers to product fields', ()
   ]);
 });
 
-test('validateStockProductImportRows rejects unknown categories and subcategories', () => {
+// A existência de categorias/subcategorias é validada no backend durante a
+// importação (ver tests/stockImportBackend.test.mjs); no ecrã só o nome é obrigatório.
+test('validateStockProductImportRows accepts named rows and rejects rows without name', () => {
   const result = validateStockProductImportRows([
     {
       id: '#9001',
@@ -221,34 +223,14 @@ test('validateStockProductImportRows rejects unknown categories and subcategorie
       expiry: '31/12/2028',
       location: 'Gaveta GT001',
     },
-    {
-      id: '#9002',
-      name: 'Produto Sem Categoria',
-      category: 'Categoria Nova',
-      subcategory: 'Comprimidos',
-      price: '900',
-      expiry: '31/12/2028',
-      location: 'Gaveta GT002',
-    },
-    {
-      id: '#9003',
-      name: 'Produto Sem Subcategoria',
-      category: 'Antibioticos',
-      subcategory: 'Subcategoria Nova',
-      price: '900',
-      expiry: '31/12/2028',
-      location: 'Gaveta GT003',
-    },
-  ], stockItems);
+    { id: '#9002', name: '', category: 'Antibioticos', price: '900' },
+  ]);
 
   assert.equal(result.acceptedRows.length, 1);
+  assert.equal(result.acceptedRows[0].name, 'Produto Teste');
+  assert.equal(result.acceptedRows[0].price, 1200);
   assert.equal(result.acceptedRows[0].quantity, 0);
-  assert.equal(result.acceptedRows[0].status, 'Sem estoque');
-  assert.deepEqual(result.missingCategories, ['Categoria Nova']);
-  assert.deepEqual(result.missingSubcategories, [
-    { category: 'Antibioticos', name: 'Subcategoria Nova' },
-  ]);
-  assert.equal(result.rejectedRows.length, 2);
+  assert.deepEqual(result.rejectedRows.map((row) => row.reason), ['Nome do produto e obrigatorio.']);
 });
 
 test('validateStockCategoryImportRows inserts only new category names', () => {
@@ -265,20 +247,19 @@ test('validateStockCategoryImportRows inserts only new category names', () => {
   ]);
 });
 
-test('validateStockSubcategoryImportRows rejects subcategories without existing category', () => {
+test('validateStockSubcategoryImportRows requires both names and removes duplicates in the file', () => {
   const result = validateStockSubcategoryImportRows([
     { category: 'Antibioticos', subcategory: 'Injetaveis' },
-    { category: 'Categoria Nova', subcategory: 'Teste' },
-    { category: 'Antibioticos', subcategory: 'Comprimidos' },
-  ], stockItems);
+    { category: 'Antibioticos', subcategory: ' injetaveis ' },
+    { category: '', subcategory: 'Teste' },
+  ]);
 
   assert.deepEqual(result.acceptedRows, [
     { category: 'Antibioticos', name: 'Injetaveis' },
   ]);
-  assert.deepEqual(result.missingCategories, ['Categoria Nova']);
   assert.deepEqual(result.rejectedRows.map((row) => row.reason), [
-    'Categoria nao encontrada.',
-    'Subcategoria ja existe nesta categoria.',
+    'Duplicado neste ficheiro.',
+    'Informe categoria e subcategoria.',
   ]);
 });
 

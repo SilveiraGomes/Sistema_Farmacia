@@ -18,6 +18,12 @@ const ACTIONS = {
   'configuration.catalog.deactivate': ['deactivateCatalogOption', 'configuracoes.editar', true],
 };
 
+// Licença activa simulada: as rotas de escrita exigem o serviço de licenças.
+const activeLicenseService = Object.freeze({
+  status: () => ({ state: 'active', canWrite: true, readOnly: false }),
+  assertWriteAllowed: () => {},
+});
+
 function dependencies(calls, session = { user: { id: 42 } }) {
   const configurationService = {};
   for (const [method] of Object.values(ACTIONS)) {
@@ -27,6 +33,8 @@ function dependencies(calls, session = { user: { id: 42 } }) {
     };
   }
   return {
+    licenseService: activeLicenseService,
+    heldSalesService: { clear: async () => {} },
     authService: { getCurrentSession: async () => session },
     assertPermission: async (actorUserId, permission) => {
       calls.push(['permission', actorUserId, permission]);

@@ -24,13 +24,11 @@ test('login refocuses and resets password when user selection changes', async ()
   assert.match(source, /PASSWORD_FOCUS_DELAYS\s*=\s*\[0,\s*80,\s*250,\s*600\]/);
   assert.match(source, /window\.focus\?\.\(\)/);
   assert.match(source, /focus\(\{ preventScroll: true \}\)/);
-  assert.match(source, /window\.addEventListener\('focus',\s*refocusPasswordField\)/);
-  assert.match(source, /document\.addEventListener\('visibilitychange',\s*refocusWhenVisible\)/);
-  assert.match(source, /window\.removeEventListener\('focus',\s*refocusPasswordField\)/);
-  assert.match(source, /document\.removeEventListener\('visibilitychange',\s*refocusWhenVisible\)/);
-  assert.match(source, /function handleUsernameChange/);
-  assert.match(source, /setPassword\(''\)/);
-  assert.match(source, /setIsPasswordVisible\(false\)/);
+  assert.match(source, /window\.addEventListener\(["']focus["'],\s*focus\)/);
+  assert.match(source, /document\.addEventListener\(["']visibilitychange["'],\s*onVisible\)/);
+  assert.match(source, /window\.removeEventListener\(["']focus["'],\s*focus\)/);
+  assert.match(source, /document\.removeEventListener\(["']visibilitychange["'],\s*onVisible\)/);
+  // Ao trocar de utilizador: limpa a senha, oculta-a e volta a focar o campo.
+  assert.match(source, /onChange=\{\(e\) => \{ setUsername\(e\.target\.value\); setPassword\(["']{2}\);[^}]*setIsPasswordVisible\(false\); focusPasswordField\(\); \}\}/);
   assert.match(source, /ref=\{passwordInputRef\}/);
-  assert.match(source, /onChange=\{handleUsernameChange\}/);
 });
