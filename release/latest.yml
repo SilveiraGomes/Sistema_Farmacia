@@ -1,8 +1,8 @@
-version: 1.0.3
+version: 1.0.4
 files:
-  - url: KILSYSTEM-PHARMACY-Setup-1.0.3.exe
-    sha512: uGbk7KpcRoqq6WiGTOfk53GXq5zk0WGVbJDSREApY82pHXBKD9zqmt11N+vlr5kMNqvLJr8tIV/3Wbr8Zba1tw==
-    size: 97077056
-path: KILSYSTEM-PHARMACY-Setup-1.0.3.exe
-sha512: uGbk7KpcRoqq6WiGTOfk53GXq5zk0WGVbJDSREApY82pHXBKD9zqmt11N+vlr5kMNqvLJr8tIV/3Wbr8Zba1tw==
-releaseDate: '2026-10-16T15:04:16.866Z'
+  - url: KILSYSTEM-PHARMACY-Setup-1.0.4.exe
+    sha512: CVkkRt3ciYksxzce7b0XDitJYx9OM+XLIe9QoJPaGWgofyyU7W+APEeN1vcxpNBDkAL+kj2gvQEAwBw/rejaAQ==
+    size: 97078695
+path: KILSYSTEM-PHARMACY-Setup-1.0.4.exe
+sha512: CVkkRt3ciYksxzce7b0XDitJYx9OM+XLIe9QoJPaGWgofyyU7W+APEeN1vcxpNBDkAL+kj2gvQEAwBw/rejaAQ==
+releaseDate: '2026-10-19T14:52:56.842Z'
