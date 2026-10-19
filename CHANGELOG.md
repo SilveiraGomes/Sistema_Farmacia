@@ -4,6 +4,10 @@ Cada versão publicada tem uma entrada aqui. Novas alterações entram em «Por 
 
 ## Por publicar
 
+_(sem alterações)_
+
+## 1.0.5 — 2026-10-19
+
 **Integridade dos dados**
 - Verificação da base de dados em cada arranque (integridade e registos órfãos), com alerta no painel de notificações.
 - Cada backup guarda a contagem de registos por tabela; o sistema alerta se um backup novo tiver muito menos dados que o anterior.
