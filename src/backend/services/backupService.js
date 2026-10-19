@@ -282,8 +282,9 @@ async function restoreBackup({ name, filePath, app: appRef, createdBy = "Sistema
 
   const safety = await createBackup({ app, type: "pre-restore", createdBy, folderPath });
 
-  const { pendingDb, pendingMeta } = getPendingPaths(app);
+  const { pendingDb, pendingMeta, rollbackDb } = getPendingPaths(app);
   try {
+    removeFileIfExists(rollbackDb);
     const tmp = `${pendingDb}.tmp`;
     fs.copyFileSync(src, tmp);
     fs.renameSync(tmp, pendingDb);
@@ -312,20 +313,30 @@ function hasPendingRestore(app) {
 // Deve ser chamado ANTES de abrir a base de dados.
 function applyPendingRestore(app) {
   const { pendingDb, pendingMeta, rollbackDb } = getPendingPaths(app);
-  if (!fs.existsSync(pendingDb) || !fs.existsSync(pendingMeta)) {
+  if (!fs.existsSync(pendingMeta)) {
     removeFileIfExists(pendingDb);
-    removeFileIfExists(pendingMeta);
     return null;
   }
 
   let meta = {};
   try { meta = JSON.parse(fs.readFileSync(pendingMeta, "utf8")); } catch { /* usar vazio */ }
 
+  if (!fs.existsSync(pendingDb)) {
+    // O ficheiro já foi trocado mas o arranque anterior terminou antes de repor
+    // as contas: retoma a finalização com a cópia de reversão.
+    if (fs.existsSync(rollbackDb)) return { meta, rollbackPath: rollbackDb, resumed: true };
+    removeFileIfExists(pendingMeta);
+    return null;
+  }
+
   const dbPath = getDbPath(app);
   // Com a base fechada, a cópia é consistente; serve para reverter e para
-  // recuperar as contas actuais.
-  removeFileIfExists(rollbackDb);
-  if (fs.existsSync(dbPath)) fs.copyFileSync(dbPath, rollbackDb);
+  // recuperar as contas actuais. Se já existir (tentativa anterior interrompida
+  // a meio da cópia), é a base original intacta e não pode ser substituída.
+  if (!fs.existsSync(rollbackDb) && fs.existsSync(dbPath)) {
+    fs.copyFileSync(dbPath, `${rollbackDb}.tmp`);
+    fs.renameSync(`${rollbackDb}.tmp`, rollbackDb);
+  }
 
   const state = { meta, rollbackPath: fs.existsSync(rollbackDb) ? rollbackDb : null };
   try {
@@ -352,9 +363,21 @@ function toDateOrNull(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// Conta que nunca foi usada: sem login e com troca de senha obrigatória (ex.: o
+// admin de fábrica de uma instalação nova). Não deve substituir a do backup.
+function isUnusedAccount(user) {
+  return toBoolean(user.deve_trocar_senha, false) && !user.ultimo_login_em;
+}
+
 async function mergeAccounts(snapshot, transaction) {
   const { Perfil, Permissao, PerfilPermissao, Usuario } = db.getModels();
   const opts = { transaction };
+
+  // Instalação nova (só contas nunca usadas): o backup prevalece por inteiro,
+  // incluindo utilizadores, senhas e permissões dos perfis.
+  if (snapshot.usuarios.every(isUnusedAccount)) {
+    return { preservedUsers: 0, preservedProfiles: 0, freshInstallation: true };
+  }
 
   const currentPermissionKeyById = new Map(snapshot.permissoes.map((p) => [p.id, p.chave]));
   const permissionIdByKey = new Map(
@@ -380,7 +403,12 @@ async function mergeAccounts(snapshot, transaction) {
       .filter((link) => link.perfil_id === oldProfile.id)
       .map((link) => permissionIdByKey.get(currentPermissionKeyById.get(link.permissao_id)))
       .filter(Boolean);
-    if (permissionIds.length) {
+    const wanted = [...new Set(permissionIds)].sort((x, y) => x - y);
+    const current = (await PerfilPermissao.findAll({ where: { perfil_id: perfil.id }, ...opts }))
+      .map((link) => link.permissao_id)
+      .sort((x, y) => x - y);
+    const unchanged = wanted.length === current.length && wanted.every((id, i) => id === current[i]);
+    if (permissionIds.length && !unchanged) {
       await PerfilPermissao.destroy({ where: { perfil_id: perfil.id }, ...opts });
       await PerfilPermissao.bulkCreate(
         [...new Set(permissionIds)].map((permissao_id) => ({ perfil_id: perfil.id, permissao_id })),
@@ -406,6 +434,7 @@ async function mergeAccounts(snapshot, transaction) {
     };
 
     const existing = await Usuario.findOne({ where: { nome_usuario: oldUser.nome_usuario }, ...opts });
+    if (existing && isUnusedAccount(oldUser)) continue;
     let email = oldUser.email || null;
     if (email) {
       const owner = await Usuario.findOne({ where: { email }, ...opts });

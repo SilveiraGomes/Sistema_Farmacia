@@ -1,5 +1,36 @@
 const { Op } = require('sequelize');
 const { getModels } = require('../database');
+const { normalizeSubcategoryKey } = require('./subcategoryKeys');
+
+// O Sequelize "singulariza" os nomes dos modelos nas associações geradas:
+// Subcategoria -> Subcategorium e Categoria -> Categorium.
+function getProductSubcategoryName(product) {
+  return product?.Subcategoria?.nome ?? product?.Subcategorium?.nome ?? '';
+}
+
+function getSubcategoryCategoryName(subcategory) {
+  return subcategory?.Categoria?.nome ?? subcategory?.Categorium?.nome ?? '';
+}
+
+// Mantém uma subcategoria por (categoria, nome normalizado), preferindo a activa.
+function deduplicateSubcategories(rows = []) {
+  const kept = new Map();
+  for (const row of rows) {
+    const key = normalizeSubcategoryKey(row.categoria_id, row.nome);
+    const current = kept.get(key);
+    if (!current || (current.ativo === false && row.ativo !== false)) kept.set(key, row);
+  }
+  const keptRows = new Set(kept.values());
+  return rows.filter((row) => keptRows.has(row));
+}
+
+async function findSubcategoryByName(categoriaId, nome, { excludeId = null } = {}) {
+  const { Subcategoria } = getModels();
+  const key = normalizeSubcategoryKey(categoriaId, nome);
+  const rows = await Subcategoria.findAll({ where: { categoria_id: Number(categoriaId) }, order: [['id', 'ASC']] });
+  const matches = rows.filter((row) => row.id !== excludeId && normalizeSubcategoryKey(row.categoria_id, row.nome) === key);
+  return matches.find((row) => row.ativo !== false) || matches[0] || null;
+}
 
 function roundCents(n) {
   return Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
@@ -175,7 +206,7 @@ async function listProducts({ query = '', categoria = '' } = {}) {
       categoria: p.categoria || '',
       categoria_id: p.categoria_id || null,
       subcategoria_id: p.subcategoria_id || null,
-      subcategoria_nome: p.Subcategoria?.nome || '',
+      subcategoria_nome: getProductSubcategoryName(p),
       fabricante: p.fabricante || '',
       unidade_medida: p.unidade_medida || 'Unidade',
       receita_obrigatoria: Boolean(p.receita_obrigatoria),
@@ -321,7 +352,7 @@ async function getProduct(produto_id) {
     categoria: p.categoria || '',
     categoria_id: p.categoria_id || null,
     subcategoria_id: p.subcategoria_id || null,
-    subcategoria_nome: p.Subcategoria?.nome || '',
+    subcategoria_nome: getProductSubcategoryName(p),
     fabricante: p.fabricante || '',
     unidade_medida: p.unidade_medida || 'Unidade',
     receita_obrigatoria: Boolean(p.receita_obrigatoria),
@@ -423,13 +454,12 @@ async function listSubcategories({ categoria_id = null } = {}) {
     order: [['nome', 'ASC']],
     include: [{ model: Categoria, required: false, attributes: ['nome'] }],
   });
-  return rows.map((r) => {
-    const s = r.get({ plain: true });
+  return deduplicateSubcategories(rows.map((r) => r.get({ plain: true }))).map((s) => {
     return {
       id: s.id,
       nome: s.nome,
       categoria_id: s.categoria_id,
-      categoria_nome: s.Categoria?.nome || '',
+      categoria_nome: getSubcategoryCategoryName(s),
       descricao: s.descricao || '',
       imagem: s.imagem || null,
     };
@@ -446,6 +476,19 @@ async function createSubcategory({ nome, categoria_nome, categoria_id: catId, de
     categoria = await Categoria.findOne({ where: { nome: categoria_nome } });
   }
   if (!categoria) throw Object.assign(new Error('Categoria nao encontrada.'), { code: 'NOT_FOUND' });
+  const existing = await findSubcategoryByName(categoria.id, nome);
+  if (existing && existing.ativo !== false) {
+    throw Object.assign(new Error('Subcategoria ja existe nesta categoria.'), { code: 'CONFLICT' });
+  }
+  if (existing) {
+    // Subcategoria removida (inactiva) com o mesmo nome: é reactivada.
+    await existing.update({
+      ativo: true,
+      ...(descricao !== undefined ? { descricao: descricao || null } : {}),
+      ...(imagem !== undefined ? { imagem: imagem || null } : {}),
+    });
+    return { id: existing.id, nome: existing.nome, categoria_id: categoria.id, categoria_nome: categoria.nome, descricao: existing.descricao || '', imagem: existing.imagem || null };
+  }
   const sub = await Subcategoria.create({
     nome: String(nome).trim(),
     categoria_id: categoria.id,
@@ -462,7 +505,11 @@ async function updateSubcategory({ id, nome, descricao, imagem } = {}) {
   const sub = await Subcategoria.findByPk(id);
   if (!sub) throw Object.assign(new Error('Subcategoria nao encontrada.'), { code: 'NOT_FOUND' });
   const updates = {};
-  if (nome !== undefined) updates.nome = String(nome).trim();
+  if (nome !== undefined) {
+    const duplicate = await findSubcategoryByName(sub.categoria_id, nome, { excludeId: sub.id });
+    if (duplicate) throw Object.assign(new Error('Subcategoria ja existe nesta categoria.'), { code: 'CONFLICT' });
+    updates.nome = String(nome).trim();
+  }
   if (descricao !== undefined) updates.descricao = descricao || null;
   if (imagem !== undefined) updates.imagem = imagem || null;
   await sub.update(updates);
@@ -520,7 +567,7 @@ async function importSubcategories(rows = []) {
       await createSubcategory({ nome: row.name, categoria_id: categoria.id, descricao: row.descricao || null });
       results.created++;
     } catch (e) {
-      if (e.name === 'SequelizeUniqueConstraintError' || (e.message || '').includes('UNIQUE')) {
+      if (e.code === 'CONFLICT' || e.name === 'SequelizeUniqueConstraintError' || (e.message || '').includes('UNIQUE')) {
         results.skipped++;
       } else {
         results.errors.push({ name: row.name, reason: e.message });
@@ -643,6 +690,7 @@ const SAFE_ERRORS = Object.freeze([
   'Categoria possui produtos associados.',
   'Subcategoria possui produtos associados.',
   'Subcategoria nao encontrada.',
+  'Subcategoria ja existe nesta categoria.',
 ]);
 
 module.exports = {
@@ -667,5 +715,9 @@ module.exports = {
   importCategories,
   importSubcategories,
   importProducts,
+  deduplicateSubcategories,
+  normalizeSubcategoryKey,
+  getProductSubcategoryName,
+  getSubcategoryCategoryName,
   SAFE_ERRORS,
 };

@@ -1,6 +1,8 @@
 const { Sequelize, DataTypes } = require("sequelize");
+const crypto = require("crypto");
 const path = require("path");
 const { hashPassword } = require("./security/passwords");
+const { normalizeSubcategoryKey } = require("./services/subcategoryKeys");
 const {
   PERMISSIONS,
   DEFAULT_PROFILES,
@@ -15,6 +17,11 @@ const VENDAS_INVOICE_INDEX = "vendas_numero_factura_unique";
 const PERFIL_PERMISSAO_UNIQUE_INDEX = "perfil_permissao_unique_pair";
 const DIA_OPERACIONAL_ONE_OPEN_INDEX = "dia_operacional_one_open_unique";
 const TURNO_OPERACIONAL_ONE_OPEN_INDEX = "turno_operacional_one_open_unique";
+const SUBCATEGORIA_UNIQUE_INDEX = "subcategoria_categoria_nome_unique";
+const SCHEMA_META_TABLE = "_kil_schema_meta";
+const SCHEMA_FINGERPRINT_KEY = "models_fingerprint";
+// Incrementar para forçar uma sincronização completa numa nova versão.
+const SCHEMA_SYNC_REVISION = 1;
 
 function defineModels(db) {
   const Categoria = db.define("Categoria", {
@@ -561,23 +568,47 @@ function hasTable(tables, tableName) {
   });
 }
 
-async function dropSqliteAlterBackupTables(db) {
+// Tabelas temporárias deixadas por uma reconstrução interrompida (ex.: a aplicação
+// foi fechada durante o arranque). Podem conter os ÚNICOS dados da tabela original,
+// por isso os registos são devolvidos à tabela principal antes de as remover.
+async function recoverSqliteAlterBackupTables(db) {
   if (db.getDialect() !== "sqlite") {
     return;
   }
 
   const queryInterface = db.getQueryInterface();
-  const tables = await queryInterface.showAllTables();
+  const tables = (await queryInterface.showAllTables()).map((table) =>
+    typeof table === "string" ? table : Object.values(table).find((v) => typeof v === "string") || "",
+  );
+  const residualSuffixes = ["_backup", "_status_fix", "_normalized"];
 
-  const residualSuffixes = ['_backup', '_status_fix', '_normalized'];
-  const residualTables = tables.flatMap((table) => {
-    const name = typeof table === 'string' ? table : Object.values(table).find((v) => typeof v === 'string') || '';
-    return residualSuffixes.some((s) => name.endsWith(s)) ? [name] : [];
-  });
+  for (const residual of tables) {
+    const suffix = residualSuffixes.find((s) => residual.endsWith(s));
+    if (!suffix) continue;
+    const target = residual.slice(0, -suffix.length);
 
-  for (const tableName of residualTables) {
-    console.log(`[syncDB] Dropping residual table: "${tableName}"`);
-    await db.query(`DROP TABLE IF EXISTS "${tableName}"`);
+    await db.query("BEGIN IMMEDIATE");
+    try {
+      if (!tables.includes(target)) {
+        console.log(`[syncDB] A recuperar "${target}" a partir de "${residual}"`);
+        await db.query(`ALTER TABLE "${residual}" RENAME TO "${target}"`);
+      } else {
+        const targetCols = Object.keys(await queryInterface.describeTable(target));
+        const residualCols = new Set(Object.keys(await queryInterface.describeTable(residual)));
+        const common = targetCols.filter((c) => residualCols.has(c)).map((c) => `"${c}"`).join(", ");
+        const [{ before }] = await db.query(`SELECT COUNT(*) AS before FROM "${target}"`, { type: db.QueryTypes.SELECT });
+        if (common) {
+          await db.query(`INSERT OR IGNORE INTO "${target}" (${common}) SELECT ${common} FROM "${residual}"`);
+        }
+        const [{ after }] = await db.query(`SELECT COUNT(*) AS after FROM "${target}"`, { type: db.QueryTypes.SELECT });
+        console.log(`[syncDB] "${residual}": ${after - before} registo(s) recuperado(s) para "${target}"`);
+        await db.query(`DROP TABLE "${residual}"`);
+      }
+      await db.query("COMMIT");
+    } catch (error) {
+      await db.query("ROLLBACK").catch(() => {});
+      console.error(`[syncDB] Não foi possível recuperar "${residual}"; tabela mantida:`, error?.message);
+    }
   }
 }
 
@@ -952,7 +983,7 @@ async function normalizePerfilPermissaoTableForSqliteAlter(db) {
   );
 }
 
-async function normalizeOpcaoCatalogoTableForSqliteAlter(db) {
+async function normalizeOpcaoCatalogoTableForSqliteAlter(db, { beforeAlter = true } = {}) {
   if (db.getDialect() !== "sqlite") {
     return;
   }
@@ -974,7 +1005,7 @@ async function normalizeOpcaoCatalogoTableForSqliteAlter(db) {
       (field) => field.attribute || field.name,
     );
 
-    return fieldNames.length === 1 && fieldNames[0] === "catalogo";
+    return fieldNames.length === 1 && (fieldNames[0] === "catalogo" || fieldNames[0] === "codigo");
   });
 
   const tableInfo = await db.query(
@@ -982,12 +1013,15 @@ async function normalizeOpcaoCatalogoTableForSqliteAlter(db) {
     { type: db.QueryTypes.SELECT },
   );
   const tableSql = tableInfo.length > 0 ? tableInfo[0].sql || "" : "";
+  // describeTable marca catalogo/codigo como "unique" por pertencerem ao índice
+  // composto (catalogo, codigo); antes de um sync({ alter: true }) isso faz o
+  // Sequelize gerar UNIQUE por coluna, por isso a tabela é normalizada. Sem
+  // alter, só o DDL da coluna conta (evita reconstruir em todos os arranques).
   const columns = await queryInterface.describeTable("OpcoesCatalogo");
   const hasProblematicColumnUnique =
     /`?catalogo`?\s+[^,]*UNIQUE/i.test(tableSql) ||
     /`?codigo`?\s+[^,]*UNIQUE/i.test(tableSql) ||
-    Boolean(columns.catalogo?.unique) ||
-    Boolean(columns.codigo?.unique);
+    (beforeAlter && (Boolean(columns.catalogo?.unique) || Boolean(columns.codigo?.unique)));
 
   if (!hasLegacyUniqueCatalogIndex && !hasProblematicColumnUnique) {
     return;
@@ -1249,26 +1283,84 @@ async function normalizeOperationalTablesForSqliteAlter(db) {
   }
 }
 
+function computeModelsFingerprint(db) {
+  const queryGenerator = db.getQueryInterface().queryGenerator;
+  const parts = Object.keys(db.models).sort().map((name) => {
+    const model = db.models[name];
+    return {
+      table: model.getTableName(),
+      attributes: queryGenerator.attributesToSQL(model.rawAttributes),
+      indexes: model.options.indexes || [],
+    };
+  });
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ revision: SCHEMA_SYNC_REVISION, parts }))
+    .digest("hex");
+}
+
+async function readStoredFingerprint(db) {
+  await db.query(`CREATE TABLE IF NOT EXISTS "${SCHEMA_META_TABLE}" (chave TEXT PRIMARY KEY, valor TEXT)`);
+  const rows = await db.query(`SELECT valor FROM "${SCHEMA_META_TABLE}" WHERE chave = ?`, {
+    replacements: [SCHEMA_FINGERPRINT_KEY],
+    type: db.QueryTypes.SELECT,
+  });
+  return rows[0]?.valor || null;
+}
+
+async function writeStoredFingerprint(db, fingerprint) {
+  await db.query(
+    `INSERT INTO "${SCHEMA_META_TABLE}" (chave, valor) VALUES (?, ?)
+     ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`,
+    { replacements: [SCHEMA_FINGERPRINT_KEY, fingerprint] },
+  );
+}
+
+async function allModelTablesExist(db) {
+  const tables = await db.getQueryInterface().showAllTables();
+  return Object.values(db.models).every((model) => hasTable(tables, model.getTableName()));
+}
+
 async function syncModels(db) {
   if (db.getDialect() !== "sqlite") {
     await db.sync({ alter: true });
     return;
   }
 
+  await recoverSqliteAlterBackupTables(db);
+
+  // O sync({ alter: true }) do SQLite reconstrói cada tabela (copiar → apagar →
+  // recriar → copiar de volta). Só é executado quando os modelos mudaram; as
+  // reparações abaixo só reconstroem quando detectam um problema na base.
+  const fingerprint = computeModelsFingerprint(db);
+  const needsAlter =
+    (await readStoredFingerprint(db)) !== fingerprint || !(await allModelTablesExist(db));
+
   await db.query("PRAGMA foreign_keys = OFF");
+  // Tudo numa única transacção: uma falha ou um encerramento a meio desfaz a
+  // reconstrução e nenhuma tabela fica vazia.
+  await db.query("BEGIN IMMEDIATE");
   try {
-    await dropSqliteAlterBackupTables(db);
-    // Drop partial UNIQUE indexes before sync. Sequelize's describeTable does not
-    // check the partial flag, so it marks status.unique=true for partial indexes.
-    // This causes changeColumn to generate a backup with status UNIQUE, which
-    // then fails on INSERT when multiple Fechado rows exist. The indexes are
-    // recreated by ensureSqliteOperationalOpenIndexes after sync completes.
-    await db.query(`DROP INDEX IF EXISTS "${DIA_OPERACIONAL_ONE_OPEN_INDEX}"`);
-    await db.query(`DROP INDEX IF EXISTS "${TURNO_OPERACIONAL_ONE_OPEN_INDEX}"`);
+    if (needsAlter) {
+      // Drop partial UNIQUE indexes before sync. Sequelize's describeTable does not
+      // check the partial flag, so it marks status.unique=true for partial indexes.
+      // This causes changeColumn to generate a backup with status UNIQUE, which
+      // then fails on INSERT when multiple Fechado rows exist. The indexes are
+      // recreated by ensureSqliteOperationalOpenIndexes after sync completes.
+      await db.query(`DROP INDEX IF EXISTS "${DIA_OPERACIONAL_ONE_OPEN_INDEX}"`);
+      await db.query(`DROP INDEX IF EXISTS "${TURNO_OPERACIONAL_ONE_OPEN_INDEX}"`);
+    }
     await normalizeOperationalTablesForSqliteAlter(db);
-    await normalizeOpcaoCatalogoTableForSqliteAlter(db);
+    await normalizeOpcaoCatalogoTableForSqliteAlter(db, { beforeAlter: needsAlter });
     await normalizePerfilPermissaoTableForSqliteAlter(db);
-    await db.sync({ alter: true });
+    if (needsAlter) {
+      await db.sync({ alter: true });
+      await writeStoredFingerprint(db, fingerprint);
+    }
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     await db.query("PRAGMA foreign_keys = ON");
   }
@@ -1372,6 +1464,66 @@ async function ensureSqliteProdutoColumns(db) {
   }
 }
 
+// Junta subcategorias repetidas na mesma categoria (mesmo nome ignorando acentos,
+// maiúsculas e espaços): os produtos passam para a subcategoria que fica.
+async function mergeDuplicateSubcategories(db) {
+  if (db.getDialect() !== "sqlite") return 0;
+  const tables = await db.getQueryInterface().showAllTables();
+  if (!hasTable(tables, "Subcategoria")) return 0;
+
+  const rows = await db.query(
+    'SELECT id, categoria_id, nome, ativo, descricao, imagem FROM "Subcategoria" ORDER BY id',
+    { type: db.QueryTypes.SELECT },
+  );
+  const groups = new Map();
+  for (const row of rows) {
+    const key = normalizeSubcategoryKey(row.categoria_id, row.nome);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const duplicated = [...groups.values()].filter((group) => group.length > 1);
+  if (!duplicated.length) return 0;
+
+  let removed = 0;
+  await db.query("BEGIN IMMEDIATE");
+  try {
+    for (const group of duplicated) {
+      const keep = group.find((row) => Number(row.ativo) !== 0) || group[0];
+      for (const dup of group) {
+        if (dup.id === keep.id) continue;
+        await db.query('UPDATE "Produtos" SET subcategoria_id = ? WHERE subcategoria_id = ?', {
+          replacements: [keep.id, dup.id],
+        });
+        if (!keep.descricao && dup.descricao) {
+          keep.descricao = dup.descricao;
+          await db.query('UPDATE "Subcategoria" SET descricao = ? WHERE id = ?', { replacements: [dup.descricao, keep.id] });
+        }
+        if (!keep.imagem && dup.imagem) {
+          keep.imagem = dup.imagem;
+          await db.query('UPDATE "Subcategoria" SET imagem = ? WHERE id = ?', { replacements: [dup.imagem, keep.id] });
+        }
+        await db.query('DELETE FROM "Subcategoria" WHERE id = ?', { replacements: [dup.id] });
+        removed += 1;
+      }
+    }
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    throw error;
+  }
+  console.log(`[syncDB] Subcategorias duplicadas unificadas: ${removed} removida(s) em ${duplicated.length} grupo(s).`);
+  return removed;
+}
+
+async function ensureSubcategoriaUniqueIndex(db) {
+  if (db.getDialect() !== "sqlite") return;
+  const tables = await db.getQueryInterface().showAllTables();
+  if (!hasTable(tables, "Subcategoria")) return;
+  await db.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "${SUBCATEGORIA_UNIQUE_INDEX}" ON "Subcategoria" (categoria_id, lower(trim(nome)))`,
+  );
+}
+
 async function syncDatabaseSchema(db) {
   await ensureSqliteVendasColumns(db);
   await ensureSqliteFinanceColumns(db);
@@ -1385,6 +1537,8 @@ async function syncDatabaseSchema(db) {
   await ensureVendasInvoiceIndex(db);
   await ensureSqliteOperationalOpenIndexes(db);
   await ensurePerfilPermissaoUniqueIndex(db);
+  await mergeDuplicateSubcategories(db);
+  await ensureSubcategoriaUniqueIndex(db);
   await seedPermissionsAndProfiles();
 }
 
