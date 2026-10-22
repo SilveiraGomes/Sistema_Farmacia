@@ -10,6 +10,7 @@ const { connectDB, syncDatabaseSchema, getModels } = require('../src/backend/dat
 const { verifyPassword, hashPassword } = require('../src/backend/security/passwords.js');
 const {
   ADMINISTRATOR_PROFILE,
+  AUTHENTICATED_BASELINE_PERMISSIONS,
   getEssentialAdminPermissions,
 } = require('../src/backend/services/permissionCatalog.js');
 const {
@@ -558,7 +559,7 @@ test('updateProfilePermissions replaces a non-administrator profile permission s
   await withServices(async ({ AuditoriaUsuario, Perfil, Usuario }) => {
     const actor = await getAdminUser(Usuario);
     const cashierProfile = await getProfileByName(Perfil, 'Caixa');
-    const nextPermissions = ['configuracoes.ver', 'dashboard.ver', 'vendas.ver'];
+    const nextPermissions = [...AUTHENTICATED_BASELINE_PERMISSIONS, 'dashboard.ver', 'vendas.ver'].sort();
 
     const profiles = await updateProfilePermissions({
       actorUserId: actor.id,
@@ -575,6 +576,33 @@ test('updateProfilePermissions replaces a non-administrator profile permission s
     });
     assert.equal(audit.ator_usuario_id, actor.id);
     assert.deepEqual(JSON.parse(audit.detalhes).permissoes, nextPermissions);
+  });
+});
+
+test('updateProfilePermissions lets the administrator grant any catalog permission to any profile', async () => {
+  await withServices(async ({ Perfil, Usuario }) => {
+    const actor = await getAdminUser(Usuario);
+    const pharmacist = await getProfileByName(Perfil, 'Farmaceutico');
+
+    const profiles = await updateProfilePermissions({
+      actorUserId: actor.id,
+      profileId: pharmacist.id,
+      permissionKeys: ['estoque.ver', 'estoque.editar', 'estoque.importar', 'estoque.custo'],
+    });
+    const updated = profiles.find((profile) => profile.id === pharmacist.id);
+    for (const key of ['estoque.editar', 'estoque.importar', 'estoque.custo']) {
+      assert.ok(updated.permissoes.includes(key), key);
+    }
+  });
+});
+
+test('listPermissions flags only the enforced baseline as fixed', async () => {
+  await withServices(async () => {
+    const permissions = await listPermissions();
+    const fixed = permissions.filter((permission) => permission.obrigatoria).map((permission) => permission.chave);
+
+    assert.deepEqual(fixed, [...AUTHENTICATED_BASELINE_PERMISSIONS]);
+    assert.equal(permissions.some((permission) => 'perfisExclusivos' in permission), false);
   });
 });
 

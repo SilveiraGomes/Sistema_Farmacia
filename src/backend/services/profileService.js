@@ -70,6 +70,8 @@ async function listPermissions() {
     modulo: permission.modulo,
     acao: permission.acao,
     descricao: permission.descricao,
+    // Garantida a todos os perfis activos: o editor mostra-a sempre marcada.
+    obrigatoria: AUTHENTICATED_BASELINE_PERMISSIONS.includes(permission.chave),
   }));
 }
 

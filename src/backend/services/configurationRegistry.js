@@ -74,6 +74,13 @@ const SETTING_DEFINITIONS = deepFreeze({
   'sales.finalConsumerLabel': {
     group: 'sales', type: 'text', defaultValue: 'Consumidor final',
   },
+  // Depois de finalizar: mostrar o documento, imprimir logo ou seguir para a venda seguinte.
+  'sales.afterSaleAction': {
+    group: 'sales',
+    type: 'enum',
+    values: ['mostrar', 'imprimir', 'continuar'],
+    defaultValue: 'mostrar',
+  },
   'stock.lowStockThreshold': { group: 'stock', type: 'number', min: 0, defaultValue: 25 },
   'stock.expiryAlertDays': { group: 'stock', type: 'number', min: 0, defaultValue: 30 },
   'alerts.dashboardEnabled': { group: 'alerts', type: 'boolean', defaultValue: true },

@@ -17,6 +17,7 @@ const CONFIGURATION_ERROR_CODES = Object.freeze({
 const DATABASE_MUTATION_QUEUES = new WeakMap();
 const MAX_RESERVATION_ATTEMPTS = 5;
 const RESERVATION_RETRY = Symbol('RESERVATION_RETRY');
+const MAX_SKIPPED_DOCUMENT_NUMBERS = 1000;
 const PROTECTED_FISCAL_FIELDS = Object.freeze(['validationNumber', 'softwareName']);
 
 const defaultProtectedFiscalEditAllowed = () =>
@@ -839,94 +840,129 @@ function createConfigurationService({
     return getSnapshot();
   });
 
-  const reserveNextDocumentNumber = ({ actorUserId, documentType } = {}) => serializeMutation(async () => {
-    const supported = CATALOG_DEFINITIONS.document_types.options
-      .some((option) => option.code === documentType);
-    if (!supported) throw validationError('Tipo de documento fiscal não suportado.');
-
-    const current = now();
-    if (!(current instanceof Date) || Number.isNaN(current.getTime())) {
-      throw validationError('Data atual inválida para a reserva fiscal.');
+  // Reserva o número seguinte dentro de `transaction`. `isTaken(numero, transaction)`
+  // permite saltar números já usados (ex.: série desfasada depois de um restauro),
+  // sem deixar falhas: só avança sobre números que já existem.
+  const reserveWithinTransaction = async (transaction, {
+    actorUserId, documentType, currentYear, isTaken,
+  }) => {
+    const key = 'documents.fiscal';
+    const row = await ConfiguracaoSistema.findOne({ where: { chave: key }, transaction });
+    if (!row) {
+      throw new ConfigurationError(
+        CONFIGURATION_ERROR_CODES.NOT_FOUND,
+        'Configuração fiscal não encontrada.',
+      );
     }
-    const currentYear = String(current.getFullYear()).slice(-2);
+    const parsed = parseSettingJson(key, row.valor_json);
+    if (!parsed.readable || !parsed.value || typeof parsed.value !== 'object'
+      || Array.isArray(parsed.value) || !parsed.value.series
+      || typeof parsed.value.series !== 'object' || Array.isArray(parsed.value.series)) {
+      throw new ConfigurationError(
+        CONFIGURATION_ERROR_CODES.CORRUPT_DATA,
+        'Configuração de séries fiscais inválida.',
+      );
+    }
 
-    for (let attempt = 1; attempt <= MAX_RESERVATION_ATTEMPTS; attempt += 1) {
-      try {
-        return await db.transaction(async (transaction) => {
-          const key = 'documents.fiscal';
-          const row = await ConfiguracaoSistema.findOne({ where: { chave: key }, transaction });
-          if (!row) {
-            throw new ConfigurationError(
-              CONFIGURATION_ERROR_CODES.NOT_FOUND,
-              'Configuração fiscal não encontrada.',
-            );
-          }
-          const parsed = parseSettingJson(key, row.valor_json);
-          if (!parsed.readable || !parsed.value || typeof parsed.value !== 'object'
-            || Array.isArray(parsed.value) || !parsed.value.series
-            || typeof parsed.value.series !== 'object' || Array.isArray(parsed.value.series)) {
-            throw new ConfigurationError(
-              CONFIGURATION_ERROR_CODES.CORRUPT_DATA,
-              'Configuração de séries fiscais inválida.',
-            );
-          }
+    const hasStoredSeries = Object.prototype.hasOwnProperty.call(
+      parsed.value.series,
+      documentType,
+    );
+    const storedSeries = validateSeries(
+      documentType,
+      hasStoredSeries
+        ? parsed.value.series[documentType]
+        : defaultSeries(documentType, currentYear),
+    );
+    let series = storedSeries.year === currentYear
+      ? storedSeries
+      : { ...storedSeries, year: currentYear, nextNumber: 1 };
+    const format = (value) => `${value.prefix}${String(value.nextNumber).padStart(value.padding, '0')}/${value.year}`;
+    let reservedNumber = format(series);
+    let skipped = 0;
+    while (typeof isTaken === 'function' && await isTaken(reservedNumber, transaction)) {
+      skipped += 1;
+      if (skipped > MAX_SKIPPED_DOCUMENT_NUMBERS) throw conflictError();
+      series = { ...series, nextNumber: series.nextNumber + 1 };
+      reservedNumber = format(series);
+    }
+    const newSeries = { ...series, nextNumber: series.nextNumber + 1 };
+    const newValue = jsonClone(parsed.value);
+    newValue.series[documentType] = newSeries;
 
-          const hasStoredSeries = Object.prototype.hasOwnProperty.call(
-            parsed.value.series,
-            documentType,
-          );
-          const storedSeries = validateSeries(
-            documentType,
-            hasStoredSeries
-              ? parsed.value.series[documentType]
-              : defaultSeries(documentType, currentYear),
-          );
-          const series = storedSeries.year === currentYear
-            ? storedSeries
-            : { ...storedSeries, year: currentYear, nextNumber: 1 };
-          const reservedNumber = `${series.prefix}${String(series.nextNumber).padStart(series.padding, '0')}/${series.year}`;
-          const newSeries = { ...series, nextNumber: series.nextNumber + 1 };
-          const newValue = jsonClone(parsed.value);
-          newValue.series[documentType] = newSeries;
+    const [updated] = await ConfiguracaoSistema.update({
+      valor_json: JSON.stringify(newValue),
+      versao: row.versao + 1,
+      atualizado_por_usuario_id: actorUserId ?? null,
+    }, {
+      where: { id: row.id, versao: row.versao },
+      transaction,
+    });
+    if (updated !== 1) throw RESERVATION_RETRY;
 
-          const [updated] = await ConfiguracaoSistema.update({
-            valor_json: JSON.stringify(newValue),
-            versao: row.versao + 1,
-            atualizado_por_usuario_id: actorUserId ?? null,
-          }, {
-            where: { id: row.id, versao: row.versao },
-            transaction,
-          });
-          if (updated !== 1) throw RESERVATION_RETRY;
+    await AuditoriaConfiguracao.create({
+      ator_usuario_id: actorUserId ?? null,
+      tipo_alvo: 'document-number',
+      alvo_chave: documentType,
+      acao: 'reserve',
+      valor_anterior_json: JSON.stringify({
+        configVersion: row.versao,
+        series: storedSeries,
+      }),
+      valor_novo_json: JSON.stringify({
+        configVersion: row.versao + 1,
+        number: reservedNumber,
+        series: newSeries,
+        ...(skipped ? { skippedTakenNumbers: skipped } : {}),
+      }),
+    }, { transaction });
+    return reservedNumber;
+  };
 
-          await AuditoriaConfiguracao.create({
-            ator_usuario_id: actorUserId ?? null,
-            tipo_alvo: 'document-number',
-            alvo_chave: documentType,
-            acao: 'reserve',
-            valor_anterior_json: JSON.stringify({
-              configVersion: row.versao,
-              series: storedSeries,
-            }),
-            valor_novo_json: JSON.stringify({
-              configVersion: row.versao + 1,
-              number: reservedNumber,
-              series: newSeries,
-            }),
-          }, { transaction });
-          return reservedNumber;
-        });
-      } catch (error) {
-        const retryable = error === RESERVATION_RETRY
-          || error?.original?.code === 'SQLITE_BUSY'
-          || error?.parent?.code === 'SQLITE_BUSY';
-        if (!retryable) throw error;
-        if (attempt === MAX_RESERVATION_ATTEMPTS) throw conflictError();
+  // Com `transaction`, a reserva faz parte da operação de quem chama (ex.: gravar
+  // a venda): se a operação falhar, o número não é consumido. Quem chama já
+  // serializa a escrita, por isso aqui não se volta a entrar na fila.
+  const reserveNextDocumentNumber = ({
+    actorUserId, documentType, transaction, isTaken,
+  } = {}) => {
+    const reserve = async () => {
+      const supported = CATALOG_DEFINITIONS.document_types.options
+        .some((option) => option.code === documentType);
+      if (!supported) throw validationError('Tipo de documento fiscal não suportado.');
+
+      const current = now();
+      if (!(current instanceof Date) || Number.isNaN(current.getTime())) {
+        throw validationError('Data atual inválida para a reserva fiscal.');
       }
-    }
+      const options = {
+        actorUserId, documentType, currentYear: String(current.getFullYear()).slice(-2), isTaken,
+      };
 
-    throw conflictError();
-  });
+      if (transaction) {
+        try {
+          return await reserveWithinTransaction(transaction, options);
+        } catch (error) {
+          if (error === RESERVATION_RETRY) throw conflictError();
+          throw error;
+        }
+      }
+
+      for (let attempt = 1; attempt <= MAX_RESERVATION_ATTEMPTS; attempt += 1) {
+        try {
+          return await db.transaction((ownTransaction) => reserveWithinTransaction(ownTransaction, options));
+        } catch (error) {
+          const retryable = error === RESERVATION_RETRY
+            || error?.original?.code === 'SQLITE_BUSY'
+            || error?.parent?.code === 'SQLITE_BUSY';
+          if (!retryable) throw error;
+          if (attempt === MAX_RESERVATION_ATTEMPTS) throw conflictError();
+        }
+      }
+
+      throw conflictError();
+    };
+    return transaction ? reserve() : serializeMutation(reserve);
+  };
 
   return {
     seedDefaults,
@@ -945,6 +981,7 @@ function createConfigurationService({
 
 module.exports = {
   CONFIGURATION_ERROR_CODES,
+  serializeDatabaseMutation,
   ConfigurationError,
   assertEditableCatalog,
   createConfigurationService,

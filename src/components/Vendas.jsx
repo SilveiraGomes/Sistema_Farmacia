@@ -37,6 +37,7 @@ import {
   findProductByExactBarcode,
   removeCartItem,
   resumeHeldSale,
+  suggestCashAmounts,
 } from '../data/salesWorkflow.mjs';
 import {
   canCancelDocument,
@@ -106,10 +107,24 @@ function seriesAfterReservedNumber(reserved, prefix) {
   return { prefix, nextNumber: Number(match[1]) + 1, padding: match[1].length, year: match[2] };
 }
 
+function buildSaleViewModel(document, snapshot) {
+  return buildInvoiceA4ViewModel({
+    document,
+    ...buildDocumentSettingsFromSnapshot(snapshot),
+    printedBy: document.userName || 'Vendedor',
+  });
+}
+
+function isTypingTarget(target) {
+  return target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+}
+
 function Vendas() {
   const operation = useOperation();
   const { snapshot } = useSettings();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  // Mesmas permissões que o backend aceita em vendas.cancelDocument.
+  const canCancelDocuments = hasPermission('vendas.cancelar') || hasPermission('documentos.anular');
   const catalogPaymentMethods = useCatalog(CATALOG_KEYS.PAYMENT_METHODS);
   const paymentMethods = catalogPaymentMethods.map((option) => ({
     id: option.code,
@@ -119,6 +134,11 @@ function Vendas() {
   const defaultPaymentMethod = useSetting('sales.defaultPaymentMethod', 'dinheiro');
   const defaultTaxRate = useSetting('sales.defaultTaxRate', 0);
   const maximumDiscount = useSetting('sales.maxDiscount', 0);
+  const afterSaleAction = useSetting('sales.afterSaleAction', 'mostrar');
+  const searchInputRef = useRef(null);
+  const finalizingRef = useRef(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [pdvNotice, setPdvNotice] = useState(null);
 
   const [allProducts, setAllProducts] = useState([]);
   const [allClients, setAllClients] = useState([]);
@@ -137,30 +157,37 @@ function Vendas() {
   const [received, setReceived] = useState('');
   const [finalizedDocument, setFinalizedDocument] = useState(null);
   const [saleError, setSaleError] = useState('');
+  const [pdvLoadError, setPdvLoadError] = useState('');
   const [recentSaleDocuments, setRecentSaleDocuments] = useState([]);
   const [pendingPayment, setPendingPayment] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [docType, setDocType] = useState(DOCUMENT_TYPES.INVOICE_RECEIPT);
 
   const loadPdvData = useCallback(async () => {
-    try {
-      const [products, clients, categories] = await Promise.all([
-        request('estoque.listProducts', {}),
-        request('clientes.list', {}),
-        request('estoque.listCategories'),
-      ]);
-      setAllProducts(products.map(mapProductForSale));
-      setAllClients(clients.map(mapClientForSale));
-      const categoriesWithCount = categories.map((cat) => ({
+    // Cada lista carrega de forma independente: uma falha (ex.: falta de
+    // permissão para clientes) não deve deixar o PDV sem produtos.
+    const [productsResult, clientsResult, categoriesResult] = await Promise.allSettled([
+      request('estoque.listProducts', {}),
+      request('clientes.list', {}),
+      request('estoque.listCategories'),
+    ]);
+    const products = productsResult.status === 'fulfilled' ? productsResult.value : [];
+    const failures = [productsResult, clientsResult, categoriesResult].filter((result) => result.status === 'rejected');
+    failures.forEach((result) => console.error('Erro ao carregar dados PDV:', result.reason));
+
+    setAllProducts(products.map(mapProductForSale));
+    if (clientsResult.status === 'fulfilled') setAllClients(clientsResult.value.map(mapClientForSale));
+    if (categoriesResult.status === 'fulfilled') {
+      setAllCategories(categoriesResult.value.map((cat) => ({
         id: cat.id,
         name: cat.nome,
         imagem: cat.imagem || null,
         count: products.filter((p) => p.categoria === cat.nome).length,
-      }));
-      setAllCategories(categoriesWithCount);
-    } catch (err) {
-      console.error('Erro ao carregar dados PDV:', err);
+      })));
     }
+    setPdvLoadError(productsResult.status === 'rejected'
+      ? `Não foi possível carregar os produtos: ${productsResult.reason?.message || 'erro desconhecido'}`
+      : '');
   }, []);
 
   const loadRecentDocuments = useCallback(async () => {
@@ -181,6 +208,19 @@ function Vendas() {
       heldSalesReady.current = true;
     }).catch(() => { heldSalesReady.current = true; });
   }, [loadPdvData, loadRecentDocuments]);
+
+  // Avisos curtos (stock, documento emitido) que não interrompem o atendimento.
+  useEffect(() => {
+    if (!pdvNotice) return undefined;
+    const timer = setTimeout(() => setPdvNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [pdvNotice]);
+
+  // A pesquisa fica pronta para o leitor de código de barras.
+  const focusSearch = useCallback(() => {
+    searchInputRef.current?.focus();
+  }, []);
+  useEffect(() => { focusSearch(); }, [focusSearch]);
 
   useEffect(() => {
     if (!heldSalesReady.current) return;
@@ -225,6 +265,28 @@ function Vendas() {
     received,
     taxRate: defaultTaxRate,
   });
+
+  // Proformas não abatem stock; os restantes documentos não podem exceder o disponível.
+  const enforceStock = docType !== DOCUMENT_TYPES.PROFORMA;
+
+  function exceedsStock(product, nextQuantity) {
+    const available = Number(product.stock) || 0;
+    if (!enforceStock || nextQuantity <= available) return false;
+    setPdvNotice({
+      tone: 'warning',
+      text: available > 0
+        ? `Stock disponível de ${product.name}: ${available}.`
+        : `${product.name} está sem stock.`,
+    });
+    return true;
+  }
+
+  function addProductToCart(product) {
+    if (!operation.canOperate) return;
+    const inCart = cart.find((item) => item.id === product.id)?.quantity || 0;
+    if (exceedsStock(product, inCart + 1)) return;
+    setCart((current) => addCartItem(current, product));
+  }
 
   function holdSale() {
     if (!operation.canOperate) return;
@@ -286,12 +348,22 @@ function Vendas() {
     const scannedProduct = findProductByExactBarcode(allProducts, value);
 
     if (scannedProduct && operation.canOperate) {
-      setCart((current) => addCartItem(current, scannedProduct));
+      addProductToCart(scannedProduct);
       setProductQuery('');
       return;
     }
 
     setProductQuery(value);
+  }
+
+  // Enter na pesquisa adiciona o produto quando só há um resultado.
+  function handleProductSearchKeyDown(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (visibleProducts.length === 1) {
+      addProductToCart(visibleProducts[0]);
+      setProductQuery('');
+    }
   }
 
   function handleDocTypeChange(nextDocType) {
@@ -312,13 +384,10 @@ function Vendas() {
 
     setSaleError('');
     try {
-      // Sem número de recurso: um número inventado podia repetir a série fiscal.
-      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota-credito' });
-
+      // O número da nota de crédito é reservado no backend, na mesma transacção.
       const { cancelledDoc, creditNote } = await request('vendas.cancelDocument', {
         venda_id: document.vendaId,
         reason,
-        creditNoteNumber: reservedNc,
       });
 
       setRecentSaleDocuments((current) =>
@@ -338,6 +407,7 @@ function Vendas() {
     if (!isPaymentMethodAllowedForDocument(docType, mode)) return;
 
     if (mode === 'dinheiro') {
+      searchInputRef.current?.blur();
       setShowCheckout(true);
       setReceived('');
       return;
@@ -349,9 +419,31 @@ function Vendas() {
     });
   }
 
+  // Depois de emitir: mostrar, imprimir logo ou seguir (Configurações › Vendas).
+  async function handleIssuedDocument(document) {
+    const label = `${documentTypeLabels[document.type] || 'Documento'} ${document.number}`;
+    if (afterSaleAction === 'continuar') {
+      setPdvNotice({ tone: 'success', text: `${label} emitida.` });
+      return;
+    }
+    if (afterSaleAction === 'imprimir') {
+      try {
+        await request('invoice.print', { viewModel: buildSaleViewModel(document, snapshot) });
+        setPdvNotice({ tone: 'success', text: `${label} emitida e enviada para impressão.` });
+      } catch (cause) {
+        setPdvNotice({ tone: 'warning', text: `${label} emitida, mas a impressão falhou: ${cause?.message || 'erro desconhecido'}.` });
+        setFinalizedDocument(document);
+      }
+      return;
+    }
+    setFinalizedDocument(document);
+  }
+
   async function finalizeSale(paymentMethod = defaultPaymentMethod, checkoutData = checkout) {
     if (!operation.canOperate) return;
     if (!cart.length || !checkoutData.canFinalize) return;
+    // Evita duplicar a venda com duplo clique ou Enter repetido.
+    if (finalizingRef.current) return;
     if (!isPaymentMethodAllowedForDocument(docType, paymentMethod)) {
       setSaleError(docType === DOCUMENT_TYPES.CREDIT
         ? 'Documento do tipo Crédito deve usar pagamento Crédito.'
@@ -363,13 +455,9 @@ function Vendas() {
     const isProforma = docType === DOCUMENT_TYPES.PROFORMA;
     const ipcDocType = SALE_DOCUMENT_SERIES[docType]?.key ?? 'factura_recibo';
 
+    finalizingRef.current = true;
+    setIsFinalizing(true);
     try {
-      const numero_factura = await request('configuration.document.reserveNumber', { documentType: ipcDocType });
-      const seriesPrefix = snapshot?.settings?.documents?.fiscal?.value?.series?.[ipcDocType]?.prefix
-        || SALE_DOCUMENT_SERIES[docType]?.prefix;
-      const nextSeries = seriesAfterReservedNumber(numero_factura, seriesPrefix);
-      if (nextSeries) setReservedSeries((current) => ({ ...current, [ipcDocType]: nextSeries }));
-
       const saleItems = cart.map((item) => ({
         produto_id: item.id,
         nome: item.name,
@@ -377,8 +465,9 @@ function Vendas() {
         preco_unitario: Number(item.price) || 0,
       }));
 
+      // O número é reservado no backend na mesma transacção da venda: se a
+      // venda falhar (ex.: stock), nenhum número da série é consumido.
       const document = await request('vendas.create', {
-        numero_factura,
         docType: ipcDocType,
         items: saleItems,
         cliente_id: selectedClient?.id !== 'FINAL_CONSUMER' ? selectedClient?.id : null,
@@ -391,7 +480,11 @@ function Vendas() {
         troco: checkoutData.change,
       });
 
-      setFinalizedDocument(document);
+      const seriesPrefix = snapshot?.settings?.documents?.fiscal?.value?.series?.[ipcDocType]?.prefix
+        || SALE_DOCUMENT_SERIES[docType]?.prefix;
+      const nextSeries = seriesAfterReservedNumber(document.number, seriesPrefix);
+      if (nextSeries) setReservedSeries((current) => ({ ...current, [ipcDocType]: nextSeries }));
+
       if (!isProforma) {
         setRecentSaleDocuments((current) => [document, ...current].slice(0, RECENT_DOCUMENTS_LIMIT));
         setCart([]);
@@ -400,11 +493,45 @@ function Vendas() {
         setSelectedClient(DEFAULT_SALE_CLIENT);
         setShowCheckout(false);
         setPendingPayment(null);
+        loadPdvData(); // stock actualizado para a venda seguinte
       }
+      await handleIssuedDocument(document);
     } catch (cause) {
       setSaleError(cause?.message || 'Nao foi possivel registar a venda.');
+    } finally {
+      finalizingRef.current = false;
+      setIsFinalizing(false);
+      focusSearch();
     }
   }
+
+  function payWithDefaultMethod() {
+    const method = isPaymentMethodAllowedForDocument(docType, defaultPaymentMethod)
+      ? defaultPaymentMethod
+      : paymentMethods.find((option) => isPaymentMethodAllowedForDocument(docType, option.id))?.id;
+    if (method) choosePaymentMethod(method);
+  }
+
+  // Atalhos do PDV: F2 pesquisa, F4 cliente, F8 em espera, F9 pagar; Esc fecha diálogos.
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === 'Escape') {
+        if (pendingPayment) setPendingPayment(null);
+        else if (showClientPopup) closeClientPicker();
+        return;
+      }
+      const busy = showClientPopup || pendingPayment || finalizedDocument || cancelTarget || saleError
+        || showCheckout || window.document.querySelector('.numpad-overlay');
+      if (busy) return;
+      const actions = { F2: focusSearch, F4: openClientPicker, F8: holdSale, F9: payWithDefaultMethod };
+      const action = actions[event.key];
+      if (!action) return;
+      event.preventDefault();
+      action();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   function rotateCategories(direction) {
     const len = allCategories.length || 1;
@@ -427,6 +554,11 @@ function Vendas() {
         {!operation.canOperate ? (
           <div className="operation-blocked-banner sales-operation-block">
             {operation.message || 'Abra o dia e o turno antes de vender.'}
+          </div>
+        ) : null}
+        {pdvLoadError ? (
+          <div className="operation-blocked-banner sales-operation-block" role="alert">
+            {pdvLoadError}
           </div>
         ) : null}
 
@@ -468,30 +600,41 @@ function Vendas() {
           <div className="product-toolbar">
             <Barcode size={28} />
             <input
+              ref={searchInputRef}
               aria-label="Buscar produto"
-              placeholder="Buscar produto"
+              placeholder="Produto ou código de barras (F2)"
               value={productQuery}
               onChange={(event) => handleProductQueryChange(event.target.value)}
+              onKeyDown={handleProductSearchKeyDown}
             />
             <Search size={18} />
           </div>
+          {pdvNotice ? (
+            <div className={`pdv-notice ${pdvNotice.tone}`} role="status">{pdvNotice.text}</div>
+          ) : null}
 
           <div className="product-grid">
-            {visibleProducts.map((product) => (
-              <button
-                key={product.id}
-                className="product-card"
-                type="button"
-                disabled={!operation.canOperate}
-                onClick={() => setCart((current) => addCartItem(current, product))}
-              >
-                {product.imagem
-                  ? <img src={product.imagem} alt={product.name} className="product-card-img" />
-                  : <ProductIllustration tone={product.imageTone} />}
-                <strong>{product.name}</strong>
-                <span>{formatKwanza(product.price).replace('KZ ', '')}</span>
-              </button>
-            ))}
+            {visibleProducts.map((product) => {
+              const outOfStock = enforceStock && Number(product.stock) <= 0;
+              return (
+                <button
+                  key={product.id}
+                  className={outOfStock ? 'product-card out-of-stock' : 'product-card'}
+                  type="button"
+                  disabled={!operation.canOperate}
+                  onClick={() => addProductToCart(product)}
+                >
+                  <span className={`product-stock${Number(product.stock) <= 0 ? ' empty' : ''}`}>
+                    {Number(product.stock) > 0 ? `Stock ${product.stock}` : 'Sem stock'}
+                  </span>
+                  {product.imagem
+                    ? <img src={product.imagem} alt={product.name} className="product-card-img" />
+                    : <ProductIllustration tone={product.imageTone} />}
+                  <strong>{product.name}</strong>
+                  <span>{formatKwanza(product.price).replace('KZ ', '')}</span>
+                </button>
+              );
+            })}
             {!visibleProducts.length && (
               <div className="empty-state product-empty">
                 <Package size={28} />
@@ -505,10 +648,12 @@ function Vendas() {
           <button type="button" onClick={holdSale} className="soft-button" disabled={!operation.canOperate}>
             <Wallet size={18} />
             Colocar em Espera
+            <kbd>F8</kbd>
           </button>
           <button type="button" onClick={openClientPicker} className="soft-button">
             <UserRound size={18} />
             Cliente
+            <kbd>F4</kbd>
           </button>
         </div>
 
@@ -520,9 +665,10 @@ function Vendas() {
             checkout={checkout}
             received={received}
             setReceived={setReceived}
-            onBack={() => setShowCheckout(false)}
+            onBack={() => { setShowCheckout(false); focusSearch(); }}
             onFinalize={() => finalizeSale('dinheiro', checkout)}
             canOperate={operation.canOperate}
+            isFinalizing={isFinalizing}
           />
         ) : (
           <InvoiceDetails
@@ -533,20 +679,25 @@ function Vendas() {
             previewDocNumber={previewDocNumber}
             onDocTypeChange={handleDocTypeChange}
             onClearCart={() => setCart([])}
-            onSetQuantity={(itemId, qty) =>
-              setCart((current) => current.map((i) => i.id === itemId ? { ...i, quantity: Math.max(1, qty) } : i))
-            }
+            onSetQuantity={(itemId, qty) => {
+              const item = cart.find((i) => i.id === itemId);
+              if (item && exceedsStock(item, Math.max(1, qty))) return;
+              setCart((current) => current.map((i) => i.id === itemId ? { ...i, quantity: Math.max(1, qty) } : i));
+            }}
             onRemoveItem={async (item) => {
               if (await confirmDelete(`o produto ${item.name} da factura`)) {
                 setCart((current) => removeCartItem(current, item.id));
               }
             }}
             onChangeQuantity={(itemId, direction) => {
+              const item = cart.find((i) => i.id === itemId);
+              if (item && direction > 0 && exceedsStock(item, item.quantity + direction)) return;
               setCart((current) => changeCartQuantity(current, itemId, direction));
             }}
             onClient={openClientPicker}
             onPaymentMethod={choosePaymentMethod}
             paymentMethods={paymentMethods}
+            defaultPaymentLabel={paymentMethods.find((method) => method.id === defaultPaymentMethod)?.label}
             canOperate={operation.canOperate}
             operationMessage={operation.message}
           />
@@ -558,11 +709,15 @@ function Vendas() {
       <RecentSaleDocumentsTable
         rows={recentSaleDocuments}
         onOpenDocument={(document) => setFinalizedDocument(document)}
-        onCancelDocument={(document) => setCancelTarget(document)}
+        onCancelDocument={canCancelDocuments ? (document) => setCancelTarget(document) : null}
       />
 
       {finalizedDocument ? (
-        <FinalizedSalePreview document={finalizedDocument} snapshot={snapshot} onClose={() => setFinalizedDocument(null)} />
+        <FinalizedSalePreview
+          document={finalizedDocument}
+          snapshot={snapshot}
+          onClose={() => { setFinalizedDocument(null); focusSearch(); }}
+        />
       ) : null}
 
       {pendingPayment && (
@@ -580,13 +735,15 @@ function Vendas() {
               <button
                 type="button"
                 className="primary-button"
+                autoFocus
+                disabled={isFinalizing}
                 onClick={() => {
                   const { mode, checkoutData } = pendingPayment;
                   setPendingPayment(null);
                   finalizeSale(mode, checkoutData);
                 }}
               >
-                Finalizar
+                Finalizar <kbd>Enter</kbd>
               </button>
             </div>
           </div>
@@ -615,6 +772,13 @@ function Vendas() {
                 placeholder="Pesquisar cliente por nome, NIF ou telefone"
                 value={clientQuery}
                 onChange={(event) => setClientQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' || !visibleClients.length) return;
+                  event.preventDefault();
+                  setSelectedClient(visibleClients[0]);
+                  closeClientPicker();
+                  focusSearch();
+                }}
                 autoFocus
               />
             </div>
@@ -652,18 +816,26 @@ function Vendas() {
 
 function FinalizedSalePreview({ document, snapshot, onClose }) {
   const [printBusy, setPrintBusy] = React.useState(false);
-  const documentSettings = buildDocumentSettingsFromSnapshot(snapshot);
-  const viewModel = buildInvoiceA4ViewModel({
-    document,
-    ...documentSettings,
-    printedBy: document.userName || 'Vendedor',
-  });
+  const viewModel = buildSaleViewModel(document, snapshot);
 
   async function handlePrintA4() {
     if (printBusy) return;
     setPrintBusy(true);
     try { await request('invoice.print', { viewModel }); } finally { setPrintBusy(false); }
   }
+
+  // Enter imprime, Esc fecha: o operador não precisa do rato entre clientes.
+  React.useEffect(() => {
+    function onKey(event) {
+      if (event.key === 'Escape') onClose();
+      else if (event.key === 'Enter' && !isTypingTarget(event.target)) {
+        event.preventDefault();
+        handlePrintA4();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   async function handleSavePdf() {
     if (printBusy) return;
@@ -680,7 +852,7 @@ function FinalizedSalePreview({ document, snapshot, onClose }) {
             <button type="button" className="icon-button" aria-label="Salvar PDF" title="Salvar PDF" onClick={handleSavePdf} disabled={printBusy}>
               <FileDown size={20} />
             </button>
-            <button type="button" className="icon-button" aria-label="Imprimir factura" title="Imprimir" onClick={handlePrintA4} disabled={printBusy}>
+            <button type="button" className="icon-button" aria-label="Imprimir factura" title="Imprimir (Enter)" onClick={handlePrintA4} disabled={printBusy}>
               <Printer size={20} />
             </button>
             <button type="button" className="icon-button" aria-label="Fechar visualizacao" onClick={onClose}>x</button>
@@ -716,6 +888,7 @@ function InvoiceDetails({
   canOperate,
   operationMessage,
   paymentMethods,
+  defaultPaymentLabel,
 }) {
   const [numpadTarget, setNumpadTarget] = React.useState(null);
   const currentDocLabel = DOC_TYPE_OPTIONS.find(d => d.id === docType)?.label ?? 'Factura';
@@ -822,6 +995,9 @@ function InvoiceDetails({
             </button>
           ))}
         </div>
+        {defaultPaymentLabel ? (
+          <p className="payment-shortcut-hint"><kbd>F9</kbd> pagar com {defaultPaymentLabel}</p>
+        ) : null}
       </div>
       {numpadTarget && (
         <NumpadDialog
@@ -985,7 +1161,7 @@ function RecentSaleDocumentsTable({ rows, onOpenDocument, onCancelDocument }) {
         <tbody>
           {rows.map((document) => {
             const statusClass = DOC_STATUS_CLASS[document.status] || 'issued';
-            const cancellable = canCancelDocument(document);
+            const cancellable = Boolean(onCancelDocument) && canCancelDocument(document);
             return (
             <tr key={document.id || document.number}>
               <td>{document.number}</td>
@@ -1038,10 +1214,31 @@ function CheckoutPanel({
   onBack,
   onFinalize,
   canOperate,
+  isFinalizing = false,
 }) {
+  const quickAmounts = suggestCashAmounts(checkout.total);
+  const canFinalize = canOperate && checkout.canFinalize && !isFinalizing;
+
   function pressKey(key) {
     setReceived((current) => appendReceivedDigit(current, key));
   }
+
+  // Teclado físico: dígitos, Backspace, Delete (limpar), Enter (finalizar), Esc (voltar).
+  React.useEffect(() => {
+    function onKey(event) {
+      if (isTypingTarget(event.target)) return;
+      if (/^[0-9]$/.test(event.key)) pressKey(event.key);
+      else if (event.key === 'Backspace') pressKey('backspace');
+      else if (event.key === 'Delete') pressKey('clear');
+      else if (event.key === 'Escape') onBack();
+      else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (canFinalize) onFinalize();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   return (
     <div className="checkout-panel">
@@ -1067,6 +1264,15 @@ function CheckoutPanel({
         <div><span>Troco</span><strong>{formatKwanza(checkout.change)}</strong></div>
       </div>
 
+      <div className="cash-quick-amounts" aria-label="Valores rápidos">
+        <button type="button" onClick={() => setReceived(String(checkout.total))}>Exacto</button>
+        {quickAmounts.map((amount) => (
+          <button type="button" key={amount} onClick={() => setReceived(String(amount))}>
+            {formatKwanza(amount).replace('KZ ', '')}
+          </button>
+        ))}
+      </div>
+
       <div className="cash-keypad" aria-label="Teclado numerico para valor recebido">
         {cashKeypad.map((key) => (
           <button type="button" key={key} onClick={() => pressKey(key)}>
@@ -1075,11 +1281,12 @@ function CheckoutPanel({
         ))}
       </div>
 
-      <button type="button" className="checkout-finalize" disabled={!canOperate || !checkout.canFinalize} onClick={onFinalize}>
+      <button type="button" className="checkout-finalize" disabled={!canFinalize} onClick={onFinalize}>
         <Banknote size={22} />
-        <span>Finalizar</span>
+        <span>{isFinalizing ? 'A registar...' : 'Finalizar'}</span>
         <CheckCircle2 size={22} />
       </button>
+      <p className="checkout-shortcut-hint"><kbd>Enter</kbd> finalizar · <kbd>Esc</kbd> voltar</p>
     </div>
   );
 }

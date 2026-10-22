@@ -189,7 +189,7 @@ function App() {
   const currentScreen = useMemo(() => {
     switch (activeView) {
       case "dashboard":
-        return <Dashboard />;
+        return <Dashboard onNavigate={setCurrentView} />;
       case 'operacao':
         return <Operacao />;
       case "vendas":

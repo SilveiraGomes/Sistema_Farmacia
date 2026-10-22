@@ -706,20 +706,26 @@ function PermissionsModal({
               {Object.entries(permissionsByModule).map(([moduleName, modulePermissions]) => (
                 <section key={moduleName} className="permission-group">
                   <h3>{moduleName}</h3>
-                  {modulePermissions.map((permission) => (
-                    <label key={permission.chave} className="permission-check">
-                      <input
-                        type="checkbox"
-                        checked={selectedPermissionKeys.includes(permission.chave)}
-                        onChange={() => onTogglePermission(permission.chave)}
-                        disabled={isSubmitting}
-                      />
-                      <span>
-                        <strong>{permission.descricao || permission.chave}</strong>
-                        <small>{permission.chave}</small>
-                      </span>
-                    </label>
-                  ))}
+                  {modulePermissions.map((permission) => {
+                    const locked = permission.obrigatoria && selectedProfile?.ativo !== false;
+                    return (
+                      <label key={permission.chave} className="permission-check">
+                        <input
+                          type="checkbox"
+                          checked={locked || selectedPermissionKeys.includes(permission.chave)}
+                          onChange={() => onTogglePermission(permission.chave)}
+                          disabled={isSubmitting || locked}
+                        />
+                        <span>
+                          <strong>{permission.descricao || permission.chave}</strong>
+                          <small>
+                            {permission.chave}
+                            {locked ? ' · todos os perfis' : ''}
+                          </small>
+                        </span>
+                      </label>
+                    );
+                  })}
                 </section>
               ))}
             </div>

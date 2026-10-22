@@ -1,5 +1,21 @@
 const ADMINISTRATOR_PROFILE = 'Administrador';
 const AUTHENTICATED_BASELINE_PERMISSIONS = Object.freeze(['configuracoes.ver']);
+// Predefinição de todos os perfis de sistema: abrir o dia e o turno (e fechar o
+// próprio turno). São permissões normais — o administrador pode alterá-las.
+const OPERATION_OPENING_PERMISSIONS = Object.freeze([
+  'operacao.ver',
+  'operacao.abrir_dia',
+  'operacao.abrir_turno',
+  'operacao.fechar_turno',
+]);
+// Permissões cujas predefinições mudaram na 1.0.6; a migração alinha os perfis
+// de sistema já existentes com o catálogo (os perfis continuam editáveis).
+const PERMISSIONS_REVISED_IN_1_0_6 = Object.freeze([
+  ...OPERATION_OPENING_PERMISSIONS,
+  'estoque.editar',
+  'estoque.importar',
+  'estoque.custo',
+]);
 
 function freezeProfile(profile) {
   return Object.freeze({
@@ -58,6 +74,7 @@ const PERMISSIONS = Object.freeze([
   { chave: 'compras.cancelar', modulo: 'Compras', acao: 'cancelar', descricao: 'Cancelar encomendas de compra' },
   { chave: 'estoque.ajustar', modulo: 'Estoque', acao: 'ajustar', descricao: 'Ajustar quantidades de estoque manualmente' },
   { chave: 'estoque.preco', modulo: 'Estoque', acao: 'preco', descricao: 'Actualizar precos de produtos' },
+  { chave: 'estoque.custo', modulo: 'Estoque', acao: 'custo', descricao: 'Ver preco de custo dos produtos' },
 ].map((permission) => Object.freeze({ ...permission })));
 
 const ALL_PERMISSION_KEYS = Object.freeze(PERMISSIONS.map((permission) => permission.chave));
@@ -75,15 +92,13 @@ const DEFAULT_PROFILES = Object.freeze([
     sistema: true,
     permissoes: [
       'dashboard.ver',
-      'operacao.ver',
-      'operacao.abrir_turno',
-      'operacao.fechar_turno',
+      ...OPERATION_OPENING_PERMISSIONS,
       'vendas.ver',
       'vendas.criar',
       'vendas.desconto',
       'estoque.ver',
       'estoque.criar',
-      'estoque.editar',
+      'estoque.custo',
       'clientes.ver',
       'clientes.criar',
       'clientes.editar',
@@ -100,9 +115,7 @@ const DEFAULT_PROFILES = Object.freeze([
     sistema: true,
     permissoes: [
       'dashboard.ver',
-      'operacao.ver',
-      'operacao.abrir_turno',
-      'operacao.fechar_turno',
+      ...OPERATION_OPENING_PERMISSIONS,
       'vendas.ver',
       'vendas.criar',
       'clientes.ver',
@@ -118,7 +131,7 @@ const DEFAULT_PROFILES = Object.freeze([
     sistema: true,
     permissoes: [
       'dashboard.ver',
-      'operacao.ver',
+      ...OPERATION_OPENING_PERMISSIONS,
       'estoque.ver',
       'estoque.criar',
       'estoque.editar',
@@ -126,6 +139,7 @@ const DEFAULT_PROFILES = Object.freeze([
       'estoque.importar',
       'estoque.ajustar',
       'estoque.preco',
+      'estoque.custo',
       'fornecedores.ver',
       'fornecedores.criar',
       'fornecedores.editar',
@@ -155,6 +169,8 @@ function getEssentialAdminPermissions() {
 module.exports = {
   ADMINISTRATOR_PROFILE,
   AUTHENTICATED_BASELINE_PERMISSIONS,
+  OPERATION_OPENING_PERMISSIONS,
+  PERMISSIONS_REVISED_IN_1_0_6,
   PERMISSIONS,
   DEFAULT_PROFILES,
   getPermissionKeys,

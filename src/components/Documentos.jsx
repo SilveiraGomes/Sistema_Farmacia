@@ -137,13 +137,10 @@ function Documentos() {
     if (!document || !canCancelDocument(document)) return;
 
     try {
-      // Sem número de recurso: um número inventado podia repetir a série fiscal.
-      const reservedNc = await request('configuration.document.reserveNumber', { documentType: 'nota-credito' });
-
+      // O número da nota de crédito é reservado no backend, na mesma transacção.
       const { cancelledDoc, creditNote } = await request('vendas.cancelDocument', {
         venda_id: document.vendaId,
         reason,
-        creditNoteNumber: reservedNc,
       });
 
       setRows((current) => [
@@ -153,7 +150,7 @@ function Documentos() {
           : d),
       ]);
       setCancelTarget(null);
-      setMessage(`${document.number} anulado. Nota de Crédito ${reservedNc} gerada.`);
+      setMessage(`${document.number} anulado. Nota de Crédito ${creditNote.number} gerada.`);
     } catch (err) {
       setMessage(err?.message || 'Erro ao anular documento.');
       setCancelTarget(null);
@@ -168,13 +165,10 @@ function Documentos() {
     }))) return;
 
     try {
-      const invoiceNumber = await request('configuration.document.reserveNumber', { documentType: 'factura' });
-      const updated = await request('vendas.convertProforma', {
-        venda_id: document.vendaId,
-        invoiceNumber,
-      });
+      // O número da factura é reservado no backend, na mesma transacção da conversão.
+      const updated = await request('vendas.convertProforma', { venda_id: document.vendaId });
       setRows((current) => current.map((d) => d.vendaId === document.vendaId ? updated : d));
-      setMessage(`${document.number} convertido em Factura ${invoiceNumber}.`);
+      setMessage(`${document.number} convertido em Factura ${updated.number}.`);
     } catch (err) {
       setMessage(err?.message || 'Erro ao converter proforma.');
     }

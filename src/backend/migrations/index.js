@@ -7,6 +7,11 @@
 //    corre cada migração dentro de BEGIN IMMEDIATE ... COMMIT e regista-a em
 //    _kil_migrations; se falhar, tudo é desfeito e o arranque é interrompido.
 const { normalizeSubcategoryKey } = require("../services/subcategoryKeys");
+const {
+  DEFAULT_PROFILES,
+  PERMISSIONS,
+  PERMISSIONS_REVISED_IN_1_0_6,
+} = require("../services/permissionCatalog");
 
 const MIGRATIONS_TABLE = "_kil_migrations";
 
@@ -56,11 +61,68 @@ async function unifySubcategories(db) {
   return removed;
 }
 
+function sequelizeTimestamp(date = new Date()) {
+  return date.toISOString().replace("T", " ").replace("Z", " +00:00");
+}
+
+// Alinha os perfis de sistema já existentes com as predefinições do catálogo,
+// apenas para as chaves indicadas: concede as que a predefinição inclui e retira
+// as restantes. Perfis criados pelo administrador e outras permissões ficam
+// intactos; depois disto tudo continua editável em Utilizadores › Permissões.
+async function alignSystemProfilesWithCatalog(db, keys = PERMISSIONS_REVISED_IN_1_0_6) {
+  for (const table of ["Perfis", "Permissaos", "PerfilPermissaos"]) {
+    if (!(await tableExists(db, table))) return 0;
+  }
+  const stamp = sequelizeTimestamp();
+  // As permissões novas ainda não existem: o catálogo só é semeado depois das migrações.
+  for (const key of keys) {
+    const definition = PERMISSIONS.find((permission) => permission.chave === key);
+    if (!definition) continue;
+    await db.query(
+      'INSERT OR IGNORE INTO "Permissaos" (chave, modulo, acao, descricao, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      { replacements: [definition.chave, definition.modulo, definition.acao, definition.descricao, stamp, stamp] },
+    );
+  }
+
+  const select = (sql, replacements) => db.query(sql, { replacements, type: db.QueryTypes.SELECT });
+  let changes = 0;
+  for (const profile of DEFAULT_PROFILES) {
+    const [perfil] = await select('SELECT id FROM "Perfis" WHERE nome = ?', [profile.nome]);
+    if (!perfil) continue;
+    for (const key of keys) {
+      const [permissao] = await select('SELECT id FROM "Permissaos" WHERE chave = ?', [key]);
+      if (!permissao) continue;
+      const [link] = await select(
+        'SELECT id FROM "PerfilPermissaos" WHERE perfil_id = ? AND permissao_id = ?',
+        [perfil.id, permissao.id],
+      );
+      const wanted = profile.permissoes.includes(key);
+      if (wanted && !link) {
+        await db.query(
+          'INSERT INTO "PerfilPermissaos" (perfil_id, permissao_id, createdAt, updatedAt) VALUES (?, ?, ?, ?)',
+          { replacements: [perfil.id, permissao.id, stamp, stamp] },
+        );
+        changes += 1;
+      } else if (!wanted && link) {
+        await db.query('DELETE FROM "PerfilPermissaos" WHERE id = ?', { replacements: [link.id] });
+        changes += 1;
+      }
+    }
+  }
+  if (changes) console.log(`[migração] Perfis de sistema alinhados com as predefinições: ${changes} alteração(ões).`);
+  return changes;
+}
+
 const MIGRATIONS = [
   {
     id: "2026-10-19-001-subcategorias-unicas",
     description: "Unifica subcategorias repetidas na mesma categoria e religa os produtos.",
     up: unifySubcategories,
+  },
+  {
+    id: "2026-10-22-001-perfis-predefinicoes-1-0-6",
+    description: "Abertura de dia/turno para todos os perfis de sistema; editar/importar estoque e ver custo conforme as predefinições.",
+    up: (db) => alignSystemProfilesWithCatalog(db),
   },
 ];
 
@@ -93,4 +155,10 @@ async function runMigrations(db, migrations = MIGRATIONS) {
   return ran;
 }
 
-module.exports = { MIGRATIONS, runMigrations, unifySubcategories, MIGRATIONS_TABLE };
+module.exports = {
+  MIGRATIONS,
+  runMigrations,
+  unifySubcategories,
+  alignSystemProfilesWithCatalog,
+  MIGRATIONS_TABLE,
+};

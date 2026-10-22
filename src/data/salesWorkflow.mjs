@@ -198,6 +198,17 @@ export function appendReceivedDigit(currentValue, key) {
   return `${currentValue}${key}`;
 }
 
+// Notas prováveis para pagamento em dinheiro: o total arredondado para cima a
+// 500, 1000, 2000, 5000 e 10000 Kz (sem repetir nem igualar o total), no máximo `limit`.
+export function suggestCashAmounts(total, limit = 3) {
+  const value = Number(total) || 0;
+  if (value <= 0) return [];
+  const amounts = [500, 1000, 2000, 5000, 10000]
+    .map((step) => Math.ceil(value / step) * step)
+    .filter((amount) => amount > value);
+  return [...new Set(amounts)].sort((a, b) => a - b).slice(0, limit);
+}
+
 function roundMoney(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }

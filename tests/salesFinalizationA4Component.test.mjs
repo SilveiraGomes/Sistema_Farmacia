@@ -10,7 +10,8 @@ test('Vendas opens an A4 invoice preview after finalizing a sale', async () => {
   assert.match(source, /buildInvoiceA4ViewModel/);
   assert.match(source, /buildDocumentSettingsFromSnapshot/);
   assert.match(source, /useSettings/);
-  assert.match(source, /configuration\.document\.reserveNumber/);
+  // O número fiscal é reservado no backend, na mesma transacção da venda.
+  assert.doesNotMatch(source, /configuration\.document\.reserveNumber/);
   assert.doesNotMatch(source, /getStoredInvoiceA4Settings|getStoredBranding/);
   assert.match(source, /finalizedDocument/);
   assert.match(source, /function finalizeSale/);
@@ -51,8 +52,15 @@ test('documentos fiscais usam sempre a série reservada no backend, sem números
     assert.doesNotMatch(source, /documentType: 'nota_credito'/, file);
     assert.doesNotMatch(source, /reserveNumber[^;]*\.catch\(/, file);
   }
+  for (const file of ['src/components/Vendas.jsx', 'src/components/Documentos.jsx']) {
+    const source = await readFile(file, 'utf8');
+    // Venda, conversão e anulação: o backend reserva o número dentro da transacção.
+    assert.doesNotMatch(source, /configuration\.document\.reserveNumber/, file);
+    assert.doesNotMatch(source, /creditNoteNumber|numero_factura,/, file);
+  }
+  const documentos = await readFile('src/components/Documentos.jsx', 'utf8');
+  assert.match(documentos, /request\('vendas\.convertProforma', \{ venda_id: document\.vendaId \}\)/);
   const vendas = await readFile('src/components/Vendas.jsx', 'utf8');
-  assert.match(vendas, /documentType: 'nota-credito'/);
   // O número previsto vem da série fiscal, não da contagem dos documentos recentes.
   assert.match(vendas, /settings\?\.documents\?\.fiscal\?\.value\?\.series/);
   assert.doesNotMatch(vendas, /recentSaleDocuments\.filter\(\(d\) => d\.type === docType\)/);

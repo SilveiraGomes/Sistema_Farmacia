@@ -43,6 +43,7 @@ import {
 import { confirmDelete } from '../utils/confirmations.mjs';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog } from '../configuration/SettingsContext';
+import { useAuth } from '../auth/AuthContext';
 
 function mapProductToRow(p) {
   return {
@@ -86,6 +87,15 @@ const modalTitles = {
 const visibleCategoryCount = 8;
 
 function Estoque() {
+  // Mesmas chaves exigidas pelas rotas estoque.* no backend.
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('estoque.criar');
+  const canEdit = hasPermission('estoque.editar');
+  const canImport = hasPermission('estoque.importar');
+  const canDelete = hasPermission('estoque.apagar');
+  const canAdjust = hasPermission('estoque.ajustar');
+  const canUpdatePrice = hasPermission('estoque.preco');
+  const canSeeCost = hasPermission('estoque.custo');
   const stockUnits = useCatalog(CATALOG_KEYS.STOCK_UNITS);
   const productLocations = useCatalog(CATALOG_KEYS.PRODUCT_LOCATIONS);
   const [activeModal, setActiveModal] = useState(null);
@@ -414,10 +424,12 @@ function Estoque() {
                   <strong>{category.count}</strong>
                 </div>
               </button>
-              <div className="cat-card-actions">
-                <button type="button" title="Editar" onClick={() => openModal('category', category)}><Pencil size={12} /></button>
-                <button type="button" title="Eliminar" onClick={() => handleDeleteCategory(category)}><Trash2 size={12} /></button>
-              </div>
+              {canEdit ? (
+                <div className="cat-card-actions">
+                  <button type="button" title="Editar" onClick={() => openModal('category', category)}><Pencil size={12} /></button>
+                  <button type="button" title="Eliminar" onClick={() => handleDeleteCategory(category)}><Trash2 size={12} /></button>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -464,10 +476,12 @@ function Estoque() {
                       {sub.imagem ? <img src={sub.imagem} alt={sub.nome} className="subcat-chip-img" /> : null}
                       {sub.nome}
                     </button>
-                    <div className="subcat-chip-actions">
-                      <button type="button" title="Editar" onClick={() => openModal('subcategory', sub)}><Pencil size={11} /></button>
-                      <button type="button" title="Eliminar" onClick={() => handleDeleteSubcategory(sub)}><Trash2 size={11} /></button>
-                    </div>
+                    {canEdit ? (
+                      <div className="subcat-chip-actions">
+                        <button type="button" title="Editar" onClick={() => openModal('subcategory', sub)}><Pencil size={11} /></button>
+                        <button type="button" title="Eliminar" onClick={() => handleDeleteSubcategory(sub)}><Trash2 size={11} /></button>
+                      </div>
+                    ) : null}
                   </div>
                 )
               )}
@@ -497,12 +511,12 @@ function Estoque() {
             />
           </div>
           <div className="stock-toolbar-actions">
-            <button type="button" onClick={() => openModal('product')}><PlusCircle size={17} /> Novo Produto</button>
-            <button type="button" onClick={() => openModal('importProducts')}><Upload size={17} /> Importar</button>
+            {canCreate ? <button type="button" onClick={() => openModal('product')}><PlusCircle size={17} /> Novo Produto</button> : null}
+            {canImport ? <button type="button" onClick={() => openModal('importProducts')}><Upload size={17} /> Importar</button> : null}
             <button type="button" onClick={() => openModal('inventory')}><ClipboardList size={17} /> Inventario</button>
             <button type="button" onClick={() => openModal('prices')}><Tags size={17} /> Preços</button>
-            <button type="button" onClick={() => openModal('category')}><Tags size={17} /> Categoria</button>
-            <button type="button" onClick={() => openModal('subcategory')}><Tags size={17} /> Subcategoria</button>
+            {canCreate ? <button type="button" onClick={() => openModal('category')}><Tags size={17} /> Categoria</button> : null}
+            {canCreate ? <button type="button" onClick={() => openModal('subcategory')}><Tags size={17} /> Subcategoria</button> : null}
             <button type="button" onClick={() => openModal('filter')}><Filter size={17} /> Filtrar</button>
             <button type="button" onClick={exportProductsExcel}><Download size={17} /> Exportar</button>
           </div>
@@ -565,10 +579,10 @@ function Estoque() {
                   {openActionsId === item.id && (
                     <div className={`stock-row-menu${menuOpenUp ? ' open-up' : ''}`}>
                       <button type="button" onClick={() => openModal('viewProduct', item)}><Eye size={15} /> Ver</button>
-                      <button type="button" onClick={() => openModal('stockIn', item)}><PlusCircle size={15} /> Quantidade</button>
-                      <button type="button" onClick={() => openModal('stockOut', item)}><MinusCircle size={15} /> Baixa</button>
-                      <button type="button" onClick={() => openModal('editProduct', item)}><Pencil size={15} /> Editar</button>
-                      <button type="button" className="danger" onClick={() => deleteRow(item)}><Trash2 size={15} /> Remover</button>
+                      {canAdjust ? <button type="button" onClick={() => openModal('stockIn', item)}><PlusCircle size={15} /> Quantidade</button> : null}
+                      {canAdjust ? <button type="button" onClick={() => openModal('stockOut', item)}><MinusCircle size={15} /> Baixa</button> : null}
+                      {canEdit ? <button type="button" onClick={() => openModal('editProduct', item)}><Pencil size={15} /> Editar</button> : null}
+                      {canDelete ? <button type="button" className="danger" onClick={() => deleteRow(item)}><Trash2 size={15} /> Remover</button> : null}
                     </div>
                   )}
                 </td>
@@ -634,6 +648,8 @@ function Estoque() {
           onApplyFilter={handleApplyFilter}
           statusFilter={statusFilter}
           onStatusChange={handleStatusChange}
+          canUpdatePrice={canUpdatePrice}
+          canSeeCost={canSeeCost}
         />
       )}
     </section>
@@ -653,7 +669,7 @@ function SummaryCard({ title, value, icon: Icon, tone = '', onClick, active = fa
   );
 }
 
-function StockModal({ type, item, options, stockRows, inventoryRows, importReference, categoryRows, subcategoryRows, onClose, onImport, onStockMovement, onSaveProduct, onSaveCategory, onSaveSubcategory, onApplyFilter, statusFilter, onStatusChange }) {
+function StockModal({ type, item, options, stockRows, inventoryRows, importReference, categoryRows, subcategoryRows, onClose, onImport, onStockMovement, onSaveProduct, onSaveCategory, onSaveSubcategory, onApplyFilter, statusFilter, onStatusChange, canUpdatePrice = true, canSeeCost = true }) {
   const [imagePreview, setImagePreview] = useState(item?.imagem || '');
   const [movementQuantity, setMovementQuantity] = useState('');
   const [movementReason, setMovementReason] = useState('');
@@ -993,17 +1009,19 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                       onChange={(event) => { setMovementValidade(event.target.value); setMovementPrefilled(false); }}
                     />
                   </label>
-                  <label>
-                    Preço de custo (KZ)
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={movementCusto}
-                      onChange={(event) => { setMovementCusto(event.target.value); setMovementPrefilled(false); }}
-                      placeholder="Actualiza preço de custo"
-                    />
-                  </label>
+                  {canSeeCost ? (
+                    <label>
+                      Preço de custo (KZ)
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={movementCusto}
+                        onChange={(event) => { setMovementCusto(event.target.value); setMovementPrefilled(false); }}
+                        placeholder="Actualiza preço de custo"
+                      />
+                    </label>
+                  ) : null}
                   <label>
                     Origem ou observação
                     <input
@@ -1038,7 +1056,7 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                     <th>Produto</th>
                     <th>Stock</th>
                     <th>Preço venda (KZ)</th>
-                    <th>Preço custo (KZ)</th>
+                    {canSeeCost ? <th>Preço custo (KZ)</th> : null}
                     <th></th>
                   </tr>
                 </thead>
@@ -1062,22 +1080,25 @@ function StockModal({ type, item, options, stockRows, inventoryRows, importRefer
                               className="price-input"
                             />
                           </td>
-                          <td>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              defaultValue={r.preco_custo}
-                              onChange={(e) => setPriceEdits((prev) => ({ ...prev, [r.id]: { ...prev[r.id], preco_custo: e.target.value } }))}
-                              className="price-input"
-                            />
-                          </td>
+                          {canSeeCost ? (
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                defaultValue={r.preco_custo}
+                                onChange={(e) => setPriceEdits((prev) => ({ ...prev, [r.id]: { ...prev[r.id], preco_custo: e.target.value } }))}
+                                className="price-input"
+                              />
+                            </td>
+                          ) : null}
                           <td>
                             <button
                               type="button"
                               className="soft-button"
                               style={{ fontSize: 12, padding: '4px 10px' }}
-                              disabled={priceSaving === r.id}
+                              disabled={!canUpdatePrice || priceSaving === r.id}
+                              title={canUpdatePrice ? undefined : 'Sem permissão para actualizar preços'}
                               onClick={() => savePrice(r.id)}
                             >
                               {priceSaving === r.id ? '...' : 'Guardar'}

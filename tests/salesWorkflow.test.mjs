@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  suggestCashAmounts,
   addCartItem,
   cancelHeldSale,
   removeCartItem,
@@ -198,4 +199,11 @@ test('appendReceivedDigit builds and edits cash received values from keypad inpu
   assert.equal(appendReceivedDigit('50', '00'), '5000');
   assert.equal(appendReceivedDigit('5000', 'backspace'), '500');
   assert.equal(appendReceivedDigit('500', 'clear'), '');
+});
+
+test('suggestCashAmounts proposes the next banknote amounts above the total', () => {
+  assert.deepEqual(suggestCashAmounts(2630), [3000, 4000, 5000]);
+  assert.deepEqual(suggestCashAmounts(500), [1000, 2000, 5000]);
+  assert.deepEqual(suggestCashAmounts(9800, 2), [10000]);
+  assert.deepEqual(suggestCashAmounts(0), []);
 });

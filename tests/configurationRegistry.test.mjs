@@ -54,6 +54,9 @@ const expectedSettings = {
   'sales.finalConsumerLabel': {
     group: 'sales', type: 'text', defaultValue: 'Consumidor final',
   },
+  'sales.afterSaleAction': {
+    group: 'sales', type: 'enum', values: ['mostrar', 'imprimir', 'continuar'], defaultValue: 'mostrar',
+  },
   'stock.lowStockThreshold': {
     group: 'stock', type: 'number', min: 0, defaultValue: 25,
   },

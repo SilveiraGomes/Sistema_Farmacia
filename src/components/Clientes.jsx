@@ -6,6 +6,7 @@ import { request } from '../services/ipcClient.js';
 import { confirmDelete } from '../utils/confirmations.mjs';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog } from '../configuration/SettingsContext';
+import { useAuth } from '../auth/AuthContext';
 
 const EMPTY_FORM = { name: '', nif: '', phone: '', email: '', creditLimit: '', status: 'Activo', address: '' };
 
@@ -51,6 +52,10 @@ function filterClients(rows, query) {
 }
 
 function Clientes() {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('clientes.criar');
+  const canEdit = hasPermission('clientes.editar');
+  const canDelete = hasPermission('clientes.apagar');
   const clientStatuses = useCatalog(CATALOG_KEYS.CLIENT_STATUSES);
   const [showModal, setShowModal] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
@@ -168,7 +173,7 @@ function Clientes() {
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
-            <button type="button" onClick={openNewClient}><PlusCircle size={17} /> Novo Cliente</button>
+            {canCreate ? <button type="button" onClick={openNewClient}><PlusCircle size={17} /> Novo Cliente</button> : null}
             <button type="button" onClick={exportClientsExcel}><Download size={17} /> Exportar</button>
           </div>
         </div>
@@ -198,8 +203,8 @@ function Clientes() {
                 <td>{formatKwanza(client.openCredit)}</td>
                 <td><span className={client.status === 'Activo' ? 'status paid' : 'status waiting'}>{client.status}</span></td>
                 <td className="options-cell">
-                  <button className="icon-button" type="button" aria-label="Editar cliente" onClick={() => openEditClient(client)}><Pencil size={16} /></button>
-                  <button className="icon-button danger" type="button" aria-label="Remover cliente" onClick={() => removeClient(client)}><Trash2 size={16} /></button>
+                  {canEdit ? <button className="icon-button" type="button" aria-label="Editar cliente" onClick={() => openEditClient(client)}><Pencil size={16} /></button> : null}
+                  {canDelete ? <button className="icon-button danger" type="button" aria-label="Remover cliente" onClick={() => removeClient(client)}><Trash2 size={16} /></button> : null}
                 </td>
               </tr>
             ))}

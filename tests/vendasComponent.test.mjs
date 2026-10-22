@@ -36,7 +36,8 @@ test('barcode scanner input adds exact product to invoice items and clears searc
 
   assert.match(source, /findProductByExactBarcode/);
   assert.match(source, /function handleProductQueryChange/);
-  assert.match(source, /setCart\(\(current\) => addCartItem\(current,\s*scannedProduct\)\)/);
+  assert.match(source, /addProductToCart\(scannedProduct\)/);
+  assert.match(source, /function addProductToCart[\s\S]*?setCart\(\(current\) => addCartItem\(current,\s*product\)\)/);
   assert.match(source, /setProductQuery\(''\)/);
   assert.match(source, /onChange=\{\(event\) => handleProductQueryChange\(event\.target\.value\)\}/);
 });

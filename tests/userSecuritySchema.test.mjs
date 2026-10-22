@@ -8,7 +8,13 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { connectDB, syncDatabaseSchema, getModels } = require('../src/backend/database.js');
 const { verifyPassword } = require('../src/backend/security/passwords.js');
-const { PERMISSIONS, DEFAULT_PROFILES, ADMINISTRATOR_PROFILE } = require('../src/backend/services/permissionCatalog.js');
+const {
+  PERMISSIONS,
+  DEFAULT_PROFILES,
+  ADMINISTRATOR_PROFILE,
+  AUTHENTICATED_BASELINE_PERMISSIONS,
+} = require('../src/backend/services/permissionCatalog.js');
+const withBaseline = (...keys) => [...new Set([...AUTHENTICATED_BASELINE_PERMISSIONS, ...keys])].sort();
 
 async function withDatabase(run) {
   const userDataPath = await mkdtemp(join(tmpdir(), 'pharmacy-user-security-'));
@@ -278,7 +284,7 @@ test('syncDatabaseSchema preserves custom non-admin profile permissions on later
       .map((permission) => permission.chave)
       .sort();
 
-    assert.deepEqual(permissionKeysAfterSecondSync, ['configuracoes.ver', 'dashboard.ver']);
+    assert.deepEqual(permissionKeysAfterSecondSync, withBaseline('dashboard.ver'));
     await assertProfilePermissionInvariant(db, models);
   });
 });
@@ -299,7 +305,7 @@ test('syncDatabaseSchema adds snapshot baseline to existing nonempty operational
     for (const profileName of ['Caixa', 'Farmaceutico']) {
       const profile = await models.Perfil.findOne({ where: { nome: profileName } });
       const keys = (await profile.getPermissaos()).map(({ chave }) => chave).sort();
-      assert.deepEqual(keys, ['configuracoes.ver', 'dashboard.ver'], profileName);
+      assert.deepEqual(keys, withBaseline('dashboard.ver'), profileName);
       assert.equal(keys.includes('configuracoes.editar'), false);
       assert.ok(baseline.id);
     }
@@ -406,6 +412,45 @@ test('syncDatabaseSchema updates existing seeded permission and profile metadata
     assert.equal(profile.sistema, expectedProfile.sistema);
     assert.equal(profile.ativo, true);
     assert.equal(adminPermissions.length, expectedProfile.permissoes.length);
+    await assertProfilePermissionInvariant(db, models);
+  });
+});
+
+test('1.0.6 profile migration aligns existing system profiles with catalog defaults only for revised keys', async () => {
+  const { alignSystemProfilesWithCatalog } = require('../src/backend/migrations/index.js');
+  await withDatabase(async (db, models) => {
+    const keyId = async (chave) => (await models.Permissao.findOne({ where: { chave } })).id;
+    const profileId = async (nome) => (await models.Perfil.findOne({ where: { nome } })).id;
+    const keysOf = async (nome) => {
+      const profile = await models.Perfil.findOne({ where: { nome } });
+      return (await profile.getPermissaos()).map(({ chave }) => chave);
+    };
+
+    // Estado de uma instalação 1.0.5: Farmacêutico com estoque.editar, Caixa sem abrir o dia,
+    // permissão estoque.custo ainda inexistente, e uma escolha do administrador fora das chaves revistas.
+    const pharmacist = await profileId('Farmaceutico');
+    const cashier = await profileId('Caixa');
+    await models.PerfilPermissao.findOrCreate({ where: { perfil_id: pharmacist, permissao_id: await keyId('estoque.editar') } });
+    await models.PerfilPermissao.destroy({ where: { perfil_id: cashier, permissao_id: await keyId('operacao.abrir_dia') } });
+    await models.PerfilPermissao.findOrCreate({ where: { perfil_id: cashier, permissao_id: await keyId('relatorios.ver') } });
+    await models.PerfilPermissao.destroy({ where: { permissao_id: await keyId('estoque.custo') } });
+    await models.Permissao.destroy({ where: { chave: 'estoque.custo' } });
+
+    assert.ok(await alignSystemProfilesWithCatalog(db) > 0);
+
+    const pharmacistKeys = await keysOf('Farmaceutico');
+    assert.equal(pharmacistKeys.includes('estoque.editar'), false);
+    assert.ok(pharmacistKeys.includes('estoque.custo'), 'permissão nova criada e concedida');
+    const cashierKeys = await keysOf('Caixa');
+    assert.ok(cashierKeys.includes('operacao.abrir_dia'));
+    assert.ok(cashierKeys.includes('relatorios.ver'), 'escolhas fora das chaves revistas ficam intactas');
+    assert.equal(cashierKeys.includes('estoque.custo'), false);
+    for (const nome of [ADMINISTRATOR_PROFILE, 'Gestor de Stock']) {
+      const keys = await keysOf(nome);
+      assert.ok(keys.includes('estoque.editar') && keys.includes('estoque.importar'), nome);
+    }
+
+    assert.equal(await alignSystemProfilesWithCatalog(db), 0, 'idempotente');
     await assertProfilePermissionInvariant(db, models);
   });
 });

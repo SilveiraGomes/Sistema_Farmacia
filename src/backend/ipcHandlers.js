@@ -146,6 +146,7 @@ const SAFE_ERROR_MESSAGES = new Set([
   "Permissoes invalidas.",
   "Chaves de permissao invalidas.",
   "Nao e possivel remover permissoes essenciais do Administrador.",
+  "Sem permissao para aplicar descontos.",
   "Nenhum ficheiro de backup especificado.",
   "Restauracao de backup nao disponivel neste ambiente.",
   ...Object.values(CONFIGURATION_SAFE_ERROR_MESSAGES),
@@ -224,6 +225,71 @@ async function withPermission(dependencies, permissionKey, handler) {
   await dependencies.assertPermission(actorUserId, permissionKey);
   return handler(actorUserId);
 }
+
+// Rotas partilhadas entre módulos (ex.: o PDV precisa de listar produtos sem
+// dar acesso à gestão de estoque): basta uma das permissões indicadas.
+async function withAnyPermission(dependencies, permissionKeys, handler) {
+  const session = await getCurrentSession(dependencies);
+  if (isPasswordChangeRequired(session)) {
+    throwPasswordChangeRequired();
+  }
+
+  const actorUserId = session.user.id;
+  let denied = null;
+  for (const permissionKey of permissionKeys) {
+    try {
+      await dependencies.assertPermission(actorUserId, permissionKey);
+    } catch (error) {
+      if (error?.code !== "PERMISSION_DENIED") throw error;
+      denied = error;
+      continue;
+    }
+    return handler(actorUserId);
+  }
+  throw denied;
+}
+
+async function actorHasPermission(dependencies, actorUserId, permissionKey) {
+  try {
+    await dependencies.assertPermission(actorUserId, permissionKey);
+    return true;
+  } catch (error) {
+    if (error?.code !== "PERMISSION_DENIED") throw error;
+    return false;
+  }
+}
+
+// Reserva o número fiscal dentro da transacção do documento (venda, conversão
+// ou nota de crédito): se a gravação falhar, o número não é consumido.
+function fiscalNumberReserver(dependencies, actorUserId) {
+  const service = dependencies.configurationService;
+  if (!service?.reserveNextDocumentNumber) return undefined;
+  return (options) => service.reserveNextDocumentNumber({ ...options, actorUserId });
+}
+
+// O PDV vê o preço de venda; o custo é só para quem gere o estoque.
+function withoutCostPrice(products) {
+  return (products || []).map(({ preco_custo, ...product }) => product);
+}
+
+// O preço de custo só é visto ou alterado por quem tem "estoque.custo"
+// (configurável por perfil em Utilizadores › Permissões).
+async function canSeeCostPrice(dependencies, actorUserId) {
+  return actorHasPermission(dependencies, actorUserId, "estoque.custo");
+}
+
+async function withCostPolicy(dependencies, actorUserId, data) {
+  if (await canSeeCostPrice(dependencies, actorUserId)) return data;
+  const { preco_custo, ...rest } = data || {};
+  return rest;
+}
+
+// A reserva grava o número na série fiscal: só quem pode concluir a operação
+// a que o número se destina o pode reservar, para não deixar falhas na série.
+const RESERVE_NUMBER_PERMISSIONS = Object.freeze({
+  "nota-credito": ["vendas.cancelar", "documentos.anular"],
+  factura: ["vendas.criar", "documentos.converter"],
+});
 
 function getTargetUserId(data = {}) {
   return data.userId !== undefined ? data.userId : data.id;
@@ -414,8 +480,8 @@ function buildRouteMap(overrides = {}) {
       ),
 
     "estoque.addLot": (data = {}) =>
-      withPermission(dependencies, "estoque.ajustar", () =>
-        dependencies.estoqueService.addStockLot(data),
+      withPermission(dependencies, "estoque.ajustar", async (actorUserId) =>
+        dependencies.estoqueService.addStockLot(await withCostPolicy(dependencies, actorUserId, data)),
       ),
     "estoque.deduct": (data = {}) =>
       withPermission(dependencies, "estoque.ajustar", () =>
@@ -426,35 +492,38 @@ function buildRouteMap(overrides = {}) {
         dependencies.estoqueService.getLotes(data.produto_id),
       ),
     "estoque.updatePrice": (data = {}) =>
-      withPermission(dependencies, "estoque.preco", () =>
-        dependencies.estoqueService.updateProductPrice(data),
+      withPermission(dependencies, "estoque.preco", async (actorUserId) =>
+        dependencies.estoqueService.updateProductPrice(await withCostPolicy(dependencies, actorUserId, data)),
       ),
     "estoque.listPrices": (data = {}) =>
-      withPermission(dependencies, "estoque.ver", () =>
-        dependencies.estoqueService.listPrices(data),
-      ),
+      withPermission(dependencies, "estoque.ver", async (actorUserId) => {
+        const rows = await dependencies.estoqueService.listPrices(data);
+        return (await canSeeCostPrice(dependencies, actorUserId)) ? rows : withoutCostPrice(rows);
+      }),
     "estoque.listProducts": (data = {}) =>
-      withPermission(dependencies, "estoque.ver", () =>
-        dependencies.estoqueService.listProducts(data),
-      ),
+      withAnyPermission(dependencies, ["estoque.ver", "vendas.criar"], async (actorUserId) => {
+        const products = await dependencies.estoqueService.listProducts(data);
+        return (await canSeeCostPrice(dependencies, actorUserId)) ? products : withoutCostPrice(products);
+      }),
     "estoque.createProduct": (data = {}) =>
-      withPermission(dependencies, "estoque.criar", () =>
-        dependencies.estoqueService.createProduct(data),
+      withPermission(dependencies, "estoque.criar", async (actorUserId) =>
+        dependencies.estoqueService.createProduct(await withCostPolicy(dependencies, actorUserId, data)),
       ),
     "estoque.updateProduct": (data = {}) =>
-      withPermission(dependencies, "estoque.editar", () =>
-        dependencies.estoqueService.updateProduct(data),
+      withPermission(dependencies, "estoque.editar", async (actorUserId) =>
+        dependencies.estoqueService.updateProduct(await withCostPolicy(dependencies, actorUserId, data)),
       ),
     "estoque.deleteProduct": (data = {}) =>
       withPermission(dependencies, "estoque.apagar", () =>
         dependencies.estoqueService.deleteProduct(data.produto_id),
       ),
     "estoque.getProduct": (data = {}) =>
-      withPermission(dependencies, "estoque.ver", () =>
-        dependencies.estoqueService.getProduct(data.produto_id),
-      ),
+      withPermission(dependencies, "estoque.ver", async (actorUserId) => {
+        const product = await dependencies.estoqueService.getProduct(data.produto_id);
+        return (await canSeeCostPrice(dependencies, actorUserId)) ? product : withoutCostPrice([product])[0];
+      }),
     "estoque.listCategories": () =>
-      withPermission(dependencies, "estoque.ver", () =>
+      withAnyPermission(dependencies, ["estoque.ver", "vendas.criar"], () =>
         dependencies.estoqueService.listCategories(),
       ),
     "estoque.createCategory": (data = {}) =>
@@ -487,22 +556,22 @@ function buildRouteMap(overrides = {}) {
       ),
 
     "estoque.importCategories": (data = {}) =>
-      withPermission(dependencies, "estoque.editar", () =>
+      withPermission(dependencies, "estoque.importar", () =>
         dependencies.estoqueService.importCategories(data.rows || []),
       ),
 
     "estoque.importSubcategories": (data = {}) =>
-      withPermission(dependencies, "estoque.editar", () =>
+      withPermission(dependencies, "estoque.importar", () =>
         dependencies.estoqueService.importSubcategories(data.rows || []),
       ),
 
     "estoque.importProducts": (data = {}) =>
-      withPermission(dependencies, "estoque.editar", () =>
+      withPermission(dependencies, "estoque.importar", () =>
         dependencies.estoqueService.importProducts(data.rows || []),
       ),
 
     "clientes.list": (data = {}) =>
-      withPermission(dependencies, "clientes.ver", () =>
+      withAnyPermission(dependencies, ["clientes.ver", "vendas.criar"], () =>
         dependencies.clienteService.listClientes(data),
       ),
     "clientes.getById": (data = {}) =>
@@ -523,24 +592,37 @@ function buildRouteMap(overrides = {}) {
       ),
 
     "vendas.create": (data = {}) =>
-      withPermission(dependencies, "vendas.criar", (actorUserId) =>
-        dependencies.vendaService.createVenda(data, actorUserId),
-      ),
+      withPermission(dependencies, "vendas.criar", async (actorUserId) => {
+        // Descontos (futuros cupões) só com permissão própria; o Caixa não a tem.
+        if (Number(data.desconto) > 0
+          && !(await actorHasPermission(dependencies, actorUserId, "vendas.desconto"))) {
+          const error = new Error("Sem permissao para aplicar descontos.");
+          error.code = "PERMISSION_DENIED";
+          throw error;
+        }
+        return dependencies.vendaService.createVenda(data, actorUserId, {
+          reserveNumber: fiscalNumberReserver(dependencies, actorUserId),
+        });
+      }),
     "vendas.recentDocuments": (data = {}) =>
       withPermission(dependencies, "vendas.ver", () =>
         dependencies.vendaService.listRecentDocuments(data),
       ),
     "vendas.listDocuments": (data = {}) =>
-      withPermission(dependencies, "vendas.ver", () =>
+      withAnyPermission(dependencies, ["vendas.ver", "documentos.ver"], () =>
         dependencies.vendaService.listDocuments(data),
       ),
     "vendas.cancelDocument": (data = {}) =>
-      withPermission(dependencies, "vendas.cancelar", (actorUserId) =>
-        dependencies.vendaService.cancelDocument(data, actorUserId),
+      withAnyPermission(dependencies, ["vendas.cancelar", "documentos.anular"], (actorUserId) =>
+        dependencies.vendaService.cancelDocument(data, actorUserId, {
+          reserveNumber: fiscalNumberReserver(dependencies, actorUserId),
+        }),
       ),
     "vendas.convertProforma": (data = {}) =>
-      withPermission(dependencies, "vendas.criar", (actorUserId) =>
-        dependencies.vendaService.convertProforma(data, actorUserId),
+      withAnyPermission(dependencies, ["vendas.criar", "documentos.converter"], (actorUserId) =>
+        dependencies.vendaService.convertProforma(data, actorUserId, {
+          reserveNumber: fiscalNumberReserver(dependencies, actorUserId),
+        }),
       ),
 
     "compras.list": (data = {}) =>
@@ -565,7 +647,7 @@ function buildRouteMap(overrides = {}) {
         dependencies.financeiroService.listContasPagar(),
       ),
     "financeiro.marcarPago": (data = {}) =>
-      withPermission(dependencies, "financeiro.ver", () =>
+      withPermission(dependencies, "financeiro.editar", () =>
         dependencies.financeiroService.marcarPago(data.id),
       ),
     "financeiro.list": (data = {}) =>
@@ -663,12 +745,18 @@ function buildRouteMap(overrides = {}) {
       ),
 
     "dashboard.metrics": (data = {}) =>
-      withPermission(dependencies, "dashboard.ver", () =>
-        dependencies.dashboardService.getDashboardMetrics({
+      withPermission(dependencies, "dashboard.ver", async (actorUserId) => {
+        const metrics = await dependencies.dashboardService.getDashboardMetrics({
           shiftOpenAt: data.shiftOpenAt || null,
           lowStockThreshold: data.lowStockThreshold || 25,
-        }),
-      ),
+        });
+        // Lucro e margem derivam do preço de custo: só para quem vê o Financeiro.
+        if (!(await actorHasPermission(dependencies, actorUserId, "financeiro.ver"))) {
+          const { financialSummary, ...rest } = metrics || {};
+          return rest;
+        }
+        return metrics;
+      }),
 
     "operation.state": () =>
       withPermission(dependencies, "operacao.ver", () =>
@@ -715,7 +803,7 @@ function buildRouteMap(overrides = {}) {
         }),
       ),
     "configuration.document.reserveNumber": (data = {}) =>
-      withPermission(dependencies, "vendas.criar", (actorUserId) =>
+      withAnyPermission(dependencies, RESERVE_NUMBER_PERMISSIONS[data.documentType] || ["vendas.criar"], (actorUserId) =>
         dependencies.configurationService.reserveNextDocumentNumber({
           ...data,
           actorUserId,

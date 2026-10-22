@@ -24,6 +24,7 @@ import { confirmDelete } from '../utils/confirmations.mjs';
 import { useOperation } from '../operation/OperationContext';
 import { CATALOG_KEYS } from '../configuration/catalogKeys.mjs';
 import { useCatalog } from '../configuration/SettingsContext';
+import { useAuth } from '../auth/AuthContext';
 
 const periodOptions = [
   { value: 'month', label: 'Mes' },
@@ -53,6 +54,10 @@ const paymentIcons = {
 
 function Financeiro() {
   const operation = useOperation();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('financeiro.criar');
+  const canEdit = hasPermission('financeiro.editar');
+  const canDelete = hasPermission('financeiro.apagar');
   const shiftCatalog = useCatalog(CATALOG_KEYS.OPERATION_SHIFTS);
   const expenseCatalog = useCatalog(CATALOG_KEYS.EXPENSE_CATEGORIES);
   const revenueCatalog = useCatalog(CATALOG_KEYS.REVENUE_CATEGORIES);
@@ -332,7 +337,7 @@ function Financeiro() {
         <div className="panel-title-row">
           <h2>Movimentos Financeiros</h2>
           <div className="stock-toolbar-actions">
-            <button type="button" onClick={openManualEntryModal} disabled={!operation.canOperate}><PlusCircle size={17} /> Novo Lancamento</button>
+            {canCreate ? <button type="button" onClick={openManualEntryModal} disabled={!operation.canOperate}><PlusCircle size={17} /> Novo Lancamento</button> : null}
             <button type="button" onClick={exportMovementsExcel}><Download size={17} /> Exportar</button>
           </div>
         </div>
@@ -358,8 +363,8 @@ function Financeiro() {
                 <td><span className={item.status === 'Paga' ? 'status paid' : 'status waiting'}>{item.status}</span></td>
                 <td><span className="finance-origin">{item.source ?? (item.type === 'Receita' ? 'Automatico' : 'Manual')}</span></td>
                 <td className="options-cell">
-                  <button className="icon-button" type="button" aria-label="Editar movimento" onClick={() => setShowModal(true)}><Pencil size={16} /></button>
-                  <button className="icon-button danger" type="button" aria-label="Remover movimento" onClick={() => removeMovement(item)}><Trash2 size={16} /></button>
+                  {canCreate ? <button className="icon-button" type="button" aria-label="Editar movimento" onClick={() => setShowModal(true)}><Pencil size={16} /></button> : null}
+                  {canDelete ? <button className="icon-button danger" type="button" aria-label="Remover movimento" onClick={() => removeMovement(item)}><Trash2 size={16} /></button> : null}
                 </td>
               </tr>
             ))}
@@ -481,14 +486,16 @@ function Financeiro() {
                     {c.data_vencimento ? new Date(c.data_vencimento).toLocaleDateString('pt-AO') : '—'}
                   </div>
                   <div className="payable-amount">{formatKwanza(c.valor)}</div>
-                  <button
-                    type="button"
-                    className="soft-button"
-                    style={{ fontSize: 12, padding: '4px 10px', display: 'flex', gap: 4, alignItems: 'center' }}
-                    onClick={() => marcarPago(c.id)}
-                  >
-                    <CheckCircle size={13} /> Pago
-                  </button>
+                  {canEdit ? (
+                    <button
+                      type="button"
+                      className="soft-button"
+                      style={{ fontSize: 12, padding: '4px 10px', display: 'flex', gap: 4, alignItems: 'center' }}
+                      onClick={() => marcarPago(c.id)}
+                    >
+                      <CheckCircle size={13} /> Pago
+                    </button>
+                  ) : null}
                 </div>
               );
             })

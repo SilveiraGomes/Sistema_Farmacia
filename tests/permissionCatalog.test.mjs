@@ -92,22 +92,39 @@ test('operation permissions are cataloged and assigned by profile', () => {
     assert.ok(admin.permissoes.includes(permission), `admin should include ${permission}`);
   }
 
-  assert.ok(pharmacist.permissoes.includes('operacao.ver'));
-  assert.ok(pharmacist.permissoes.includes('operacao.abrir_turno'));
-  assert.ok(pharmacist.permissoes.includes('operacao.fechar_turno'));
-  assert.equal(pharmacist.permissoes.includes('operacao.abrir_dia'), false);
-  assert.equal(pharmacist.permissoes.includes('operacao.fechar_dia'), false);
+  // Abrir o dia e o turno (e fechar o próprio turno) é permitido a todos os perfis;
+  // fechar o dia continua reservado ao Administrador.
+  for (const profile of [pharmacist, cashier, stockManager]) {
+    assert.deepEqual(
+      operationPermissions.filter((permission) => profile.permissoes.includes(permission)),
+      ['operacao.ver', 'operacao.abrir_dia', 'operacao.abrir_turno', 'operacao.fechar_turno'],
+      profile.nome,
+    );
+  }
+});
 
-  assert.ok(cashier.permissoes.includes('operacao.ver'));
-  assert.ok(cashier.permissoes.includes('operacao.abrir_turno'));
-  assert.ok(cashier.permissoes.includes('operacao.fechar_turno'));
-  assert.equal(cashier.permissoes.includes('operacao.abrir_dia'), false);
-  assert.equal(cashier.permissoes.includes('operacao.fechar_dia'), false);
+test('stock import and edit are exclusive to administrator and stock manager profiles', () => {
+  for (const permission of ['estoque.editar', 'estoque.importar']) {
+    const holders = DEFAULT_PROFILES
+      .filter((profile) => profile.permissoes.includes(permission))
+      .map((profile) => profile.nome)
+      .sort();
+    assert.deepEqual(holders, [ADMINISTRATOR_PROFILE, 'Gestor de Stock'].sort(), permission);
+  }
+});
 
-  assert.deepEqual(
-    operationPermissions.filter((permission) => stockManager.permissoes.includes(permission)),
-    ['operacao.ver'],
-  );
+test('cost price visibility is a configurable permission, off for the cashier by default', () => {
+  assert.ok(getPermissionKeys().includes('estoque.custo'));
+  const holders = DEFAULT_PROFILES
+    .filter((profile) => profile.permissoes.includes('estoque.custo'))
+    .map((profile) => profile.nome)
+    .sort();
+  assert.deepEqual(holders, [ADMINISTRATOR_PROFILE, 'Farmaceutico', 'Gestor de Stock'].sort());
+});
+
+test('cashier profile cannot apply discounts', () => {
+  const cashier = DEFAULT_PROFILES.find((profile) => profile.nome === 'Caixa');
+  assert.equal(cashier.permissoes.includes('vendas.desconto'), false);
 });
 
 test('cashier profile does not receive admin permissions', () => {
@@ -122,6 +139,7 @@ test('cashier profile does not receive admin permissions', () => {
 });
 
 test('every operational default profile can view but not edit central settings', () => {
+  // Só a consulta das configurações é imposta; tudo o resto é configurável por perfil.
   assert.deepEqual(AUTHENTICATED_BASELINE_PERMISSIONS, ['configuracoes.ver']);
   for (const profile of DEFAULT_PROFILES) {
     assert.ok(profile.permissoes.includes('configuracoes.ver'), profile.nome);

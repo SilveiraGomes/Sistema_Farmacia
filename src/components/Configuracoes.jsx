@@ -589,6 +589,20 @@ function SectionFields({ section, draft, update, snapshot, disabled }) {
             onChange={(e) => update("sales.finalConsumerLabel", e.target.value)}
           />
         </SettingField>
+        <SettingField
+          label="Depois de finalizar a venda"
+          help="Imprimir logo ou seguir directo para o cliente seguinte acelera o atendimento"
+        >
+          <select
+            disabled={disabled}
+            value={draft["sales.afterSaleAction"] || "mostrar"}
+            onChange={(e) => update("sales.afterSaleAction", e.target.value)}
+          >
+            <option value="mostrar">Mostrar o documento</option>
+            <option value="imprimir">Imprimir automaticamente</option>
+            <option value="continuar">Continuar para a venda seguinte</option>
+          </select>
+        </SettingField>
       </div>
     );
   if (section === "stock")

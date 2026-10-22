@@ -6,6 +6,28 @@ Cada versão publicada tem uma entrada aqui. Novas alterações entram em «Por 
 
 _(sem alterações)_
 
+## 1.0.6 — 2026-10-22
+
+**Vendas e facturas**
+- Cada documento (venda, conversão de proforma, nota de crédito) é gravado numa única transacção com o número da série: se algo falhar não fica stock abatido nem número consumido. Corrige a perda de stock numa venda com vários produtos em que um não tinha stock.
+- A série fiscal salta automaticamente números que já existam (por exemplo, depois de um restauro).
+- PDV mais rápido: pesquisa sempre pronta para o leitor de código de barras; Enter adiciona o produto quando há um só resultado; atalhos F2 (pesquisa), F4 (cliente), F8 (em espera) e F9 (pagar com a forma de pagamento padrão).
+- Stock visível em cada produto; o carrinho não aceita mais do que o disponível (excepto proformas).
+- Pagamento em dinheiro pelo teclado (dígitos, Enter finaliza, Esc volta), botão «Exacto» e notas sugeridas.
+- Protecção contra venda duplicada por duplo clique ou Enter repetido.
+- Nova definição «Depois de finalizar a venda» (Configurações › Vendas): mostrar o documento, imprimir automaticamente ou continuar para a venda seguinte.
+
+**Perfis e permissões (tudo configurável em Utilizadores › Permissões)**
+- O perfil Caixa passa a conseguir vender: o PDV lista produtos e clientes com a permissão de criar vendas.
+- Abrir o dia e o turno faz parte das predefinições de todos os perfis; editar e importar estoque ficam por omissão com Administrador e Gestor de Stock.
+- Nova permissão «Ver preço de custo» (`estoque.custo`): sem ela o custo não é enviado nem pode ser alterado; o Caixa não a tem por omissão.
+- Descontos exigem a permissão própria; o lucro do Painel só aparece a quem tem acesso ao Financeiro.
+- Botões de Estoque, Clientes, Financeiro e Documentos seguem as permissões do perfil; «Marcar como pago» exige editar Financeiro.
+- As instalações existentes recebem estas predefinições numa migração única; os perfis criados pelo administrador não são alterados.
+
+**Painel**
+- Novo visual: saudação, estado operacional, cartões de indicadores, gráfico com eixo de valores, ranking em barras verticais e tabela de vendas recentes com acesso a Documentos.
+
 ## 1.0.5 — 2026-10-19
 
 **Integridade dos dados**

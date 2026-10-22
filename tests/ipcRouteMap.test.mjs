@@ -303,6 +303,236 @@ test('operation routes reject sessions that must change password before service 
   assert.deepEqual(calls, []);
 });
 
+const { DEFAULT_PROFILES } = require('../src/backend/services/permissionCatalog.js');
+
+function createProfileRouteDependencies(grantedKeys, calls = []) {
+  const granted = new Set(grantedKeys);
+  return {
+    ...createRouteDependencies(calls),
+    assertPermission: async (userId, permissionKey) => {
+      calls.push(['assertPermission', userId, permissionKey]);
+      if (!granted.has(permissionKey)) {
+        throw Object.assign(new Error('Permissao insuficiente.'), { code: 'PERMISSION_DENIED' });
+      }
+    },
+    estoqueService: {
+      listProducts: async () => { calls.push(['listProducts']); return []; },
+      listCategories: async () => { calls.push(['listCategories']); return []; },
+    },
+    clienteService: {
+      listClientes: async () => { calls.push(['listClientes']); return []; },
+    },
+    vendaService: {
+      listDocuments: async () => { calls.push(['listDocuments']); return []; },
+      cancelDocument: async () => { calls.push(['cancelDocument']); return {}; },
+      convertProforma: async () => { calls.push(['convertProforma']); return {}; },
+    },
+    configurationService: {
+      reserveNextDocumentNumber: async ({ documentType }) => {
+        calls.push(['reserveNextDocumentNumber', documentType]);
+        return `${documentType} 1/26`;
+      },
+    },
+  };
+}
+
+function profilePermissions(name) {
+  return DEFAULT_PROFILES.find((profile) => profile.nome === name).permissoes;
+}
+
+test('default Caixa profile can load every list the PDV needs without stock management access', async () => {
+  const caixa = profilePermissions('Caixa');
+  assert.equal(caixa.includes('estoque.ver'), false);
+  const routes = buildRouteMap(createProfileRouteDependencies(caixa));
+
+  for (const action of ['estoque.listProducts', 'estoque.listCategories', 'clientes.list']) {
+    const result = await handleAppRequest(routes, { action });
+    assert.equal(result.ok, true, `${action} should be allowed for Caixa`);
+  }
+  for (const documentType of ['factura', 'factura_recibo', 'proforma']) {
+    const result = await handleAppRequest(routes, {
+      action: 'configuration.document.reserveNumber',
+      data: { documentType },
+    });
+    assert.equal(result.ok, true, `Caixa should reserve ${documentType}`);
+  }
+});
+
+test('shared routes deny users holding none of the accepted permissions', async () => {
+  const calls = [];
+  const routes = buildRouteMap(createProfileRouteDependencies(['dashboard.ver'], calls));
+
+  const result = await handleAppRequest(routes, { action: 'estoque.listProducts' });
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: { message: 'Permissao insuficiente.', code: 'PERMISSION_DENIED' },
+  });
+  assert.deepEqual(calls, [
+    ['assertPermission', 42, 'estoque.ver'],
+    ['assertPermission', 42, 'vendas.criar'],
+  ]);
+});
+
+test('shared routes propagate non-permission failures from the permission check', async () => {
+  const dependencies = createProfileRouteDependencies([]);
+  dependencies.assertPermission = async () => { throw new Error('database locked'); };
+  const routes = buildRouteMap(dependencies);
+
+  await assert.rejects(() => routes['estoque.listProducts'](), /database locked/);
+});
+
+test('credit note numbers are only reserved for users allowed to cancel documents', async () => {
+  const calls = [];
+  const routes = buildRouteMap(createProfileRouteDependencies(profilePermissions('Caixa'), calls));
+
+  const result = await handleAppRequest(routes, {
+    action: 'configuration.document.reserveNumber',
+    data: { documentType: 'nota-credito' },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PERMISSION_DENIED');
+  assert.equal(calls.some(([name]) => name === 'reserveNextDocumentNumber'), false);
+});
+
+test('Documentos permissions of the default Gestor de Stock profile match the backend routes', async () => {
+  const calls = [];
+  const routes = buildRouteMap(createProfileRouteDependencies(profilePermissions('Gestor de Stock'), calls));
+
+  const steps = [
+    ['vendas.listDocuments', {}],
+    ['configuration.document.reserveNumber', { documentType: 'nota-credito' }],
+    ['vendas.cancelDocument', { venda_id: 1 }],
+    ['configuration.document.reserveNumber', { documentType: 'factura' }],
+    ['vendas.convertProforma', { venda_id: 2 }],
+  ];
+  for (const [action, data] of steps) {
+    const result = await handleAppRequest(routes, { action, data });
+    assert.equal(result.ok, true, `${action} should be allowed for Gestor de Stock`);
+  }
+});
+
+test('product list hides the cost price from users who only sell', async () => {
+  const product = { id: 1, nome: 'Paracetamol', preco_venda: 500, preco_custo: 320 };
+  const routesFor = (keys) => {
+    const dependencies = createProfileRouteDependencies(keys);
+    dependencies.estoqueService.listProducts = async () => [{ ...product }];
+    return buildRouteMap(dependencies);
+  };
+
+  const cashierProducts = await routesFor(profilePermissions('Caixa'))['estoque.listProducts']();
+  assert.deepEqual(cashierProducts, [{ id: 1, nome: 'Paracetamol', preco_venda: 500 }]);
+
+  const stockProducts = await routesFor(profilePermissions('Gestor de Stock'))['estoque.listProducts']();
+  assert.equal(stockProducts[0].preco_custo, 320);
+});
+
+test('cost price follows the configurable estoque.custo permission on reads and writes', async () => {
+  const calls = [];
+  const product = { id: 1, nome: 'Paracetamol', preco_venda: 500, preco_custo: 320 };
+  const dependencies = createProfileRouteDependencies(['estoque.ver', 'estoque.preco', 'estoque.ajustar'], calls);
+  Object.assign(dependencies.estoqueService, {
+    listPrices: async () => [{ ...product }],
+    getProduct: async () => ({ ...product }),
+    updateProductPrice: async (data) => { calls.push(['updateProductPrice', data]); return data; },
+    addStockLot: async (data) => { calls.push(['addStockLot', data]); return data; },
+  });
+  const routes = buildRouteMap(dependencies);
+
+  assert.equal('preco_custo' in (await routes['estoque.listPrices']())[0], false);
+  assert.equal('preco_custo' in await routes['estoque.getProduct']({ produto_id: 1 }), false);
+  await routes['estoque.updatePrice']({ produto_id: 1, preco_venda: 600, preco_custo: 1 });
+  await routes['estoque.addLot']({ produto_id: 1, quantidade: 5, preco_custo: 1 });
+  assert.deepEqual(calls.filter(([name]) => name === 'updateProductPrice')[0][1], { produto_id: 1, preco_venda: 600 });
+  assert.deepEqual(calls.filter(([name]) => name === 'addStockLot')[0][1], { produto_id: 1, quantidade: 5 });
+
+  const withCost = createProfileRouteDependencies(['estoque.ver', 'estoque.custo']);
+  withCost.estoqueService.listPrices = async () => [{ ...product }];
+  assert.equal((await buildRouteMap(withCost)['estoque.listPrices']())[0].preco_custo, 320);
+});
+
+test('sales routes reserve the fiscal number inside the document transaction', async () => {
+  const calls = [];
+  const dependencies = createProfileRouteDependencies(profilePermissions('Administrador'), calls);
+  dependencies.vendaService.createVenda = async (data, actorUserId, { reserveNumber }) => {
+    calls.push(['createVenda', data.numero_factura ?? null]);
+    return { number: await reserveNumber({ documentType: data.docType, transaction: 'tx' }) };
+  };
+  dependencies.configurationService.reserveNextDocumentNumber = async (options) => {
+    calls.push(['reserve', options]);
+    return 'FR00001/26';
+  };
+  const routes = buildRouteMap(dependencies);
+
+  const result = await routes['vendas.create']({ docType: 'factura_recibo', items: [{}], total: 1 });
+
+  assert.equal(result.number, 'FR00001/26');
+  assert.deepEqual(calls.filter(([name]) => name !== 'assertPermission'), [
+    ['createVenda', null],
+    ['reserve', { documentType: 'factura_recibo', transaction: 'tx', actorUserId: 42 }],
+  ]);
+});
+
+test('sales with a discount require the discount permission', async () => {
+  const calls = [];
+  const dependencies = createProfileRouteDependencies(profilePermissions('Caixa'), calls);
+  dependencies.vendaService.createVenda = async () => { calls.push(['createVenda']); return { id: 9 }; };
+  const routes = buildRouteMap(dependencies);
+
+  const discounted = await handleAppRequest(routes, { action: 'vendas.create', data: { desconto: 100 } });
+  assert.deepEqual(discounted, {
+    ok: false,
+    error: { message: 'Sem permissao para aplicar descontos.', code: 'PERMISSION_DENIED' },
+  });
+  assert.equal(calls.some(([name]) => name === 'createVenda'), false);
+
+  const regular = await handleAppRequest(routes, { action: 'vendas.create', data: { desconto: 0 } });
+  assert.equal(regular.ok, true);
+});
+
+test('stock imports require the import permission', async () => {
+  const calls = [];
+  const dependencies = createProfileRouteDependencies(['estoque.ver', 'estoque.editar'], calls);
+  dependencies.estoqueService.importProducts = async () => { calls.push(['importProducts']); return {}; };
+  const routes = buildRouteMap(dependencies);
+
+  for (const action of ['estoque.importProducts', 'estoque.importCategories', 'estoque.importSubcategories']) {
+    const result = await handleAppRequest(routes, { action, data: { rows: [] } });
+    assert.equal(result.error?.code, 'PERMISSION_DENIED', action);
+  }
+  assert.equal(calls.some(([name]) => name === 'importProducts'), false);
+});
+
+test('dashboard metrics only include profit figures for users with financial access', async () => {
+  const routesFor = (keys) => {
+    const dependencies = createProfileRouteDependencies(keys);
+    dependencies.dashboardService = {
+      getDashboardMetrics: async () => ({ day: { totalVendas: 10 }, financialSummary: { netProfit: 4 } }),
+    };
+    return buildRouteMap(dependencies);
+  };
+
+  const cashier = await routesFor(profilePermissions('Caixa'))['dashboard.metrics']();
+  assert.deepEqual(cashier, { day: { totalVendas: 10 } });
+
+  const admin = await routesFor(['dashboard.ver', 'financeiro.ver'])['dashboard.metrics']();
+  assert.deepEqual(admin.financialSummary, { netProfit: 4 });
+});
+
+test('marking a payable as paid requires the financial edit permission', async () => {
+  const calls = [];
+  const dependencies = createProfileRouteDependencies(['financeiro.ver'], calls);
+  dependencies.financeiroService = { marcarPago: async () => { calls.push(['marcarPago']); } };
+  const routes = buildRouteMap(dependencies);
+
+  const result = await handleAppRequest(routes, { action: 'financeiro.marcarPago', data: { id: 1 } });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PERMISSION_DENIED');
+  assert.deepEqual(calls, [['assertPermission', 42, 'financeiro.editar']]);
+});
+
 test('legacy toMain routes require inventory permissions before model actions', async () => {
   const calls = [];
   let legacyHandler;

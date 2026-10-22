@@ -100,7 +100,8 @@ async function addStockLot({ produto_id, lote, quantidade, data_validade, locali
 }
 
 // FIFO: deduct from oldest lots first (earliest expiry → earliest entry)
-async function deductStockFIFO({ produto_id, quantidade, motivo }) {
+// `transaction` (opcional): o abate faz parte da operação de quem chama (venda).
+async function deductStockFIFO({ produto_id, quantidade, motivo, transaction }) {
   const { Estoque } = getModels();
   if (!produto_id) throw Object.assign(new Error('Produto e obrigatorio.'), { code: 'VALIDATION' });
   const qty = Number(quantidade);
@@ -109,6 +110,7 @@ async function deductStockFIFO({ produto_id, quantidade, motivo }) {
   const lots = await Estoque.findAll({
     where: { produto_id: Number(produto_id), quantidade: { [Op.gt]: 0 } },
     order: [['data_validade', 'ASC'], ['data_entrada', 'ASC']],
+    transaction,
   });
 
   const totalAvailable = lots.reduce((sum, l) => sum + Number(l.quantidade), 0);
@@ -124,7 +126,7 @@ async function deductStockFIFO({ produto_id, quantidade, motivo }) {
   for (const lot of lots) {
     if (remaining <= 0) break;
     const deduct = Math.min(Number(lot.quantidade), remaining);
-    await lot.update({ quantidade: Number(lot.quantidade) - deduct });
+    await lot.update({ quantidade: Number(lot.quantidade) - deduct }, { transaction });
     deducted.push({ lote: lot.lote, quantidade: deduct });
     remaining -= deduct;
   }
