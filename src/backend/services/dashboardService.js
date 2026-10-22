@@ -249,7 +249,8 @@ async function getDashboardMetrics({ shiftOpenAt, lowStockThreshold = 25 }) {
     Venda.count({ where: { ...notCancelled, data_venda: { [Op.gte]: shiftStart } } }),
     getStockCounts(lowStockThreshold),
     getRecentSales(6),
-    getTopSellers(6),
+    // O Painel mostra o ranking em páginas (slide), por isso pede o top 12.
+    getTopSellers(12),
     getStockAlerts(),
     getFinancialSummary(),
     getPendingInvoicesCount(),

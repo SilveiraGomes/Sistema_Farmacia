@@ -92,12 +92,12 @@ test('operation permissions are cataloged and assigned by profile', () => {
     assert.ok(admin.permissoes.includes(permission), `admin should include ${permission}`);
   }
 
-  // Abrir o dia e o turno (e fechar o próprio turno) é permitido a todos os perfis;
-  // fechar o dia continua reservado ao Administrador.
+  // Abrir e fechar o dia e o turno faz parte da predefinição de todos os perfis
+  // (fecha quem estiver em serviço); continua configurável por perfil.
   for (const profile of [pharmacist, cashier, stockManager]) {
     assert.deepEqual(
       operationPermissions.filter((permission) => profile.permissoes.includes(permission)),
-      ['operacao.ver', 'operacao.abrir_dia', 'operacao.abrir_turno', 'operacao.fechar_turno'],
+      operationPermissions,
       profile.nome,
     );
   }

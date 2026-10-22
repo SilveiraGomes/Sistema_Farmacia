@@ -19,7 +19,7 @@ _(sem alterações)_
 
 **Perfis e permissões (tudo configurável em Utilizadores › Permissões)**
 - O perfil Caixa passa a conseguir vender: o PDV lista produtos e clientes com a permissão de criar vendas.
-- Abrir o dia e o turno faz parte das predefinições de todos os perfis; editar e importar estoque ficam por omissão com Administrador e Gestor de Stock.
+- Abrir e fechar o dia e o turno faz parte das predefinições de todos os perfis (fecha quem estiver em serviço); editar e importar estoque ficam por omissão com Administrador e Gestor de Stock.
 - Nova permissão «Ver preço de custo» (`estoque.custo`): sem ela o custo não é enviado nem pode ser alterado; o Caixa não a tem por omissão.
 - Descontos exigem a permissão própria; o lucro do Painel só aparece a quem tem acesso ao Financeiro.
 - Botões de Estoque, Clientes, Financeiro e Documentos seguem as permissões do perfil; «Marcar como pago» exige editar Financeiro.
@@ -27,6 +27,7 @@ _(sem alterações)_
 
 **Painel**
 - Novo visual: saudação, estado operacional, cartões de indicadores, gráfico com eixo de valores, ranking em barras verticais e tabela de vendas recentes com acesso a Documentos.
+- Ranking dos mais vendidos em slide (top 12, 4 por página, com setas), sem transbordar com muitos produtos.
 
 ## 1.0.5 — 2026-10-19
 

@@ -5183,6 +5183,50 @@ button :is(strong, b) {
 .legend-expenses {
   background: #d92f2f;
 }
+.seller-slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.seller-slider .vertical-seller-chart {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.seller-slide-arrow {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--brand-dark);
+  background: var(--surface);
+  cursor: pointer;
+}
+.seller-slide-arrow:hover {
+  color: white;
+  background: var(--brand);
+}
+.seller-slide-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.seller-slide-dots button {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line);
+  cursor: pointer;
+}
+.seller-slide-dots button.active {
+  width: 20px;
+  background: var(--brand);
+}
 .vertical-seller-chart {
   height: 260px;
   display: grid;
@@ -5251,11 +5295,16 @@ button :is(strong, b) {
 }
 .seller-title {
   max-width: 100%;
+  min-height: 2.5em;
+  display: -webkit-box;
   overflow: hidden;
   color: var(--muted);
   font-size: 11.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .empty-state.compact {
   min-height: 140px;

@@ -6,6 +6,8 @@ import {
   BarChart3,
   Boxes,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Eye,
   Info,
@@ -77,6 +79,7 @@ const periodOptions = [
 ];
 
 const RECENT_SALES_LIMIT = 6;
+const SELLERS_PER_PAGE = 4;
 const CHART_TICKS = [1, 0.75, 0.5, 0.25, 0];
 const ALERT_ICONS = { danger: AlertTriangle, warning: PackageX, info: Info };
 const compactNumber = new Intl.NumberFormat("pt-AO", { notation: "compact", maximumFractionDigits: 1 });
@@ -88,6 +91,7 @@ function Dashboard({ onNavigate }) {
   const dashboardAlertsEnabled = useSetting("alerts.dashboardEnabled", true);
   const [selectedPeriod, setSelectedPeriod] = useState("month");
   const [hoveredPoint, setHoveredPoint] = useState(null);
+  const [sellerPage, setSellerPage] = useState(0);
   // O backend só envia lucro e despesas a quem tem acesso ao Financeiro.
   const showFinancial = hasPermission("financeiro.ver");
   const canOpenDocuments = typeof onNavigate === "function" && hasPermission("documentos.ver");
@@ -146,6 +150,16 @@ function Dashboard({ onNavigate }) {
       : buildDashboardTopSellers([], 6),
     [liveData],
   );
+
+  // Ranking em slide: 4 produtos por página, setas para navegar (sem transbordar).
+  const sellerPageCount = Math.max(1, Math.ceil(topSellers.length / SELLERS_PER_PAGE));
+  const currentSellerPage = Math.min(sellerPage, sellerPageCount - 1);
+  const visibleSellers = topSellers.slice(
+    currentSellerPage * SELLERS_PER_PAGE,
+    (currentSellerPage + 1) * SELLERS_PER_PAGE,
+  );
+  const moveSellerPage = (direction) =>
+    setSellerPage((page) => (Math.min(page, sellerPageCount - 1) + direction + sellerPageCount) % sellerPageCount);
 
   const notifications = useMemo(
     () => liveData?.stockAlerts ? buildRealNotifications(liveData.stockAlerts) : [],
@@ -396,26 +410,56 @@ function Dashboard({ onNavigate }) {
               </div>
             </div>
             {topSellers.length ? (
-              <div className="vertical-seller-chart" role="list">
-                {topSellers.map((item, index) => (
-                  <div
-                    className="seller-column"
-                    key={item.product}
-                    role="listitem"
-                    title={`${item.product}: ${item.quantity} vendido(s)`}
-                  >
-                    <span className="seller-quantity">{item.quantity}</span>
-                    <div className="seller-pill-track">
-                      <span
-                        className={`seller-pill rank-${index + 1}`}
-                        style={{ height: `${Math.max(item.percent, 12)}%` }}
-                      />
-                      <span className="seller-rank">{index + 1}</span>
-                    </div>
-                    <span className="seller-title">{item.product}</span>
+              <>
+                <div className="seller-slider">
+                  {sellerPageCount > 1 ? (
+                    <button type="button" className="seller-slide-arrow" aria-label="Produtos anteriores" onClick={() => moveSellerPage(-1)}>
+                      <ChevronLeft size={20} />
+                    </button>
+                  ) : null}
+                  <div className="vertical-seller-chart" role="list">
+                    {visibleSellers.map((item, index) => {
+                      const rank = currentSellerPage * SELLERS_PER_PAGE + index + 1;
+                      return (
+                        <div
+                          className="seller-column"
+                          key={item.product}
+                          role="listitem"
+                          title={`${rank}.º ${item.product}: ${item.quantity} vendido(s)`}
+                        >
+                          <span className="seller-quantity">{item.quantity}</span>
+                          <div className="seller-pill-track">
+                            <span
+                              className={`seller-pill rank-${Math.min(rank, 6)}`}
+                              style={{ height: `${Math.max(item.percent, 12)}%` }}
+                            />
+                            <span className="seller-rank">{rank}</span>
+                          </div>
+                          <span className="seller-title">{item.product}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                  {sellerPageCount > 1 ? (
+                    <button type="button" className="seller-slide-arrow" aria-label="Produtos seguintes" onClick={() => moveSellerPage(1)}>
+                      <ChevronRight size={20} />
+                    </button>
+                  ) : null}
+                </div>
+                {sellerPageCount > 1 ? (
+                  <div className="seller-slide-dots" aria-label="Páginas do ranking">
+                    {Array.from({ length: sellerPageCount }, (_, page) => (
+                      <button
+                        key={page}
+                        type="button"
+                        className={page === currentSellerPage ? "active" : ""}
+                        aria-label={`Página ${page + 1} do ranking`}
+                        onClick={() => setSellerPage(page)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className="empty-state compact">
                 <Boxes size={26} />
